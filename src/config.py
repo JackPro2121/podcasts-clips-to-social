@@ -24,6 +24,12 @@ BUFFER_CHANNEL_IDS = [
 ]
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 GITHUB_REPOSITORY = os.getenv("GITHUB_REPOSITORY", "")
+APIFY_API_TOKEN = (
+    os.getenv("APIFY_API_TOKEN") or
+    os.getenv("APIFY_KEY") or
+    os.getenv("apify_key") or
+    ""
+)
 
 # Video & Format Defaults
 OUTPUT_WIDTH = 1080

@@ -3,8 +3,9 @@ import re
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 import yt_dlp
+import requests
 from youtube_transcript_api import YouTubeTranscriptApi
-from src.config import DOWNLOADS_DIR
+from src.config import DOWNLOADS_DIR, APIFY_API_TOKEN
 
 def extract_youtube_id(url: str) -> Optional[str]:
     """Extract YouTube video ID from various URL formats."""
@@ -68,10 +69,88 @@ def fetch_youtube_transcript(video_id: str) -> Optional[List[Dict[str, Any]]]:
     print(f"[+] Retrieved native YouTube transcript ({len(normalized)} snippets).")
     return normalized
 
+def download_via_apify(
+    video_url: str,
+    output_dir: Path,
+    quality: str = "1080",
+    api_token: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Downloads YouTube video using Apify Actor (epctex/youtube-video-downloader).
+    Guarantees bypass of bot captchas and datacenter IP blocks on GitHub Actions.
+    """
+    token = api_token or APIFY_API_TOKEN
+    if not token:
+        return None
+
+    print(f"[*] Dispatching YouTube download via Apify Actor (Quality: {quality}p)...")
+    endpoint = "https://api.apify.com/v2/acts/epctex~youtube-video-downloader/runs?waitForFinish=180"
+    payload = {
+        "startUrls": [video_url],
+        "quality": quality,
+        "storageType": "apify"
+    }
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+
+    try:
+        res = requests.post(endpoint, headers=headers, json=payload, timeout=200)
+        if res.status_code not in (200, 201):
+            print(f"[-] Apify actor start failed: {res.status_code} - {res.text}")
+            return None
+
+        run_data = res.json().get("data", {})
+        status = run_data.get("status")
+        dataset_id = run_data.get("defaultDatasetId")
+
+        if status != "SUCCEEDED" or not dataset_id:
+            print(f"[-] Apify actor run ended with status: {status}")
+            return None
+
+        # Fetch output items
+        items_res = requests.get(
+            f"https://api.apify.com/v2/datasets/{dataset_id}/items",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30
+        )
+        items = items_res.json()
+        if not items or not isinstance(items, list):
+            print("[-] No output items found in Apify dataset.")
+            return None
+
+        first_item = items[0]
+        direct_url = first_item.get("output", {}).get("url")
+        if not direct_url:
+            print("[-] Apify output missing direct video download URL.")
+            return None
+
+        video_id = first_item.get("videoId", "video")
+        out_file = output_dir / f"{video_id}.mp4"
+
+        print(f"[*] Streaming high-quality video from Apify storage ({out_file.name})...")
+        with requests.get(direct_url, stream=True, timeout=180) as stream_res:
+            stream_res.raise_for_status()
+            with open(out_file, "wb") as f:
+                for chunk in stream_res.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        f.write(chunk)
+
+        print(f"[+] Download complete via Apify: {out_file} ({out_file.stat().st_size / (1024*1024):.2f} MB)")
+        return {
+            "video_path": out_file.resolve(),
+            "title": f"YouTube_{video_id}",
+            "duration": float(first_item.get("durationSeconds", 0.0)),
+            "is_local": False
+        }
+    except Exception as e:
+        print(f"[-] Apify download encountered an exception: {e}")
+        return None
+
 def download_video(url_or_path: str, output_dir: Optional[Path] = None) -> Dict[str, Any]:
     """
-    Downloads the video using yt-dlp or validates existing local file.
-    Uses Android/Web client imitation to avoid data-center bot blocks.
+    Downloads the video using Apify Actor (preferred) or yt-dlp fallback.
     """
     target_dir = output_dir or DOWNLOADS_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -92,6 +171,14 @@ def download_video(url_or_path: str, output_dir: Optional[Path] = None) -> Dict[
     transcript = None
     if video_id:
         transcript = fetch_youtube_transcript(video_id)
+
+    # 1. If Apify API token is configured, use Apify for 100% cloud bot-bypass
+    if APIFY_API_TOKEN and ("youtube.com" in url_or_path or "youtu.be" in url_or_path):
+        apify_result = download_via_apify(url_or_path, target_dir, quality="1080")
+        if apify_result:
+            apify_result['transcript'] = transcript
+            return apify_result
+        print("[!] Apify download failed or timed out. Falling back to yt-dlp...")
 
     # Download with yt-dlp (up to 1080p, AAC audio, mp4 container)
     out_template = str(target_dir / "%(id)s_%(title).50s.%(ext)s")
