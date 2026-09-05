@@ -115,14 +115,29 @@ def render_viral_clip(
     )
     audio_filters = build_audio_filtergraph()
 
+    # Detect if source has audio
+    has_audio = True
+    try:
+        probe_cmd = ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(source_video_path)]
+        probe_res = subprocess.run(probe_cmd, capture_output=True, text=True)
+        has_audio = "audio" in probe_res.stdout
+    except Exception:
+        has_audio = True
+
+    if has_audio:
+        combined_filter = f"{video_filters};[0:a]{audio_filters}[outa]"
+        map_args = ["-map", "[outv]", "-map", "[outa]"]
+    else:
+        combined_filter = video_filters
+        map_args = ["-map", "[outv]"]
+
     cmd = [
         "ffmpeg", "-y",
         "-ss", f"{start_time:.2f}",
         "-t", f"{duration:.2f}",
         "-i", str(source_video_path),
-        "-filter_complex", video_filters,
-        "-map", "[outv]",
-        "-filter:a", audio_filters,
+        "-filter_complex", combined_filter,
+        *map_args,
         "-c:v", "libx264",
         "-crf", str(VIDEO_CRF),
         "-preset", "medium",

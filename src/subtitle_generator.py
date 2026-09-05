@@ -1,4 +1,5 @@
 import math
+import re
 from pathlib import Path
 from typing import List, Optional
 from src.config import SUBTITLE_THEMES, SUBTITLES_DIR, OUTPUT_WIDTH, OUTPUT_HEIGHT
@@ -85,7 +86,11 @@ def create_styled_ass_subtitles(
                 # Relative timestamp relative to the clip start
                 rel_start = max(0.0, w.start - clip_start)
                 rel_end = max(rel_start + 0.1, min(clip_end - clip_start, w.end - clip_start))
-                clean_text = w.word.upper() if uppercase else w.word
+                # Strip leading and trailing punctuation (. , ! ? ; : " ' - _ ~ etc.)
+                clean_word = re.sub(r'^[^\w]+|[^\w]+$', '', w.word.strip())
+                if not clean_word:
+                    continue
+                clean_text = clean_word.upper() if uppercase else clean_word
                 clip_words.append(WordTimestamp(
                     word=clean_text,
                     start=rel_start,

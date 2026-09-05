@@ -70,11 +70,11 @@ class TestPodcastClipperPipeline(unittest.TestCase):
 
     def test_ass_file_generation(self):
         words = [
-            WordTimestamp(word="This", start=10.0, end=10.4),
-            WordTimestamp(word="is", start=10.4, end=10.7),
-            WordTimestamp(word="awesome", start=10.7, end=11.2),
+            WordTimestamp(word="Fine.", start=10.0, end=10.4),
+            WordTimestamp(word="How?", start=10.4, end=10.7),
+            WordTimestamp(word="Awesome!", start=10.7, end=11.2),
         ]
-        seg = TranscriptSegment(start=10.0, end=12.0, text="This is awesome", words=words)
+        seg = TranscriptSegment(start=10.0, end=12.0, text="Fine. How? Awesome!", words=words)
         out_ass = Path("subtitles/test_output.ass")
         created = create_styled_ass_subtitles(
             segments=[seg],
@@ -86,7 +86,12 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertTrue(created.exists())
         content = created.read_text(encoding="utf-8")
         self.assertIn("Dialogue: 0", content)
-        self.assertIn("THIS", content)
+        self.assertIn("FINE", content)
+        self.assertIn("HOW", content)
+        self.assertIn("AWESOME", content)
+        self.assertNotIn("FINE.", content)
+        self.assertNotIn("HOW?", content)
+        self.assertNotIn("AWESOME!", content)
         # Clean up test file
         if created.exists():
             created.unlink()
