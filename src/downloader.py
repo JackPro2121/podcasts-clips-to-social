@@ -77,19 +77,17 @@ def download_via_apify(
     api_token: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
     """
-    Downloads YouTube video using Apify Actor (epctex/youtube-video-downloader).
+    Downloads YouTube video using Apify Actor (streamers/youtube-video-downloader).
     Guarantees bypass of bot captchas and datacenter IP blocks on GitHub Actions.
     """
     token = api_token or APIFY_API_TOKEN
     if not token:
         return None
 
-    print(f"[*] Dispatching YouTube download via Apify Actor (Quality: {quality}p)...")
-    endpoint = "https://api.apify.com/v2/acts/epctex~youtube-video-downloader/runs"
+    print(f"[*] Dispatching YouTube download via Apify Actor (streamers/youtube-video-downloader)...")
+    endpoint = "https://api.apify.com/v2/acts/streamers~youtube-video-downloader/runs"
     payload = {
-        "startUrls": [video_url],
-        "quality": quality,
-        "storageType": "apify"
+        "videos": [{"url": video_url}]
     }
     headers = {
         "Authorization": f"Bearer {token}",
@@ -109,7 +107,7 @@ def download_via_apify(
 
         print(f"[*] Apify run started ({run_id}). Polling for download completion...")
         final_run_data = None
-        for attempt in range(40):
+        for attempt in range(45):
             time.sleep(4)
             status_res = requests.get(
                 f"https://api.apify.com/v2/actor-runs/{run_id}",
@@ -142,13 +140,13 @@ def download_via_apify(
             return None
 
         first_item = items[0]
-        direct_url = first_item.get("output", {}).get("url")
+        direct_url = first_item.get("downloadedFileUrl") or first_item.get("output", {}).get("url")
         if not direct_url:
             print("[-] Apify output missing direct video download URL.")
             return None
 
-        video_id = first_item.get("videoId", "video")
-        out_file = output_dir / f"{video_id}.mp4"
+        vid_id = first_item.get("id") or extract_youtube_id(video_url) or "video"
+        out_file = output_dir / f"{vid_id}.mp4"
 
         print(f"[*] Streaming high-quality video from Apify storage ({out_file.name})...")
         with requests.get(direct_url, headers=headers, stream=True, timeout=180) as stream_res:
@@ -161,7 +159,7 @@ def download_via_apify(
         print(f"[+] Download complete via Apify: {out_file} ({out_file.stat().st_size / (1024*1024):.2f} MB)")
         return {
             "video_path": out_file.resolve(),
-            "title": f"YouTube_{video_id}",
+            "title": f"YouTube_{vid_id}",
             "duration": float(first_item.get("durationSeconds", 0.0)),
             "is_local": False
         }
@@ -211,7 +209,7 @@ def download_video(url_or_path: str, output_dir: Optional[Path] = None) -> Dict[
         'no_warnings': True,
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'web']
+                'player_client': ['android', 'tv']
             }
         },
         'postprocessors': [{
