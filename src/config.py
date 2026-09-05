@@ -18,10 +18,15 @@ SUBTITLES_DIR.mkdir(exist_ok=True, parents=True)
 
 # API Keys & Credentials
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-BUFFER_ACCESS_TOKEN = os.getenv("BUFFER_ACCESS_TOKEN", "")
+BUFFER_ACCESS_TOKEN = (
+    os.getenv("BUFFER_ACCESS_TOKEN") or
+    os.getenv("BUFFER_API_KEY") or
+    ""
+)
 BUFFER_CHANNEL_IDS = [
     cid.strip() for cid in os.getenv("BUFFER_CHANNEL_IDS", "").split(",") if cid.strip()
 ]
+CHANNEL_WATERMARK = os.getenv("CHANNEL_WATERMARK", "@allinonepodcastsss")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 GITHUB_REPOSITORY = os.getenv("GITHUB_REPOSITORY", "")
 APIFY_API_TOKEN = (

@@ -2,7 +2,7 @@ import math
 import re
 from pathlib import Path
 from typing import List, Optional
-from src.config import SUBTITLE_THEMES, SUBTITLES_DIR, OUTPUT_WIDTH, OUTPUT_HEIGHT
+from src.config import SUBTITLE_THEMES, SUBTITLES_DIR, OUTPUT_WIDTH, OUTPUT_HEIGHT, CHANNEL_WATERMARK
 from src.transcriber import TranscriptSegment, WordTimestamp
 
 def format_ass_timestamp(seconds: float) -> str:
@@ -55,6 +55,7 @@ PlayResY: {OUTPUT_HEIGHT}
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,{font_name},{font_size},{primary_col},&H000000FF,{outline_col},{shadow_col},-1,0,0,0,100,100,1.5,0,1,{outline_w},{shadow_d},{alignment},100,100,{margin_v},1
 Style: TopHeader,Trebuchet MS,46,&H00FFFFFF,&H000000FF,&H0084323B,&H00000000,-1,0,0,0,100,100,1.2,0,3,18,0,8,120,120,210,1
+Style: Watermark,Arial,28,&H80FFFFFF,&H000000FF,&H80000000,&H00000000,-1,0,0,0,100,100,1.2,0,1,1.5,0.0,8,60,60,330,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -68,7 +69,8 @@ def create_styled_ass_subtitles(
     output_ass_path: Path,
     theme_key: str = "hormozi",
     layout_mode: str = "single_smooth",
-    header_title: Optional[str] = None
+    header_title: Optional[str] = None,
+    watermark: Optional[str] = None
 ) -> Path:
     """
     Generates word-level animated karaoke-style ASS subtitles for a specific clip window.
@@ -142,6 +144,13 @@ def create_styled_ass_subtitles(
 
     header = generate_ass_header(theme_key=theme_key, layout_mode=layout_mode)
     
+    dur_str = format_ass_timestamp(clip_end - clip_start)
+
+    # If channel watermark is provided or configured, burn it at 50% opacity
+    active_watermark = watermark if watermark is not None else CHANNEL_WATERMARK
+    if active_watermark:
+        lines.insert(0, f"Dialogue: 2,0:00:00.00,{dur_str},Watermark,,0,0,0,,{active_watermark.strip()}")
+
     # If a viral hook title is provided, burn it persistently at the top safe zone
     if header_title:
         clean_title = header_title.strip().upper()
@@ -152,7 +161,6 @@ def create_styled_ass_subtitles(
             clean_title = " ".join(words[:mid]) + "\\N" + " ".join(words[mid:])
         
         # Clean title without star emojis
-        dur_str = format_ass_timestamp(clip_end - clip_start)
         lines.insert(0, f"Dialogue: 1,0:00:00.00,{dur_str},TopHeader,,0,0,0,,{clean_title}")
 
     full_content = header + "\n".join(lines) + "\n"

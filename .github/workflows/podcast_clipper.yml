@@ -52,6 +52,11 @@ on:
         required: true
         default: true
         type: boolean
+      watermark:
+        description: 'Channel Watermark to burn at 50% opacity'
+        required: false
+        default: '@allinonepodcastsss'
+        type: string
 
 permissions:
   contents: write
@@ -85,8 +90,10 @@ jobs:
       - name: Run AI Podcast Clipper & Publisher
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN }}
+          BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN || secrets.BUFFER_API_KEY }}
+          BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY || secrets.BUFFER_ACCESS_TOKEN }}
           BUFFER_CHANNEL_IDS: ${{ secrets.BUFFER_CHANNEL_IDS }}
+          CHANNEL_WATERMARK: ${{ secrets.CHANNEL_WATERMARK || '@allinonepodcastsss' }}
           APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -96,12 +103,15 @@ jobs:
             POST_FLAG="--post-to-buffer"
           fi
 
+          WATERMARK="${{ github.event.inputs.watermark || '@allinonepodcastsss' }}"
+
           python main.py \
             --url "${{ github.event.inputs.video_url }}" \
             --num-clips "${{ github.event.inputs.num_clips }}" \
             --framing "${{ github.event.inputs.framing }}" \
             --subtitle-style "${{ github.event.inputs.subtitle_style }}" \
             --subtitles "${{ github.event.inputs.subtitles_mode }}" \
+            --watermark "$WATERMARK" \
             $POST_FLAG
 
       - name: Upload Output Clips as Artifacts

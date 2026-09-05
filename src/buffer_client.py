@@ -18,16 +18,13 @@ class BufferClient:
         }
 
     def get_channels(self) -> List[Dict[str, Any]]:
-        """Queries connected social channels from Buffer GraphQL."""
-        query = """
-        query GetChannels {
+        """Queries connected social channels from Buffer GraphQL using organization-based schema."""
+        org_query = """
+        query GetOrgs {
           account {
             organizations {
-              channels {
-                id
-                name
-                service
-              }
+              id
+              name
             }
           }
         }
@@ -36,20 +33,38 @@ class BufferClient:
             res = requests.post(
                 BUFFER_GRAPHQL_ENDPOINT,
                 headers=self.headers,
-                json={"query": query},
+                json={"query": org_query},
                 timeout=15
             )
-            if res.status_code == 200:
-                data = res.json()
-                channels = []
-                orgs = data.get("data", {}).get("account", {}).get("organizations", [])
-                for org in orgs:
-                    for ch in org.get("channels", []):
-                        channels.append(ch)
-                return channels
-            else:
-                print(f"[-] Buffer channels query failed: {res.status_code} - {res.text}")
+            if res.status_code != 200:
+                print(f"[-] Buffer organizations query failed: {res.status_code} - {res.text}")
                 return []
+
+            orgs = res.json().get("data", {}).get("account", {}).get("organizations", [])
+            channels = []
+            for org in orgs:
+                org_id = org.get("id")
+                if not org_id:
+                    continue
+                ch_query = f"""query {{
+                  channels(input: {{ organizationId: "{org_id}" }}) {{
+                    id
+                    name
+                    service
+                  }}
+                }}"""
+                ch_res = requests.post(
+                    BUFFER_GRAPHQL_ENDPOINT,
+                    headers=self.headers,
+                    json={"query": ch_query},
+                    timeout=15
+                )
+                if ch_res.status_code == 200:
+                    ch_items = ch_res.json().get("data", {}).get("channels", [])
+                    for ch in ch_items:
+                        ch["organizationName"] = org.get("name")
+                        channels.append(ch)
+            return channels
         except Exception as e:
             print(f"[-] Error fetching Buffer channels: {e}")
             return []

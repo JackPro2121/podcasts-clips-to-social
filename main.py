@@ -26,7 +26,8 @@ def run_pipeline(
     subtitle_style: str = "hormozi",
     subtitles_mode: str = "auto",
     post_to_buffer: bool = False,
-    dry_run: bool = False
+    dry_run: bool = False,
+    watermark: Optional[str] = None
 ):
     print("=" * 70)
     print("🚀 AUTONOMOUS AI PODCAST CLIPPER & BUFFER SOCIAL PUBLISHER ($0)")
@@ -101,7 +102,8 @@ def run_pipeline(
                 output_ass_path=ass_path,
                 theme_key=subtitle_style,
                 layout_mode=framing.mode,
-                header_title=moment.title
+                header_title=moment.title,
+                watermark=watermark
             )
 
         # Video Render
@@ -201,6 +203,12 @@ def main():
         action="store_true",
         help="Perform transcript analysis and moment hunting without heavy video rendering."
     )
+    parser.add_argument(
+        "--watermark", "-w",
+        type=str,
+        default=None,
+        help="Channel watermark handle to burn at 50% opacity (default: @allinonepodcastsss)."
+    )
 
     args = parser.parse_args()
 
@@ -211,7 +219,8 @@ def main():
         subtitle_style=args.subtitle_style,
         subtitles_mode=args.subtitles,
         post_to_buffer=args.post_to_buffer,
-        dry_run=args.dry_run
+        dry_run=args.dry_run,
+        watermark=args.watermark
     )
 
 if __name__ == "__main__":
