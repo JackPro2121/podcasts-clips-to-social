@@ -54,6 +54,7 @@ PlayResY: {OUTPUT_HEIGHT}
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,{font_name},{font_size},{primary_col},&H000000FF,{outline_col},{shadow_col},-1,0,0,0,100,100,1.5,0,1,{outline_w},{shadow_d},{alignment},100,100,{margin_v},1
+Style: TopHeader,{font_name},50,&H0000E6FF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,1.2,0,1,5.0,3.0,8,80,80,240,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -66,7 +67,8 @@ def create_styled_ass_subtitles(
     clip_end: float,
     output_ass_path: Path,
     theme_key: str = "hormozi",
-    layout_mode: str = "single_smooth"
+    layout_mode: str = "single_smooth",
+    header_title: Optional[str] = None
 ) -> Path:
     """
     Generates word-level animated karaoke-style ASS subtitles for a specific clip window.
@@ -128,6 +130,14 @@ def create_styled_ass_subtitles(
             lines.append(ass_line)
 
     header = generate_ass_header(theme_key=theme_key, layout_mode=layout_mode)
+    
+    # If a viral hook title is provided, burn it persistently at the top safe zone
+    if header_title:
+        clean_title = header_title.strip().upper()
+        # Ensure common emojis are supported or clean text
+        dur_str = format_ass_timestamp(clip_end - clip_start)
+        lines.insert(0, f"Dialogue: 1,0:00:00.00,{dur_str},TopHeader,,0,0,0,,{clean_title}")
+
     full_content = header + "\n".join(lines) + "\n"
 
     output_ass_path.parent.mkdir(parents=True, exist_ok=True)

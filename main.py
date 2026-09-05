@@ -100,7 +100,8 @@ def run_pipeline(
                 clip_end=moment.end_time,
                 output_ass_path=ass_path,
                 theme_key=subtitle_style,
-                layout_mode=framing.mode
+                layout_mode=framing.mode,
+                header_title=moment.title
             )
 
         # Video Render
