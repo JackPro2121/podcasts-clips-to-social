@@ -99,6 +99,17 @@ def create_styled_ass_subtitles(
                     end=rel_end
                 ))
 
+    # Sort words by start time and enforce strictly monotonic, non-overlapping timestamps
+    clip_words.sort(key=lambda x: x.start)
+    monotonic_words: List[WordTimestamp] = []
+    last_end = 0.0
+    for w in clip_words:
+        w_start = max(last_end, w.start)
+        w_end = max(w_start + 0.12, w.end)
+        monotonic_words.append(WordTimestamp(word=w.word, start=w_start, end=w_end))
+        last_end = w_end
+    clip_words = monotonic_words
+
     # Group words into short punchy batches of 2-4 words
     lines: List[str] = []
     i = 0
@@ -108,13 +119,13 @@ def create_styled_ass_subtitles(
         if not chunk:
             continue
 
-        chunk_start = chunk[0].start
-        chunk_end = chunk[-1].end
-
         # For each word in this chunk, generate an active highlight state
         for active_idx, target_word in enumerate(chunk):
             w_start = target_word.start
-            w_end = target_word.end
+            if active_idx + 1 < len(chunk):
+                w_end = chunk[active_idx + 1].start
+            else:
+                w_end = target_word.end
 
             # Build line text where active word is rendered in highlight_color
             word_elements = []
