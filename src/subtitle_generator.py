@@ -54,7 +54,7 @@ PlayResY: {OUTPUT_HEIGHT}
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,{font_name},{font_size},{primary_col},&H000000FF,{outline_col},{shadow_col},-1,0,0,0,100,100,1.5,0,1,{outline_w},{shadow_d},{alignment},100,100,{margin_v},1
-Style: TopHeader,{font_name},50,&H0000E6FF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,1.2,0,1,5.0,3.0,8,80,80,240,1
+Style: TopHeader,{font_name},44,&H00FFFFFF,&H000000FF,&HA00A0A0A,&H00000000,-1,0,0,0,100,100,1.2,0,3,14,0,8,100,100,230,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -145,9 +145,16 @@ def create_styled_ass_subtitles(
     # If a viral hook title is provided, burn it persistently at the top safe zone
     if header_title:
         clean_title = header_title.strip().upper()
-        # Ensure common emojis are supported or clean text
+        # If title is long, wrap it at a balanced word boundary to fit cleanly inside 1080px portrait
+        if len(clean_title) > 30 and " " in clean_title:
+            words = clean_title.split()
+            mid = len(words) // 2
+            clean_title = " ".join(words[:mid]) + "\\N" + " ".join(words[mid:])
+        
+        # Add visual hook marker
+        formatted_header = f"★ {clean_title} ★" if not clean_title.startswith("★") else clean_title
         dur_str = format_ass_timestamp(clip_end - clip_start)
-        lines.insert(0, f"Dialogue: 1,0:00:00.00,{dur_str},TopHeader,,0,0,0,,{clean_title}")
+        lines.insert(0, f"Dialogue: 1,0:00:00.00,{dur_str},TopHeader,,0,0,0,,{formatted_header}")
 
     full_content = header + "\n".join(lines) + "\n"
 
