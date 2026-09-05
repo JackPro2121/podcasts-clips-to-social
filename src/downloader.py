@@ -1,5 +1,6 @@
 import os
 import re
+import time
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 import yt_dlp
@@ -84,7 +85,7 @@ def download_via_apify(
         return None
 
     print(f"[*] Dispatching YouTube download via Apify Actor (Quality: {quality}p)...")
-    endpoint = "https://api.apify.com/v2/acts/epctex~youtube-video-downloader/runs?waitForFinish=180"
+    endpoint = "https://api.apify.com/v2/acts/epctex~youtube-video-downloader/runs"
     payload = {
         "startUrls": [video_url],
         "quality": quality,
@@ -96,18 +97,38 @@ def download_via_apify(
     }
 
     try:
-        res = requests.post(endpoint, headers=headers, json=payload, timeout=200)
+        res = requests.post(endpoint, headers=headers, json=payload, timeout=30)
         if res.status_code not in (200, 201):
             print(f"[-] Apify actor start failed: {res.status_code} - {res.text}")
             return None
 
-        run_data = res.json().get("data", {})
-        status = run_data.get("status")
-        dataset_id = run_data.get("defaultDatasetId")
-
-        if status != "SUCCEEDED" or not dataset_id:
-            print(f"[-] Apify actor run ended with status: {status}")
+        run_id = res.json().get("data", {}).get("id")
+        if not run_id:
+            print("[-] Could not retrieve Apify run ID.")
             return None
+
+        print(f"[*] Apify run started ({run_id}). Polling for download completion...")
+        final_run_data = None
+        for attempt in range(40):
+            time.sleep(4)
+            status_res = requests.get(
+                f"https://api.apify.com/v2/actor-runs/{run_id}",
+                headers=headers,
+                timeout=15
+            )
+            if status_res.status_code == 200:
+                final_run_data = status_res.json().get("data", {})
+                status = final_run_data.get("status")
+                if attempt % 2 == 0:
+                    print(f"[*] Apify download status: {status} (elapsed: {(attempt + 1) * 4}s)")
+                if status in ("SUCCEEDED", "FAILED", "TIMED-OUT", "ABORTED"):
+                    break
+
+        if not final_run_data or final_run_data.get("status") != "SUCCEEDED":
+            print(f"[-] Apify actor finished with non-success state: {final_run_data.get('status') if final_run_data else 'unknown'}")
+            return None
+
+        dataset_id = final_run_data.get("defaultDatasetId")
 
         # Fetch output items
         items_res = requests.get(
