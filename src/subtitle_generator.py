@@ -54,7 +54,7 @@ PlayResY: {OUTPUT_HEIGHT}
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,{font_name},{font_size},{primary_col},&H000000FF,{outline_col},{shadow_col},-1,0,0,0,100,100,1.5,0,1,{outline_w},{shadow_d},{alignment},100,100,{margin_v},1
-Style: TopHeader,{font_name},44,&H00FFFFFF,&H000000FF,&HA00A0A0A,&H00000000,-1,0,0,0,100,100,1.2,0,3,14,0,8,100,100,230,1
+Style: TopHeader,Trebuchet MS,46,&H00FFFFFF,&H000000FF,&H0084323B,&H00000000,-1,0,0,0,100,100,1.2,0,3,18,0,8,120,120,210,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -131,8 +131,8 @@ def create_styled_ass_subtitles(
             word_elements = []
             for idx, w in enumerate(chunk):
                 if idx == active_idx:
-                    # Highlighted active spoken word with subtle bold pop
-                    word_elements.append(f"{{\\c{highlight_color}\\t(\\fscx108\\fscy108)}}{w.word}{{\\c{primary_color}\\fscx100\\fscy100}}")
+                    # Highlighted active spoken word with kinetic spring pop
+                    word_elements.append(f"{{\\c{highlight_color}\\t(0,80,\\fscx112\\fscy112)\\t(80,160,\\fscx100\\fscy100)}}{w.word}{{\\c{primary_color}\\fscx100\\fscy100}}")
                 else:
                     word_elements.append(w.word)
 
@@ -151,10 +151,9 @@ def create_styled_ass_subtitles(
             mid = len(words) // 2
             clean_title = " ".join(words[:mid]) + "\\N" + " ".join(words[mid:])
         
-        # Add visual hook marker
-        formatted_header = f"★ {clean_title} ★" if not clean_title.startswith("★") else clean_title
+        # Clean title without star emojis
         dur_str = format_ass_timestamp(clip_end - clip_start)
-        lines.insert(0, f"Dialogue: 1,0:00:00.00,{dur_str},TopHeader,,0,0,0,,{formatted_header}")
+        lines.insert(0, f"Dialogue: 1,0:00:00.00,{dur_str},TopHeader,,0,0,0,,{clean_title}")
 
     full_content = header + "\n".join(lines) + "\n"
 

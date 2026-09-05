@@ -31,13 +31,16 @@ def build_video_filtergraph(
     """
     filters = []
 
+    # Broadcast Studio Visual Enhancements: Unsharp mask (sharp 4K detail) + Color Grading (rich contrast & skin saturation)
+    studio_grade = "unsharp=lx=5:ly=5:la=0.85:cx=3:cy=3:ca=0.45,eq=contrast=1.08:brightness=0.01:saturation=1.14"
+
     if framing.mode == "single_smooth":
         # Target aspect ratio 9:16
         crop_w = int(framing.video_height * (9 / 16))
         # Ensure center_x keeps crop window within bounds
         cx = framing.smoothed_center_x or (framing.video_width // 2)
         crop_x = max(0, min(cx - crop_w // 2, framing.video_width - crop_w))
-        v_filter = f"[0:v]crop={crop_w}:{framing.video_height}:{crop_x}:0,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos,fps={FPS}[base]"
+        v_filter = f"[0:v]crop={crop_w}:{framing.video_height}:{crop_x}:0,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos,{studio_grade},fps={FPS}[base]"
 
     elif framing.mode == "split_screen" and framing.speaker1_box and framing.speaker2_box:
         # Split-screen stack: Top pane (1080x960), Bottom pane (1080x960)
@@ -47,8 +50,8 @@ def build_video_filtergraph(
 
         v_filter = (
             f"[0:v]split=2[s1_in][s2_in];"
-            f"[s1_in]crop={s1_w}:{s1_h}:{s1_x}:0,scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos[top_pane];"
-            f"[s2_in]crop={s2_w}:{s2_h}:{s2_x}:0,scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos[bottom_pane];"
+            f"[s1_in]crop={s1_w}:{s1_h}:{s1_x}:0,scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos,{studio_grade}[top_pane];"
+            f"[s2_in]crop={s2_w}:{s2_h}:{s2_x}:0,scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos,{studio_grade}[bottom_pane];"
             f"[top_pane][bottom_pane]vstack=inputs=2,fps={FPS}[base]"
         )
 
@@ -61,8 +64,8 @@ def build_video_filtergraph(
         v_filter = (
             f"[0:v]split=2[bg_in][fg_in];"
             f"[bg_in]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
-            f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},boxblur=25:5,eq=brightness=-0.15:contrast=0.9[bg];"
-            f"[fg_in]scale={OUTPUT_WIDTH}:{fg_height}:flags=lanczos[fg];"
+            f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},boxblur=30:5,eq=brightness=-0.16:contrast=1.12[bg];"
+            f"[fg_in]scale={OUTPUT_WIDTH}:{fg_height}:flags=lanczos,{studio_grade}[fg];"
             f"[bg][fg]overlay=0:{fg_y},fps={FPS}[base]"
         )
 
