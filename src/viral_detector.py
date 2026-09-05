@@ -60,7 +60,7 @@ def detect_viral_moments(
         print("[!] GEMINI_API_KEY is not set. Falling back to heuristic/rule-based moment detector.")
         return fallback_rule_based_detector(segments, num_clips)
 
-    model_name = "gemini-1.5-flash"
+    models_to_try = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-1.5-flash"]
     transcript_text = format_transcript_with_timestamps(segments)
 
     prompt = f"""
@@ -96,32 +96,47 @@ Output MUST be valid JSON only matching this schema:
 Do not include markdown backticks or commentary outside the JSON.
 """
 
-    print(f"[*] Sending transcript to Gemini Flash ({model_name}) for viral moment hunting...")
+    raw_text = None
+    last_err = None
+    for model_name in models_to_try:
+        print(f"[*] Sending transcript to Gemini Flash ({model_name}) for viral moment hunting...")
+        try:
+            if HAS_NEW_GENAI:
+                client = genai.Client(api_key=key)
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config=genai_types.GenerateContentConfig(
+                        temperature=0.4,
+                        response_mime_type="application/json"
+                    )
+                )
+                raw_text = response.text.strip()
+            elif legacy_genai is not None:
+                legacy_genai.configure(api_key=key)
+                model = legacy_genai.GenerativeModel(model_name)
+                response = model.generate_content(
+                    prompt,
+                    generation_config=legacy_genai.GenerationConfig(
+                        temperature=0.4,
+                        response_mime_type="application/json"
+                    )
+                )
+                raw_text = response.text.strip()
+            else:
+                raise RuntimeError("No Google GenAI library installed.")
+            
+            if raw_text:
+                break
+        except Exception as e:
+            last_err = e
+            print(f"[-] Model {model_name} failed: {e}. Trying fallback model...")
+
+    if not raw_text:
+        print(f"[-] All Gemini models failed ({last_err}). Falling back to heuristic detector.")
+        return fallback_rule_based_detector(segments, num_clips)
+
     try:
-        if HAS_NEW_GENAI:
-            client = genai.Client(api_key=key)
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-                config=genai_types.GenerateContentConfig(
-                    temperature=0.4,
-                    response_mime_type="application/json"
-                )
-            )
-            raw_text = response.text.strip()
-        elif legacy_genai is not None:
-            legacy_genai.configure(api_key=key)
-            model = legacy_genai.GenerativeModel(model_name)
-            response = model.generate_content(
-                prompt,
-                generation_config=legacy_genai.GenerationConfig(
-                    temperature=0.4,
-                    response_mime_type="application/json"
-                )
-            )
-            raw_text = response.text.strip()
-        else:
-            raise RuntimeError("No Google GenAI library installed.")
         # Clean any accidental wrapping
         if raw_text.startswith("```json"):
             raw_text = raw_text[7:]
@@ -163,11 +178,11 @@ Do not include markdown backticks or commentary outside the JSON.
 
         # Sort by viral_score descending
         candidates.sort(key=lambda x: x.viral_score, reverse=True)
-        print(f"[+] Successfully detected {len(candidates)} viral candidates!")
+        print(f"[+] Successfully detected {len(candidates)} viral candidates via Gemini!")
         return candidates[:num_clips]
 
     except Exception as e:
-        print(f"[-] Gemini viral detection failed ({e}). Falling back to heuristic detector.")
+        print(f"[-] Parsing Gemini response failed ({e}). Falling back to heuristic detector.")
         return fallback_rule_based_detector(segments, num_clips)
 
 def fallback_rule_based_detector(segments: List[TranscriptSegment], num_clips: int = 3) -> List[ViralClipCandidate]:

@@ -3,6 +3,12 @@ import argparse
 from pathlib import Path
 from typing import Optional
 
+# Ensure UTF-8 output encoding across Windows terminals
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
 from src.config import CLIPS_DIR, SUBTITLES_DIR
 from src.downloader import download_video
 from src.transcriber import get_transcript
