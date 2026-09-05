@@ -1,0 +1,18 @@
+# Core AI & LLM (Gemini Free Tier API)
+google-genai>=0.1.1
+google-generativeai>=0.8.0
+
+# Video & Media Processing
+yt-dlp>=2024.8.6
+youtube-transcript-api>=0.6.2
+faster-whisper>=1.0.0
+opencv-python-headless>=4.9.0.80
+
+# API & Networking
+requests>=2.31.0
+python-dotenv>=1.0.0
+pydantic>=2.7.0
+
+# Utility & CLI
+tqdm>=4.66.0
+click>=8.1.7

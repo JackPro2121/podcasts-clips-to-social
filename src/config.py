@@ -1,0 +1,105 @@
+import os
+from pathlib import Path
+from typing import Dict, Any
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+DOWNLOADS_DIR = BASE_DIR / "downloads"
+CLIPS_DIR = BASE_DIR / "clips"
+SUBTITLES_DIR = BASE_DIR / "subtitles"
+
+# Ensure output directories exist
+DOWNLOADS_DIR.mkdir(exist_ok=True, parents=True)
+CLIPS_DIR.mkdir(exist_ok=True, parents=True)
+SUBTITLES_DIR.mkdir(exist_ok=True, parents=True)
+
+# API Keys & Credentials
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+BUFFER_ACCESS_TOKEN = os.getenv("BUFFER_ACCESS_TOKEN", "")
+BUFFER_CHANNEL_IDS = [
+    cid.strip() for cid in os.getenv("BUFFER_CHANNEL_IDS", "").split(",") if cid.strip()
+]
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
+GITHUB_REPOSITORY = os.getenv("GITHUB_REPOSITORY", "")
+
+# Video & Format Defaults
+OUTPUT_WIDTH = 1080
+OUTPUT_HEIGHT = 1920
+FPS = 30
+VIDEO_CRF = 18  # High visual fidelity
+AUDIO_BITRATE = "192k"
+
+# Social Media UI Safe Zone Margins (TikTok, Reels, Shorts)
+SAFE_ZONE_TOP = 240       # Reserved for header/search
+SAFE_ZONE_BOTTOM = 380    # Reserved for creator handle, captions, audio disc
+SAFE_ZONE_RIGHT = 120     # Reserved for like, comment, share icons
+
+# Audio Mastering (Social Broadcast Standard)
+TARGET_LUFS = -14.0       # EBU R128 standard for Instagram/TikTok/Shorts
+TARGET_TRUE_PEAK = -1.5   # Prevents compression clipping distortion
+HIGHPASS_FREQ = 80        # Cut microphone room rumble
+VOCAL_PRESENCE_FREQ = 3000 # Enhance voice clarity
+
+# Subtitle Color & Aesthetic Themes (ASS color codes: &HAABBGGRR)
+# Note: ASS hex format is &H[Alpha][Blue][Green][Red]
+SUBTITLE_THEMES: Dict[str, Dict[str, Any]] = {
+    "hormozi": {
+        "name": "Hormozi Viral",
+        "font_name": "Montserrat Black",
+        "fallback_font": "Arial Black",
+        "font_size": 52,
+        "primary_color": "&H00FFFFFF",      # Crisp White
+        "highlight_color": "&H0000E6FF",    # Electric Yellow (&H00BBGGRR: Blue 00, Green E6, Red FF)
+        "outline_color": "&H00000000",      # Deep Black Outline
+        "outline_width": 4.5,
+        "shadow_color": "&H80000000",       # Soft Black Shadow
+        "shadow_depth": 2.5,
+        "max_words_per_line": 3,
+        "uppercase": True
+    },
+    "neon_green": {
+        "name": "Toxic Neon",
+        "font_name": "Montserrat Black",
+        "fallback_font": "Arial Black",
+        "font_size": 52,
+        "primary_color": "&H00FFFFFF",      # Crisp White
+        "highlight_color": "&H0066FF00",    # Neon Toxic Green
+        "outline_color": "&H00000000",
+        "outline_width": 4.0,
+        "shadow_color": "&H90000000",
+        "shadow_depth": 2.0,
+        "max_words_per_line": 3,
+        "uppercase": True
+    },
+    "luxury_gold": {
+        "name": "Luxury Mindset",
+        "font_name": "Arial",
+        "fallback_font": "Helvetica",
+        "font_size": 50,
+        "primary_color": "&H00F5F5F5",      # Ivory White
+        "highlight_color": "&H0000D7FF",    # Warm Gold
+        "outline_color": "&H001A1A1A",      # Charcoal Outline
+        "outline_width": 3.5,
+        "shadow_color": "&H70000000",
+        "shadow_depth": 3.0,
+        "max_words_per_line": 4,
+        "uppercase": False
+    },
+    "cyber_cyan": {
+        "name": "Cyber Cyan",
+        "font_name": "Montserrat Black",
+        "fallback_font": "Arial Black",
+        "font_size": 52,
+        "primary_color": "&H00FFFFFF",      # Crisp White
+        "highlight_color": "&H00FFFF00",    # Pure Cyan
+        "outline_color": "&H00000000",
+        "outline_width": 4.0,
+        "shadow_color": "&H90000000",
+        "shadow_depth": 2.5,
+        "max_words_per_line": 3,
+        "uppercase": True
+    }
+}

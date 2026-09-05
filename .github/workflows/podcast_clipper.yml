@@ -1,0 +1,123 @@
+name: Podcast Viral Clips to Social (Buffer)
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'YouTube Video URL, Podcast Episode Link, or Direct MP4 URL'
+        required: true
+        type: string
+      num_clips:
+        description: 'Number of viral clips to extract (1 to 5)'
+        required: true
+        default: '3'
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '3'
+          - '4'
+          - '5'
+      framing:
+        description: 'Framing Strategy (Auto face tracking, Split-screen, Blur-stack, Crop)'
+        required: true
+        default: 'auto'
+        type: choice
+        options:
+          - 'auto'
+          - 'split'
+          - 'blur_stack'
+          - 'crop'
+      subtitle_style:
+        description: 'Subtitle Aesthetic & Color Palette'
+        required: true
+        default: 'hormozi'
+        type: choice
+        options:
+          - 'hormozi'
+          - 'neon_green'
+          - 'luxury_gold'
+          - 'cyber_cyan'
+      subtitles_mode:
+        description: 'Subtitle burn-in mode (auto, burn, or skip if already baked-in)'
+        required: true
+        default: 'auto'
+        type: choice
+        options:
+          - 'auto'
+          - 'burn'
+          - 'skip'
+      post_to_buffer:
+        description: 'Automatically schedule generated clips to Buffer connected channels'
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  clip-and-publish:
+    name: Detect Viral Clips, Enhance & Publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install System Dependencies (FFmpeg)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run AI Podcast Clipper & Publisher
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN }}
+          BUFFER_CHANNEL_IDS: ${{ secrets.BUFFER_CHANNEL_IDS }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          POST_FLAG=""
+          if [ "${{ github.event.inputs.post_to_buffer }}" = "true" ]; then
+            POST_FLAG="--post-to-buffer"
+          fi
+
+          python main.py \
+            --url "${{ github.event.inputs.video_url }}" \
+            --num-clips "${{ github.event.inputs.num_clips }}" \
+            --framing "${{ github.event.inputs.framing }}" \
+            --subtitle-style "${{ github.event.inputs.subtitle_style }}" \
+            --subtitles "${{ github.event.inputs.subtitles_mode }}" \
+            $POST_FLAG
+
+      - name: Upload Output Clips as Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: viral-podcast-clips
+          path: clips/*.mp4
+          retention-days: 14
+
+      - name: Job Summary Report
+        if: always()
+        run: |
+          echo "## 🎬 Viral Clips Processing Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Source Video:** ${{ github.event.inputs.video_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Clips Requested:** ${{ github.event.inputs.num_clips }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Framing Strategy:** ${{ github.event.inputs.framing }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Subtitle Theme:** ${{ github.event.inputs.subtitle_style }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Posted to Buffer:** ${{ github.event.inputs.post_to_buffer }}" >> $GITHUB_STEP_SUMMARY
+          echo "Clips have been archived as release assets and workflow artifacts." >> $GITHUB_STEP_SUMMARY
