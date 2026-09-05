@@ -151,7 +151,7 @@ def download_via_apify(
         out_file = output_dir / f"{video_id}.mp4"
 
         print(f"[*] Streaming high-quality video from Apify storage ({out_file.name})...")
-        with requests.get(direct_url, stream=True, timeout=180) as stream_res:
+        with requests.get(direct_url, headers=headers, stream=True, timeout=180) as stream_res:
             stream_res.raise_for_status()
             with open(out_file, "wb") as f:
                 for chunk in stream_res.iter_content(chunk_size=1024 * 1024):
