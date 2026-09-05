@@ -1,0 +1,51 @@
+name: Auto-Cleanup Old Video Releases
+
+on:
+  schedule:
+    # Run once daily at 03:00 UTC
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'Delete video releases older than N days'
+        required: true
+        default: '5'
+        type: string
+      dry_run:
+        description: 'Simulate cleanup without deleting'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup-releases:
+    name: Clean Old Video Releases
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install requests python-dotenv
+
+      - name: Run Release Auto-Cleanup
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          DAYS_ARG="--days ${{ github.event.inputs.days || '5' }}"
+          DRY_ARG=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            DRY_ARG="--dry-run"
+          fi
+          python -m src.release_cleaner $DAYS_ARG $DRY_ARG

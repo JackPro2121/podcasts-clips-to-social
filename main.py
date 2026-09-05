@@ -138,6 +138,14 @@ def run_pipeline(
         elif post_to_buffer and not direct_url:
             print("[-] Cannot post to Buffer because direct video URL is not available.")
 
+    # Step 7: Storage Hygiene: Auto-delete releases older than 5 days
+    print("\n--- [7/7] STORAGE HYGIENE: AUTO-CLEANUP RELEASES > 5 DAYS ---")
+    try:
+        from src.release_cleaner import clean_old_releases
+        clean_old_releases(days=5)
+    except Exception as e:
+        print(f"[-] Auto-cleanup warning: {e}")
+
     print("\n" + "=" * 70)
     print("✨ ALL CLIPS PROCESSED SUCCESSFULLY!")
     print(f"📂 Output clips saved to: {CLIPS_DIR.resolve()}")
