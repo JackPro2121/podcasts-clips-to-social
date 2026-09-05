@@ -23,13 +23,17 @@ class FramingDecision:
     video_width: int = 1920
     video_height: int = 1080
 
-def get_face_cascade() -> cv2.CascadeClassifier:
-    """Loads OpenCV's default frontal face Haar cascade."""
-    cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-    cascade = cv2.CascadeClassifier(cascade_path)
-    if cascade.empty():
-        raise RuntimeError("Failed to load OpenCV face cascade.")
-    return cascade
+def get_face_cascade() -> Optional[Any]:
+    """Loads OpenCV's default frontal face Haar cascade with safe fallback."""
+    try:
+        if hasattr(cv2, 'CascadeClassifier') and hasattr(cv2, 'data') and hasattr(cv2.data, 'haarcascades'):
+            cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+            cascade = cv2.CascadeClassifier(cascade_path)
+            if not cascade.empty():
+                return cascade
+    except Exception as e:
+        print(f"[-] Could not load face cascade: {e}")
+    return None
 
 def analyze_faces_in_clip(
     video_path: Path,
@@ -51,13 +55,17 @@ def analyze_faces_in_clip(
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 1920
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 1080
 
+    cascade = get_face_cascade()
+    if cascade is None:
+        print("[-] Face detector cascade unavailable. Defaulting to blur_stack framing.")
+        cap.release()
+        return FramingDecision(mode='blur_stack', face_count=0, video_width=width, video_height=height)
+
     start_frame = int(start_time * fps)
     end_frame = int(end_time * fps)
     frame_step = max(1, int(fps / sample_fps))
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-
-    cascade = get_face_cascade()
 
     face_counts: List[int] = []
     speaker1_centers_x: List[int] = []
