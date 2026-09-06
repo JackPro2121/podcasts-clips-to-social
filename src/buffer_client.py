@@ -69,6 +69,29 @@ class BufferClient:
             print(f"[-] Error fetching Buffer channels: {e}")
             return []
 
+    def get_pinterest_boards(self, channel_id: str) -> List[Dict[str, Any]]:
+        """Queries boards for a specific Pinterest channel."""
+        q = f"""query {{
+          channel(input: {{ id: "{channel_id}" }}) {{
+            metadata {{
+              ... on PinterestMetadata {{
+                boards {{
+                  id
+                  name
+                }}
+              }}
+            }}
+          }}
+        }}"""
+        try:
+            res = requests.post(BUFFER_GRAPHQL_ENDPOINT, headers=self.headers, json={"query": q}, timeout=10)
+            if res.status_code == 200:
+                data = res.json().get("data", {}).get("channel", {}).get("metadata", {})
+                return data.get("boards", [])
+        except Exception as e:
+            print(f"[-] Warning: Failed to fetch Pinterest boards: {e}")
+        return []
+
     def schedule_video_post(
         self,
         video_url: str,
@@ -119,21 +142,41 @@ class BufferClient:
         for channel_id in target_channels:
             service = channel_service_map.get(channel_id, "youtube")
 
-            # Prepare YouTube-specific metadata if posting to YouTube
             metadata = None
+            clean_title = (title or text.split("\n")[0]).strip()
+
             if service == "youtube":
-                clean_title = (title or text.split("\n")[0]).strip()
-                if "#shorts" not in clean_title.lower():
-                    clean_title = f"{clean_title} #shorts"
-                if len(clean_title) > 95:
-                    clean_title = clean_title[:90] + "... #shorts"
+                yt_title = clean_title
+                if "#shorts" not in yt_title.lower():
+                    yt_title = f"{yt_title} #shorts"
+                if len(yt_title) > 95:
+                    yt_title = yt_title[:90] + "... #shorts"
 
                 metadata = {
                     "youtube": {
-                        "title": clean_title,
+                        "title": yt_title,
                         "categoryId": "22",
                         "madeForKids": False,
                         "privacy": "public"
+                    }
+                }
+            elif service == "instagram":
+                metadata = {
+                    "instagram": {
+                        "type": "reel",
+                        "shouldShareToFeed": True
+                    }
+                }
+            elif service == "pinterest":
+                boards = self.get_pinterest_boards(channel_id)
+                if not boards:
+                    ch_name = next((ch["name"] for ch in connected if ch["id"] == channel_id), channel_id)
+                    print(f"[-] Pinterest channel '{ch_name}' has no boards configured yet. Please create a board on Pinterest (e.g., 'Podcast Clips') to enable automated pinning. Skipping Pinterest.")
+                    continue
+                metadata = {
+                    "pinterest": {
+                        "title": clean_title[:95],
+                        "boardServiceId": boards[0]["id"]
                     }
                 }
 

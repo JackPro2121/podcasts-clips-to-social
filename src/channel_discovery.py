@@ -183,12 +183,30 @@ def get_latest_high_cpm_podcast_url(
         except Exception:
             pass
 
-    # Select niche queries
-    selected_niche = niche if niche in HIGH_CPM_NICHES else random.choice(list(HIGH_CPM_NICHES.keys()))
+    # Day-of-Week Smart Auto-Rotation for maximum CPM & audience engagement:
+    # Monday: Finance & Wealth | Tuesday: AI & Tech | Wednesday: Health & Longevity
+    # Thursday: Business & Startups | Friday: Finance & Investing
+    # Saturday: AI & Tech | Sunday: Health & Neuroscience
+    DAY_OF_WEEK_NICHES = [
+        "finance",           # Monday
+        "ai_tech",           # Tuesday
+        "health_longevity",  # Wednesday
+        "business",          # Thursday
+        "finance",           # Friday
+        "ai_tech",           # Saturday
+        "health_longevity"   # Sunday
+    ]
+    if niche and niche in HIGH_CPM_NICHES:
+        selected_niche = niche
+    else:
+        import datetime
+        day_idx = datetime.datetime.utcnow().weekday()
+        selected_niche = DAY_OF_WEEK_NICHES[day_idx]
+
     queries = HIGH_CPM_NICHES[selected_niche]["search_queries"].copy()
     random.shuffle(queries)
 
-    print(f"[*] Auto-Discovering latest episodes in niche: {HIGH_CPM_NICHES[selected_niche]['title']}")
+    print(f"[*] Auto-Discovering latest episodes in niche: {HIGH_CPM_NICHES[selected_niche]['title']} (Day rotation: {selected_niche})")
 
     ydl_opts = {
         "quiet": True,
