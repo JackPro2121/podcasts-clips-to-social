@@ -7,6 +7,7 @@ yt-dlp>=2024.8.6
 youtube-transcript-api>=0.6.2
 faster-whisper>=1.0.0
 opencv-python-headless>=4.8.0.76,<5.0.0.0
+scenedetect>=0.6.4
 
 # API & Networking
 requests>=2.31.0

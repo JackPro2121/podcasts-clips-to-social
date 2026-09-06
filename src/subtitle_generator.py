@@ -74,11 +74,12 @@ def create_styled_ass_subtitles(
     theme_key: str = "hormozi",
     layout_mode: str = "single_smooth",
     header_title: Optional[str] = None,
-    watermark: Optional[str] = None
+    watermark: Optional[str] = None,
+    shots: Optional[List[Any]] = None
 ) -> Path:
     """
     Generates word-level animated karaoke-style ASS subtitles for a specific clip window.
-    Only displays 2-4 words at a time for maximum retention and viewer attention.
+    Dynamically positions subtitles based on active shot layout (e.g. margin_v=420 during slides).
     """
     theme = SUBTITLE_THEMES.get(theme_key, SUBTITLE_THEMES["hormozi"])
     max_words = theme.get("max_words_per_line", 3)
@@ -91,10 +92,8 @@ def create_styled_ass_subtitles(
     for seg in segments:
         for w in seg.words:
             if w.end >= clip_start and w.start <= clip_end:
-                # Relative timestamp relative to the clip start
                 rel_start = max(0.0, w.start - clip_start)
                 rel_end = max(rel_start + 0.1, min(clip_end - clip_start, w.end - clip_start))
-                # Strip leading and trailing punctuation (. , ! ? ; : " ' - _ ~ etc.)
                 clean_word = re.sub(r'^[^\w]+|[^\w]+$', '', w.word.strip())
                 if not clean_word:
                     continue
@@ -116,6 +115,15 @@ def create_styled_ass_subtitles(
         last_end = w_end
     clip_words = monotonic_words
 
+    def get_shot_margin_v(t: float) -> int:
+        if shots:
+            for s in shots:
+                s_start = getattr(s, "start", 0.0)
+                s_end = getattr(s, "end", 9999.0)
+                if s_start <= t <= s_end:
+                    return getattr(s, "margin_v", 0)
+        return 420 if layout_mode == "blur_stack" else 0
+
     # Group words into short punchy batches of 2-4 words
     lines: List[str] = []
     i = 0
@@ -125,7 +133,6 @@ def create_styled_ass_subtitles(
         if not chunk:
             continue
 
-        # For each word in this chunk, generate an active highlight state
         for active_idx, target_word in enumerate(chunk):
             w_start = target_word.start
             if active_idx + 1 < len(chunk):
@@ -133,43 +140,40 @@ def create_styled_ass_subtitles(
             else:
                 w_end = target_word.end
 
-            # Build line text where active word is rendered in highlight_color
             word_elements = []
             for idx, w in enumerate(chunk):
                 if idx == active_idx:
-                    # Highlighted active spoken word with kinetic spring pop
                     word_elements.append(f"{{\\c{highlight_color}\\t(0,80,\\fscx112\\fscy112)\\t(80,160,\\fscx100\\fscy100)}}{w.word}{{\\c{primary_color}\\fscx100\\fscy100}}")
                 else:
                     word_elements.append(w.word)
 
             dialogue_text = " ".join(word_elements)
-            ass_line = f"Dialogue: 0,{format_ass_timestamp(w_start)},{format_ass_timestamp(w_end)},Default,,0,0,0,,{dialogue_text}"
+            w_mid = (w_start + w_end) / 2
+            active_margin_v = get_shot_margin_v(w_mid)
+            ass_line = f"Dialogue: 0,{format_ass_timestamp(w_start)},{format_ass_timestamp(w_end)},Default,,0,0,{active_margin_v},,{dialogue_text}"
             lines.append(ass_line)
 
     header = generate_ass_header(theme_key=theme_key, layout_mode=layout_mode)
-    
     dur_str = format_ass_timestamp(clip_end - clip_start)
 
-    # If channel watermark is provided or configured, burn it at 50% opacity
+    # Watermark (if configured)
     active_watermark = watermark if watermark is not None else CHANNEL_WATERMARK
     if active_watermark:
         lines.insert(0, f"Dialogue: 2,0:00:00.00,{dur_str},Watermark,,0,0,0,,{active_watermark.strip()}")
 
-    # If a viral hook title is provided, burn it as a clean top capsule badge for the first 6.5 seconds (NO EMOJIS)
+    # Hook title capsule badge: first 3.5 seconds, clean fade out, 0 emojis
     if header_title:
-        # Strip all emojis, symbols, and non-alphanumeric punctuation
         clean_title = header_title.strip().upper()
         clean_title = re.sub(r'[^\w\s\-\'\,\.\?]', '', clean_title).strip()
         clean_title = re.sub(r'\s+', ' ', clean_title)
 
-        # Balance hook title cleanly across 2 punchy lines (e.g. THE EYE TRICK TO TURN \N YOUR MIND OFF & SLEEP)
         words = clean_title.split()
         if len(words) >= 2:
             mid = (len(words) + 1) // 2
             clean_title = " ".join(words[:mid]) + "\\N" + " ".join(words[mid:])
         
-        hook_dur = format_ass_timestamp(min(6.5, clip_end - clip_start))
-        lines.insert(0, f"Dialogue: 1,0:00:00.00,{hook_dur},TopHeader,,0,0,0,,{{\\fad(250,400)}}{clean_title}")
+        hook_dur = format_ass_timestamp(min(3.5, clip_end - clip_start))
+        lines.insert(0, f"Dialogue: 1,0:00:00.00,{hook_dur},TopHeader,,0,0,0,,{{\\fad(200,400)}}{clean_title}")
 
     full_content = header + "\n".join(lines) + "\n"
 

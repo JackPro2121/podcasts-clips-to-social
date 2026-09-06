@@ -181,6 +181,53 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         scene_info = classify_frame_scene(doc_frame)
         self.assertTrue(scene_info["is_presentation"])
 
+    def test_multi_shot_dynamic_filtergraph(self):
+        from src.face_tracker import ShotPlan
+        shots = [
+            ShotPlan(start=0.0, end=5.0, mode="presentation_slide", margin_v=420),
+            ShotPlan(start=5.0, end=12.0, mode="portrait_face", crop_x=650, margin_v=220),
+        ]
+        decision = FramingDecision(
+            mode="multi_shot_dynamic",
+            face_count=2,
+            shots=shots,
+            video_width=1920,
+            video_height=1080
+        )
+        fg = build_video_filtergraph(decision, burn_subtitles=False)
+        self.assertIn("trim=start=0.00:end=5.00", fg)
+        self.assertIn("trim=start=5.00:end=12.00", fg)
+        self.assertIn("concat=n=2:v=1:a=0", fg)
+        self.assertIn("setsar=1:1", fg)
+
+    def test_dynamic_shot_subtitles_margin(self):
+        from src.face_tracker import ShotPlan
+        words = [
+            WordTimestamp(word="Slide", start=2.0, end=2.5),
+            WordTimestamp(word="Speaker", start=6.0, end=6.5),
+        ]
+        seg = TranscriptSegment(start=2.0, end=7.0, text="Slide Speaker", words=words)
+        shots = [
+            ShotPlan(start=0.0, end=5.0, mode="presentation_slide", margin_v=420),
+            ShotPlan(start=5.0, end=10.0, mode="portrait_face", crop_x=650, margin_v=220),
+        ]
+        out_ass = Path("subtitles/test_dynamic_shots.ass")
+        created = create_styled_ass_subtitles(
+            segments=[seg],
+            clip_start=0.0,
+            clip_end=10.0,
+            output_ass_path=out_ass,
+            shots=shots
+        )
+        self.assertTrue(created.exists())
+        content = created.read_text(encoding="utf-8")
+        # Line 1 (t=2.0s during slide) must have margin_v=420
+        # Line 2 (t=6.0s during speaker) must have margin_v=220
+        self.assertIn(",0,0,420,,", content)
+        self.assertIn(",0,0,220,,", content)
+        if created.exists():
+            created.unlink()
+
     def test_sanitize_ffmpeg_path(self):
         p = Path("C:/videos/clip 1.ass")
         sanitized = sanitize_ffmpeg_path(p)

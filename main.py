@@ -106,7 +106,8 @@ def run_pipeline(
                 theme_key=subtitle_style,
                 layout_mode=framing.mode,
                 header_title=moment.title,
-                watermark=watermark
+                watermark=watermark,
+                shots=framing.shots
             )
 
         # Video Render

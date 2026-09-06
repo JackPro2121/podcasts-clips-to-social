@@ -44,7 +44,51 @@ def build_video_filtergraph(
     # Scaled and centered smoothly so the speaker's eyes remain in the upper-third golden ratio.
     punch_zoom = ",crop='if(between(mod(t,9),4.0,7.0),964,1080)':'if(between(mod(t,9),4.0,7.0),1714,1920)':(iw-ow)/2:(ih-oh)*0.35,scale=1080:1920:flags=lanczos" if ENABLE_PUNCH_ZOOM else ""
 
-    if framing.mode == "dynamic_cut" and framing.crop_x_expr:
+    if framing.mode == "multi_shot_dynamic" and framing.shots:
+        fg_height = int(OUTPUT_WIDTH * (9 / 16))  # 608px
+        fg_y = (OUTPUT_HEIGHT - fg_height) // 2   # 656px
+        target_crop_w = int(framing.video_height * (9 / 16))
+        half_h = OUTPUT_HEIGHT // 2
+
+        shot_filters = []
+        shot_labels = []
+
+        for i, shot in enumerate(framing.shots):
+            label = f"v_shot_{i}"
+            shot_labels.append(f"[{label}]")
+
+            if shot.mode == "presentation_slide":
+                # Presentation slide: 100% full uncropped 16:9 on ambient blurred background
+                shot_f = (
+                    f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,split=2[s{i}_fg_in][s{i}_bg_in];"
+                    f"[s{i}_bg_in]scale=270:480,boxblur=8:2,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}[s{i}_bg];"
+                    f"[s{i}_fg_in]scale={OUTPUT_WIDTH}:{fg_height}:force_original_aspect_ratio=decrease,pad={OUTPUT_WIDTH}:{fg_height}:(ow-iw)/2:(oh-ih)/2[s{i}_fg];"
+                    f"[s{i}_bg][s{i}_fg]overlay=0:{fg_y},scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},setsar=1:1,fps={FPS}[{label}]"
+                )
+            elif shot.mode == "split_screen" and shot.speaker1_box and shot.speaker2_box:
+                s1_x, s1_y, s1_w, s1_h = shot.speaker1_box
+                s2_x, s2_y, s2_w, s2_h = shot.speaker2_box
+                shot_f = (
+                    f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,split=2[s{i}_p1][s{i}_p2];"
+                    f"[s{i}_p1]crop={s1_w}:{s1_h}:{s1_x}:0,scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos[s{i}_top];"
+                    f"[s{i}_p2]crop={s2_w}:{s2_h}:{s2_x}:0,scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos[s{i}_bot];"
+                    f"[s{i}_top][s{i}_bot]vstack=inputs=2,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},setsar=1:1,fps={FPS}[{label}]"
+                )
+            else:
+                # Full 9:16 portrait on speaker
+                crop_x = max(0, min(shot.crop_x, framing.video_width - target_crop_w))
+                shot_f = (
+                    f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,"
+                    f"crop={target_crop_w}:{framing.video_height}:{crop_x}:0,"
+                    f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos,setsar=1:1,fps={FPS}[{label}]"
+                )
+            shot_filters.append(shot_f)
+
+        concat_inputs = "".join(shot_labels)
+        concat_f = f"{concat_inputs}concat=n={len(shot_labels)}:v=1:a=0,{studio_grade}[base]"
+        v_filter = ";".join(shot_filters) + ";" + concat_f
+
+    elif framing.mode == "dynamic_cut" and framing.crop_x_expr:
         # Target aspect ratio 9:16 with dynamic multi-camera angle switching
         crop_w = int(framing.video_height * (9 / 16))
         v_filter = f"[0:v]crop={crop_w}:{framing.video_height}:'{framing.crop_x_expr}':0,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos,{studio_grade}{punch_zoom},fps={FPS}[base]"
