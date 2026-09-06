@@ -36,12 +36,12 @@ APIFY_API_TOKEN = (
     ""
 )
 
-# Video & Format Defaults
+# Video & Format Defaults (Ultra HD 60FPS Broadcast Studio)
 OUTPUT_WIDTH = 1080
 OUTPUT_HEIGHT = 1920
-FPS = 30
-VIDEO_CRF = 18  # High visual fidelity
-AUDIO_BITRATE = "192k"
+FPS = 60
+VIDEO_CRF = 16  # Ultra high visual fidelity (near-lossless)
+AUDIO_BITRATE = "256k"
 
 # Social Media UI Safe Zone Margins (TikTok, Reels, Shorts)
 SAFE_ZONE_TOP = 240       # Reserved for header/search
@@ -53,6 +53,7 @@ TARGET_LUFS = -14.0       # EBU R128 standard for Instagram/TikTok/Shorts
 TARGET_TRUE_PEAK = -1.5   # Prevents compression clipping distortion
 HIGHPASS_FREQ = 80        # Cut microphone room rumble
 VOCAL_PRESENCE_FREQ = 3000 # Enhance voice clarity
+VOCAL_AIR_FREQ = 10000    # High-frequency studio microphone sheen
 
 # Subtitle Color & Aesthetic Themes (ASS color codes: &HAABBGGRR)
 # Note: ASS hex format is &H[Alpha][Blue][Green][Red]

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 from src.config import (
     OUTPUT_WIDTH, OUTPUT_HEIGHT, FPS, VIDEO_CRF, AUDIO_BITRATE,
-    TARGET_LUFS, TARGET_TRUE_PEAK, HIGHPASS_FREQ, VOCAL_PRESENCE_FREQ, CLIPS_DIR
+    TARGET_LUFS, TARGET_TRUE_PEAK, HIGHPASS_FREQ, VOCAL_PRESENCE_FREQ, VOCAL_AIR_FREQ, CLIPS_DIR
 )
 from src.face_tracker import FramingDecision
 
@@ -31,8 +31,10 @@ def build_video_filtergraph(
     """
     filters = []
 
-    # Broadcast Studio Visual Enhancements: Unsharp mask (sharp 4K detail) + Color Grading (rich contrast & skin saturation)
-    studio_grade = "unsharp=lx=5:ly=5:la=0.85:cx=3:cy=3:ca=0.45,eq=contrast=1.08:brightness=0.01:saturation=1.14"
+    # Ultra-HD Broadcast Studio Enhancements:
+    # 1. Multi-band Unsharp Mask: lx=7:ly=7:la=0.95 (Macro edge clarity) + cx=5:cy=5:ca=0.55 (Micro facial texture)
+    # 2. S-Curve Dynamic Color Grading: contrast=1.12, brightness=0.01, saturation=1.18
+    studio_grade = "unsharp=lx=7:ly=7:la=0.95:cx=5:cy=5:ca=0.55,eq=contrast=1.12:brightness=0.01:saturation=1.18"
 
     if framing.mode == "single_smooth":
         # Target aspect ratio 9:16
@@ -87,11 +89,13 @@ def build_audio_filtergraph() -> str:
     Constructs the broadcast audio mastering chain:
     1. High-pass filter (80Hz) to cut desk bumps/low rumble
     2. Vocal presence lift (3000Hz)
-    3. EBU R128 loudness normalization (-14 LUFS, -1.5 dBTP)
+    3. Crystal air shelf (10000Hz) for studio podcast sheen
+    4. EBU R128 loudness normalization (-14 LUFS, -1.5 dBTP)
     """
     return (
         f"highpass=f={HIGHPASS_FREQ},"
         f"equalizer=f={VOCAL_PRESENCE_FREQ}:width_type=h:width=1000:g=2.5,"
+        f"equalizer=f={VOCAL_AIR_FREQ}:width_type=h:width=2500:g=1.8,"
         f"loudnorm=I={TARGET_LUFS}:TP={TARGET_TRUE_PEAK}:LRA=11"
     )
 
@@ -144,8 +148,13 @@ def render_viral_clip(
         "-c:v", "libx264",
         "-crf", str(VIDEO_CRF),
         "-preset", "medium",
+        "-pix_fmt", "yuv420p",
+        "-color_primaries", "bt709",
+        "-color_trc", "bt709",
+        "-colorspace", "bt709",
         "-c:a", "aac",
         "-b:a", AUDIO_BITRATE,
+        "-ar", "48000",
         "-movflags", "+faststart",
         str(output_clip_path)
     ]
