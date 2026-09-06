@@ -40,6 +40,9 @@ def generate_ass_header(
     if layout_mode == "split_screen":
         alignment = 5  # Middle Center
         margin_v = 0
+    elif layout_mode == "blur_stack":
+        alignment = 2  # Bottom Center
+        margin_v = 400  # Perfectly below the 16:9 centered diagram (which ends at Y=1264)
     else:
         alignment = 2  # Bottom Center
         margin_v = 460  # Y = 1460px (76% height, perfectly above bottom 22% UI overlay)

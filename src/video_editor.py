@@ -33,9 +33,9 @@ def build_video_filtergraph(
     filters = []
 
     # Ultra-HD Broadcast Studio Enhancements:
-    # 1. Multi-band Unsharp Mask: lx=5:ly=5:la=0.7 (Crisp edge clarity without pixel noise)
-    # 2. Balanced Contrast & Vibrancy: contrast=1.06, saturation=1.10
-    studio_grade = "unsharp=lx=5:ly=5:la=0.7:cx=5:cy=5:ca=0.4,eq=contrast=1.06:brightness=0.01:saturation=1.10"
+    # 1. Multi-band Unsharp Mask: lx=7:ly=7:la=1.10 (Razor-sharp text, papers & diagrams) + cx=5:cy=5:ca=0.60 (Crisp facial details)
+    # 2. Balanced Contrast & Vibrancy: contrast=1.08, saturation=1.12
+    studio_grade = "unsharp=lx=7:ly=7:la=1.10:cx=5:cy=5:ca=0.60,eq=contrast=1.08:brightness=0.01:saturation=1.12"
 
     # Intelligent Dynamic Punch Zoom (Alex Hormozi / Diary of a CEO style):
     # Starts at 1.0x NORMAL wide crop for the first 4.0s (anchors viewer).

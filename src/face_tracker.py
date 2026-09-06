@@ -197,7 +197,10 @@ def analyze_faces_in_clip(
             video_height=height
         )
 
-    # 2. Single Speaker or Multi-Camera Switching Shots
+    # 2. Single Speaker vs Document / Presentation / Infographic Detection
+    # If the video shows slides, charts, research papers, or screenshares for most of the clip,
+    # cropping into a 9:16 portrait viewport destroys the diagram.
+    # An intelligent tool checks if genuine human faces are present for at least 50% of the clip.
     single_samples: List[Tuple[float, int, int]] = []
     for rel_t, faces in timeline_samples:
         if faces:
@@ -205,8 +208,11 @@ def analyze_faces_in_clip(
             best_face = min(faces, key=lambda f: abs(f.center_y - height * 0.35))
             single_samples.append((rel_t, best_face.center_x, best_face.center_y))
 
-    if not single_samples:
-        # 0 faces detected consistently -> Safe Blur Stack
+    face_presence_ratio = len(single_samples) / max(1, len(timeline_samples))
+    if face_presence_ratio < 0.50 or not single_samples:
+        # Less than 50% face presence -> Document/chart/slide presentation detected!
+        # Automatically preserve 100% of the diagram in blur_stack mode!
+        print(f"[*] Visual graphics / slide detected (Face presence: {face_presence_ratio*100:.1f}% < 50%). Activating intelligent Blur-Stack presentation framing!")
         return FramingDecision(mode='blur_stack', face_count=0, video_width=width, video_height=height)
 
     # Detect camera angle switches (clusters of face centers separated by significant X shift)
