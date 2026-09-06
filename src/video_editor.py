@@ -33,12 +33,16 @@ def build_video_filtergraph(
     filters = []
 
     # Ultra-HD Broadcast Studio Enhancements:
-    # 1. Multi-band Unsharp Mask: lx=7:ly=7:la=0.95 (Macro edge clarity) + cx=5:cy=5:ca=0.55 (Micro facial texture)
-    # 2. S-Curve Dynamic Color Grading: contrast=1.12, brightness=0.01, saturation=1.18
-    studio_grade = "unsharp=lx=7:ly=7:la=0.95:cx=5:cy=5:ca=0.55,eq=contrast=1.12:brightness=0.01:saturation=1.18"
+    # 1. Multi-band Unsharp Mask: lx=5:ly=5:la=0.7 (Crisp edge clarity without pixel noise)
+    # 2. Balanced Contrast & Vibrancy: contrast=1.06, saturation=1.10
+    studio_grade = "unsharp=lx=5:ly=5:la=0.7:cx=5:cy=5:ca=0.4,eq=contrast=1.06:brightness=0.01:saturation=1.10"
 
-    # Dynamic Retention Punch Zoom: subtle 1.10x zoom cut every 7 seconds (4.2s normal, 2.8s punch-in)
-    punch_zoom = ",crop='if(lt(mod(t,7),4.2),1080,980)':'if(lt(mod(t,7),4.2),1920,1742)':(iw-ow)/2:(ih-oh)/2.5,scale=1080:1920:flags=lanczos" if ENABLE_PUNCH_ZOOM else ""
+    # Intelligent Dynamic Punch Zoom (Alex Hormozi / Diary of a CEO style):
+    # Starts at 1.0x NORMAL wide crop for the first 4.0s (anchors viewer).
+    # Cuts cleanly into 1.12x PUNCH ZOOM on the speaker for 3.0s (peaks retention).
+    # Then returns to 1.0x normal crop, alternating every 9.0s cycle.
+    # Scaled and centered smoothly so the speaker's eyes remain in the upper-third golden ratio.
+    punch_zoom = ",crop='if(between(mod(t,9),4.0,7.0),964,1080)':'if(between(mod(t,9),4.0,7.0),1714,1920)':(iw-ow)/2:(ih-oh)*0.35,scale=1080:1920:flags=lanczos" if ENABLE_PUNCH_ZOOM else ""
 
     if framing.mode == "dynamic_cut" and framing.crop_x_expr:
         # Target aspect ratio 9:16 with dynamic multi-camera angle switching
@@ -46,7 +50,7 @@ def build_video_filtergraph(
         v_filter = f"[0:v]crop={crop_w}:{framing.video_height}:'{framing.crop_x_expr}':0,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos,{studio_grade}{punch_zoom},fps={FPS}[base]"
 
     elif framing.mode == "single_smooth":
-        # Target aspect ratio 9:16
+        # Target aspect ratio 9:16 with intelligent eye-level framing
         crop_w = int(framing.video_height * (9 / 16))
         # Ensure center_x keeps crop window within bounds
         cx = framing.smoothed_center_x or (framing.video_width // 2)

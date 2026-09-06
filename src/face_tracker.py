@@ -22,6 +22,7 @@ class FramingDecision:
     speaker1_box: Optional[Tuple[int, int, int, int]] = None  # (x, y, w, h) for top or single
     speaker2_box: Optional[Tuple[int, int, int, int]] = None  # (x, y, w, h) for bottom (split-screen)
     smoothed_center_x: int = 0
+    smoothed_center_y: int = 0  # Intelligent face-height tracking
     crop_x_expr: Optional[str] = None  # Dynamic FFmpeg expression for multi-camera angle switching
     video_width: int = 1920
     video_height: int = 1080
@@ -197,12 +198,12 @@ def analyze_faces_in_clip(
         )
 
     # 2. Single Speaker or Multi-Camera Switching Shots
-    single_samples: List[Tuple[float, int]] = []
+    single_samples: List[Tuple[float, int, int]] = []
     for rel_t, faces in timeline_samples:
         if faces:
             # Pick the face closest to eye level (Y: ~35% of frame) to ignore desk objects/mugs
             best_face = min(faces, key=lambda f: abs(f.center_y - height * 0.35))
-            single_samples.append((rel_t, best_face.center_x))
+            single_samples.append((rel_t, best_face.center_x, best_face.center_y))
 
     if not single_samples:
         # 0 faces detected consistently -> Safe Blur Stack
@@ -213,30 +214,35 @@ def analyze_faces_in_clip(
     shift_threshold = width * 0.20
 
     shots: List[Dict[str, Any]] = []
-    current_shot_centers = [single_samples[0][1]]
+    current_shot_centers_x = [single_samples[0][1]]
+    current_shot_centers_y = [single_samples[0][2]]
     current_shot_start = single_samples[0][0]
 
     for i in range(1, len(single_samples)):
-        t_cur, cx_cur = single_samples[i]
-        median_cx = np.median(current_shot_centers)
+        t_cur, cx_cur, cy_cur = single_samples[i]
+        median_cx = np.median(current_shot_centers_x)
         
         if abs(cx_cur - median_cx) > shift_threshold:
             # Camera cut detected
             shots.append({
                 "start": current_shot_start,
                 "end": t_cur,
-                "cx": int(median_cx)
+                "cx": int(median_cx),
+                "cy": int(np.median(current_shot_centers_y))
             })
             current_shot_start = t_cur
-            current_shot_centers = [cx_cur]
+            current_shot_centers_x = [cx_cur]
+            current_shot_centers_y = [cy_cur]
         else:
-            current_shot_centers.append(cx_cur)
+            current_shot_centers_x.append(cx_cur)
+            current_shot_centers_y.append(cy_cur)
 
     # Append last shot
     shots.append({
         "start": current_shot_start,
         "end": (end_time - start_time),
-        "cx": int(np.median(current_shot_centers))
+        "cx": int(np.median(current_shot_centers_x)),
+        "cy": int(np.median(current_shot_centers_y))
     })
 
     # Filter out momentary glitch shots (< 1.2 seconds)
@@ -252,11 +258,13 @@ def analyze_faces_in_clip(
     # If only 1 shot or camera angles are all close:
     if len(filtered_shots) <= 1:
         avg_cx = filtered_shots[0]["cx"] if filtered_shots else width // 2
+        avg_cy = filtered_shots[0]["cy"] if filtered_shots else height // 3
         left_bound = max(0, min(avg_cx - target_crop_w // 2, width - target_crop_w))
         return FramingDecision(
             mode='single_smooth',
             face_count=1,
             smoothed_center_x=left_bound + target_crop_w // 2,
+            smoothed_center_y=avg_cy,
             video_width=width,
             video_height=height
         )

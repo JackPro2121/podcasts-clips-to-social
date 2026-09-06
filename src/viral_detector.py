@@ -183,8 +183,9 @@ def parse_clips_json(raw_text: str, segments: List[TranscriptSegment], num_clips
             end = min(start + 40.0, segments[-1].end if segments else start + 40.0)
             dur = end - start
 
+        candidate_title = re.sub(r'[^\w\s\-\'\,\.\?]', '', str(c.get("title", "Viral Moment"))).strip().upper()
         candidate = ViralClipCandidate(
-            title=c.get("title", "Viral Moment").strip().upper(),
+            title=candidate_title or "VIRAL MOMENT",
             start_time=start,
             end_time=end,
             duration=dur,
@@ -222,7 +223,7 @@ Your goal is to analyze the following podcast transcript and extract the top {nu
 3. **Standalone Cohesion**: The clip must make complete sense on its own without needing the rest of the 2-hour podcast.
 4. **Optimal Duration**: Each clip MUST be strictly between 30 and 60 seconds (target: 35-50s).
 5. **Exact Timestamps**: Use the provided transcript timestamps to specify precise start_time and end_time.
-6. **Punchy Viral Title**: Give each clip an engaging, click-worthy hook title in ALL CAPS (e.g., "THE SECRET TO BETTER SLEEP", "HOW CORTISOL PEAKS", "DO THIS EVERY MORNING"). Max 5-7 words.
+6. **Punchy Viral Title**: Give each clip an engaging, click-worthy hook title in ALL CAPS (e.g., "THE SECRET TO BETTER SLEEP", "HOW CORTISOL PEAKS", "DO THIS EVERY MORNING"). Max 5-7 words. Strictly DO NOT include any emojis or special symbols.
 
 ### PODCAST TRANSCRIPT:
 {transcript_text}

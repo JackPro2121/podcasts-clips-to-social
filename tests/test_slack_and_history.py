@@ -39,7 +39,7 @@ class TestSlackAndHistory(unittest.TestCase):
                 temp_history_path.unlink()
 
     def test_slack_notifier_blocks(self):
-        notifier = SlackNotifier(webhook_url=None)
+        notifier = SlackNotifier(webhook_url="", bot_token="")
         self.assertFalse(notifier.is_enabled())
         # Should gracefully return False when webhook_url is not set
         res = notifier.send_run_report(

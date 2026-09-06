@@ -152,18 +152,21 @@ def create_styled_ass_subtitles(
     if active_watermark:
         lines.insert(0, f"Dialogue: 2,0:00:00.00,{dur_str},Watermark,,0,0,0,,{active_watermark.strip()}")
 
-    # If a viral hook title is provided, burn it as a dynamic top capsule badge for the first 6.5 seconds
+    # If a viral hook title is provided, burn it as a clean top capsule badge for the first 6.5 seconds (NO EMOJIS)
     if header_title:
+        # Strip all emojis, symbols, and non-alphanumeric punctuation
         clean_title = header_title.strip().upper()
-        # If title is long, wrap it at a balanced word boundary to fit cleanly inside 1080px portrait
+        clean_title = re.sub(r'[^\w\s\-\'\,\.\?]', '', clean_title).strip()
+        clean_title = re.sub(r'\s+', ' ', clean_title)
+
+        # If title is long, wrap it cleanly at a balanced word boundary to fit inside 1080px portrait
         if len(clean_title) > 26 and " " in clean_title:
             words = clean_title.split()
             mid = len(words) // 2
             clean_title = " ".join(words[:mid]) + "\\N" + " ".join(words[mid:])
         
         hook_dur = format_ass_timestamp(min(6.5, clip_end - clip_start))
-        prefix = "⚡ " if not any(e in clean_title for e in ("🔥", "⚡", "💡", "💰", "🚨")) else ""
-        lines.insert(0, f"Dialogue: 1,0:00:00.00,{hook_dur},TopHeader,,0,0,0,,{{\\fad(250,400)}}{prefix}{clean_title}")
+        lines.insert(0, f"Dialogue: 1,0:00:00.00,{hook_dur},TopHeader,,0,0,0,,{{\\fad(250,400)}}{clean_title}")
 
     full_content = header + "\n".join(lines) + "\n"
 

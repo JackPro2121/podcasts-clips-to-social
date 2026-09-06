@@ -18,9 +18,9 @@ class SlackNotifier:
         bot_token: Optional[str] = None,
         channel: Optional[str] = None
     ):
-        self.webhook_url = webhook_url or SLACK_WEBHOOK_URL
-        self.bot_token = bot_token or SLACK_BOT_TOKEN
-        self.channel = channel or SLACK_CHANNEL or "podcast-clip"
+        self.webhook_url = webhook_url if webhook_url is not None else SLACK_WEBHOOK_URL
+        self.bot_token = bot_token if bot_token is not None else SLACK_BOT_TOKEN
+        self.channel = channel if channel is not None else (SLACK_CHANNEL or "podcast-clip")
 
     def is_enabled(self) -> bool:
         return bool((self.webhook_url and self.webhook_url.startswith("http")) or (self.bot_token and self.bot_token.startswith("xoxb-")))
