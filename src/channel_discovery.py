@@ -244,25 +244,57 @@ def get_daily_discovery_episode(
         except Exception:
             pass
 
-    # Day-of-Week Smart Auto-Rotation for maximum CPM & audience engagement:
-    # Monday: Finance & Wealth | Tuesday: AI & Tech | Wednesday: Health & Longevity
-    # Thursday: Business & Startups | Friday: Finance & Investing
-    # Saturday: AI & Tech | Sunday: Health & Neuroscience
-    DAY_OF_WEEK_NICHES = [
-        "finance",           # Monday
-        "ai_tech",           # Tuesday
-        "health_longevity",  # Wednesday
-        "business",          # Thursday
-        "finance",           # Friday
-        "ai_tech",           # Saturday
-        "health_longevity"   # Sunday
-    ]
+# Day-of-Week Smart Auto-Rotation for maximum CPM & audience engagement:
+# Monday: Finance & Wealth | Tuesday: AI & Tech | Wednesday: Health & Longevity
+# Thursday: Business & Startups | Friday: Real Estate Investing & Wealth
+# Saturday: AI & Tech | Sunday: Health & Neuroscience
+DAY_OF_WEEK_NICHES = [
+    "finance",           # Monday
+    "ai_tech",           # Tuesday
+    "health_longevity",  # Wednesday
+    "business",          # Thursday
+    "real_estate",       # Friday
+    "ai_tech",           # Saturday
+    "health_longevity"   # Sunday
+]
+
+def resolve_daily_niche(niche: Optional[str] = None) -> str:
+    """Resolves target niche from explicit argument or day-of-week rotation."""
     if niche and niche in HIGH_CPM_NICHES:
-        selected_niche = niche
-    else:
-        import datetime
-        day_idx = datetime.datetime.utcnow().weekday()
-        selected_niche = DAY_OF_WEEK_NICHES[day_idx]
+        return niche
+    import datetime
+    day_idx = datetime.datetime.now(datetime.timezone.utc).weekday()
+    return DAY_OF_WEEK_NICHES[day_idx]
+
+def get_daily_discovery_episode(
+    niche: Optional[str] = None,
+    history_file: str = "history.txt"
+) -> str:
+    """
+    Discovers the latest high-CPM podcast episode URL automatically.
+    Prioritizes fresh episodes not previously processed in history.
+    Uses free yt-dlp search across top high-CPM channels.
+    """
+    import random
+    import yt_dlp
+    from pathlib import Path
+    from src.config import HISTORY_FILE
+
+    # Load persistent history (both JSON and legacy TXT)
+    history_data = load_history(HISTORY_FILE)
+    processed_ids = set(history_data.keys())
+
+    legacy_txt = Path(history_file)
+    if legacy_txt.exists():
+        try:
+            for line in legacy_txt.read_text(encoding="utf-8").splitlines():
+                lid = extract_youtube_id(line.strip())
+                if lid:
+                    processed_ids.add(lid)
+        except Exception:
+            pass
+
+    selected_niche = resolve_daily_niche(niche)
 
     queries = HIGH_CPM_NICHES[selected_niche]["search_queries"].copy()
     random.shuffle(queries)

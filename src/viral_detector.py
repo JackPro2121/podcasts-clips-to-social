@@ -155,6 +155,21 @@ def query_openrouter_free_models(prompt: str, key: str) -> Optional[str]:
             print(f"[-] OpenRouter {m} error: {e}")
     return None
 
+def strip_emojis(text: str) -> str:
+    """Removes all emoji characters to enforce clean signature broadcast aesthetic."""
+    emoji_pattern = re.compile(
+        "["
+        "\U00010000-\U0010ffff"
+        "\u2600-\u27bf"
+        "\u2300-\u23ff"
+        "\u2b50-\u2b55"
+        "\u200d"
+        "\ufe0f"
+        "]+",
+        flags=re.UNICODE
+    )
+    return emoji_pattern.sub(r"", text).strip()
+
 def parse_clips_json(raw_text: str, segments: List[TranscriptSegment], num_clips: int) -> List[ViralClipCandidate]:
     """Parses raw LLM JSON into validated ViralClipCandidate objects."""
     clean_text = raw_text.strip()
@@ -183,16 +198,20 @@ def parse_clips_json(raw_text: str, segments: List[TranscriptSegment], num_clips
             end = min(start + 40.0, segments[-1].end if segments else start + 40.0)
             dur = end - start
 
-        candidate_title = re.sub(r'[^\w\s\-\'\,\.\?]', '', str(c.get("title", "Viral Moment"))).strip().upper()
+        candidate_title = strip_emojis(re.sub(r'[^\w\s\-\'\,\.\?]', '', str(c.get("title", "Viral Moment"))).strip().upper())
+        clean_caption = strip_emojis(str(c.get("social_caption", "Wait until the end. #shorts")))
+        raw_hashtags = c.get("hashtags", ["#podcast", "#viral", "#shorts"])
+        clean_hashtags = [strip_emojis(str(h)).strip() for h in raw_hashtags if strip_emojis(str(h)).strip()]
+
         candidate = ViralClipCandidate(
             title=candidate_title or "VIRAL MOMENT",
             start_time=start,
             end_time=end,
             duration=dur,
             viral_score=int(c.get("viral_score", 85)),
-            hook_reason=c.get("hook_reason", "High engagement segment"),
-            social_caption=c.get("social_caption", "Wait until the end... #shorts"),
-            hashtags=c.get("hashtags", ["#podcast", "#viral", "#shorts"])
+            hook_reason=strip_emojis(str(c.get("hook_reason", "High engagement segment"))),
+            social_caption=clean_caption,
+            hashtags=clean_hashtags or ["#podcast", "#viral", "#shorts"]
         )
         candidates.append(candidate)
 
@@ -224,6 +243,7 @@ Your goal is to analyze the following podcast transcript and extract the top {nu
 4. **Optimal Duration**: Each clip MUST be strictly between 30 and 60 seconds (target: 35-50s).
 5. **Exact Timestamps**: Use the provided transcript timestamps to specify precise start_time and end_time.
 6. **Punchy Viral Title**: Give each clip an engaging, click-worthy hook title in ALL CAPS (e.g., "THE SECRET TO BETTER SLEEP", "HOW CORTISOL PEAKS", "DO THIS EVERY MORNING"). Max 5-7 words. Strictly DO NOT include any emojis or special symbols.
+7. **STRICTLY NO EMOJIS**: Under NO circumstances use emojis anywhere in titles, social captions, or hashtags. Maintain an elite, clean broadcast aesthetic.
 
 ### PODCAST TRANSCRIPT:
 {transcript_text}
@@ -239,7 +259,7 @@ Output MUST be valid JSON only matching this schema:
       "duration": 47.5,
       "viral_score": 95,
       "hook_reason": "Opens with a shocking contrarian statement about wealth.",
-      "social_caption": "This perspective changes everything. Drop your thoughts below 👇",
+      "social_caption": "This perspective changes everything. Drop your thoughts below.",
       "hashtags": ["#mindset", "#podcast", "#success", "#reels"]
     }}
   ]

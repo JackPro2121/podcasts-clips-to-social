@@ -171,21 +171,17 @@ from src.config import DOWNLOADS_DIR, APIFY_API_TOKEN, YOUTUBE_COOKIES
 
 def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[str] = None, transcript: Optional[Any] = None) -> Optional[Dict[str, Any]]:
     """
-    Downloads video using yt-dlp with iOS/Android mobile clients and optional cookie authentication.
+    Downloads video using yt-dlp with Node.js challenge solving and optional cookie authentication.
     Runs 100% free with 0 Apify compute cost.
     """
     out_template = str(target_dir / "%(id)s_%(title).50s.%(ext)s")
-    ydl_opts = {
-        'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
+    base_opts = {
+        'js_runtimes': {'node': {}},
+        'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/bestvideo+bestaudio/best',
         'outtmpl': out_template,
         'merge_output_format': 'mp4',
         'quiet': False,
         'no_warnings': True,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['ios', 'android', 'mweb', 'web_embedded']
-            }
-        },
         'postprocessors': [{
             'key': 'FFmpegVideoConvertor',
             'preferedformat': 'mp4',
@@ -198,32 +194,47 @@ def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[st
         try:
             cookie_path = target_dir / "yt_cookies.txt"
             cookie_path.write_text(YOUTUBE_COOKIES.strip(), encoding="utf-8")
-            ydl_opts['cookiefile'] = str(cookie_path)
+            base_opts['cookiefile'] = str(cookie_path)
             print("[*] Loaded YouTube cookies from environment/secret.")
         except Exception as e:
             print(f"[-] Cookie setup warning: {e}")
 
-    try:
-        print("[*] Attempting zero-cost direct download via yt-dlp (iOS/Android mobile client)...")
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url_or_path, download=True)
-            downloaded_file = ydl.prepare_filename(info)
-            if not os.path.exists(downloaded_file):
-                candidate = str(Path(downloaded_file).with_suffix('.mp4'))
-                if os.path.exists(candidate):
-                    downloaded_file = candidate
+    strategies = [
+        ("Primary (1080p stream with Node solver)", dict(base_opts)),
+    ]
+    if cookie_path:
+        opts_no_cookie = dict(base_opts)
+        opts_no_cookie.pop('cookiefile', None)
+        strategies.append(("Fallback (Without cookies)", opts_no_cookie))
 
-            print(f"[+] Successfully downloaded video via yt-dlp ($0 cost): {downloaded_file}")
-            return {
-                'video_path': Path(downloaded_file).resolve(),
-                'title': info.get('title', f"YouTube_{video_id or 'podcast'}"),
-                'duration': float(info.get('duration', 0.0)),
-                'transcript': transcript,
-                'video_id': video_id or info.get('id'),
-                'is_local': False
-            }
-    except Exception as e:
-        print(f"[-] yt-dlp direct download encountered error: {e}")
+    opts_resilient = dict(base_opts)
+    opts_resilient['format'] = 'best[height<=1080]/best'
+    opts_resilient.pop('cookiefile', None)
+    strategies.append(("Resilient Fallback (Standard best format)", opts_resilient))
+
+    try:
+        for strat_name, current_opts in strategies:
+            try:
+                print(f"[*] Attempting yt-dlp download: {strat_name}...")
+                with yt_dlp.YoutubeDL(current_opts) as ydl:
+                    info = ydl.extract_info(url_or_path, download=True)
+                    downloaded_file = ydl.prepare_filename(info)
+                    if not os.path.exists(downloaded_file):
+                        candidate = str(Path(downloaded_file).with_suffix('.mp4'))
+                        if os.path.exists(candidate):
+                            downloaded_file = candidate
+
+                    print(f"[+] Successfully downloaded video via yt-dlp ($0 cost): {downloaded_file}")
+                    return {
+                        'video_path': Path(downloaded_file).resolve(),
+                        'title': info.get('title', f"YouTube_{video_id or 'podcast'}"),
+                        'duration': float(info.get('duration', 0.0)),
+                        'transcript': transcript,
+                        'video_id': video_id or info.get('id'),
+                        'is_local': False
+                    }
+            except Exception as e:
+                print(f"[-] Strategy '{strat_name}' encountered error: {e}")
         return None
     finally:
         # Clean up temporary cookies file if created

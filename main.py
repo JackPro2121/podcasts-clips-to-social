@@ -255,11 +255,15 @@ def main():
     args = parser.parse_args()
 
     target_url = args.url
+    resolved_niche = args.niche
     if not target_url or target_url.strip().lower() in ("auto", "none", ""):
         print("[*] No URL provided. Activating Automated High-CPM Podcast Discovery...")
-        from src.channel_discovery import get_latest_high_cpm_podcast_url
-        target_niche = None if args.niche == "auto" else args.niche
-        target_url = get_latest_high_cpm_podcast_url(niche=target_niche)
+        from src.channel_discovery import get_daily_discovery_episode, resolve_daily_niche
+        resolved_niche = resolve_daily_niche(args.niche if args.niche != "auto" else None)
+        target_url = get_daily_discovery_episode(niche=resolved_niche)
+    elif resolved_niche == "auto":
+        from src.channel_discovery import resolve_daily_niche
+        resolved_niche = resolve_daily_niche()
 
     run_pipeline(
         url_or_path=target_url,
@@ -270,7 +274,7 @@ def main():
         post_to_buffer=args.post_to_buffer,
         dry_run=args.dry_run,
         watermark=args.watermark,
-        niche=args.niche
+        niche=resolved_niche
     )
 
 if __name__ == "__main__":
