@@ -99,7 +99,8 @@ class BufferClient:
         text: str,
         title: Optional[str] = None,
         channel_ids: Optional[List[str]] = None,
-        due_at: Optional[str] = None
+        due_at: Optional[str] = None,
+        source_url: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Schedules video clip on specified or all connected Buffer channels.
@@ -145,6 +146,7 @@ class BufferClient:
 
             metadata = None
             clean_title = (title or text.split("\n")[0]).strip()
+            channel_text = text
 
             if service == "youtube":
                 yt_title = clean_title
@@ -161,6 +163,9 @@ class BufferClient:
                         "privacy": "public"
                     }
                 }
+                if "#shorts" not in channel_text.lower():
+                    channel_text = f"{channel_text}\n\n#Shorts #Podcast"
+
             elif service == "instagram":
                 metadata = {
                     "instagram": {
@@ -168,6 +173,9 @@ class BufferClient:
                         "shouldShareToFeed": True
                     }
                 }
+                if "#reels" not in channel_text.lower():
+                    channel_text = f"{channel_text}\n\n#reels #viral #podcastclips #mindset #motivation"
+
             elif service == "pinterest":
                 boards = self.get_pinterest_boards(channel_id)
                 if not boards:
@@ -181,10 +189,12 @@ class BufferClient:
                         "boardServiceId": board_service_id
                     }
                 }
+                if source_url:
+                    channel_text = f"{channel_text}\n\n👉 Watch the full episode: {source_url}"
 
             post_input = {
                 "channelId": channel_id,
-                "text": text,
+                "text": channel_text,
                 "schedulingType": "automatic",
                 "mode": "customScheduled" if due_at else "addToQueue",
                 "needsApproval": False,

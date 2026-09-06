@@ -3,6 +3,8 @@ import sys
 import argparse
 import json
 import time
+import re
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 import requests
 
@@ -164,22 +166,81 @@ def extract_high_cpm_channels(
 
 def get_latest_high_cpm_podcast_url(
     niche: Optional[str] = None,
-    history_file: str = "downloads/processed_episodes.txt"
+    history_file: str = "history.txt"
+) -> str:
+    """Alias for get_daily_discovery_episode for backwards compatibility."""
+    return get_daily_discovery_episode(niche=niche, history_file=history_file)
+
+def extract_youtube_id(url_or_id: str) -> Optional[str]:
+    """Extracts canonical 11-character YouTube video ID."""
+    if not url_or_id:
+        return None
+    if len(url_or_id) == 11 and re.match(r"^[0-9A-Za-z_-]{11}$", url_or_id):
+        return url_or_id
+    match = re.search(r"(?:v=|\/|embed\/|shorts\/)([0-9A-Za-z_-]{11})", url_or_id)
+    return match.group(1) if match else None
+
+def load_history(history_file_path: Optional[Path] = None) -> Dict[str, Any]:
+    """Loads JSON history of processed video IDs."""
+    from src.config import HISTORY_FILE
+    target = history_file_path or HISTORY_FILE
+    if target.exists():
+        try:
+            with open(target, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+def record_history(video_url: str, title: str, niche: str, history_file_path: Optional[Path] = None) -> None:
+    """Records a processed video to JSON history file."""
+    import datetime
+    from src.config import HISTORY_FILE
+    target = history_file_path or HISTORY_FILE
+    vid = extract_youtube_id(video_url)
+    if not vid:
+        return
+    history = load_history(target)
+    history[vid] = {
+        "title": title,
+        "url": f"https://www.youtube.com/watch?v={vid}",
+        "niche": niche,
+        "processed_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+    }
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with open(target, "w", encoding="utf-8") as f:
+            json.dump(history, f, indent=2, ensure_ascii=False)
+        print(f"[+] Recorded '{vid}' to persistent history: {target}")
+    except Exception as e:
+        print(f"[-] Failed to update history: {e}")
+
+def get_daily_discovery_episode(
+    niche: Optional[str] = None,
+    history_file: str = "history.txt"
 ) -> str:
     """
     Discovers the latest high-CPM podcast episode URL automatically.
-    Prioritizes fresh episodes not previously processed.
+    Prioritizes fresh episodes not previously processed in history.
     Uses free yt-dlp search across top high-CPM channels.
     """
     import random
     import yt_dlp
     from pathlib import Path
+    from src.config import HISTORY_FILE
 
-    history_path = Path(history_file)
-    processed_urls = set()
-    if history_path.exists():
+    # Load persistent history (both JSON and legacy TXT)
+    history_data = load_history(HISTORY_FILE)
+    processed_ids = set(history_data.keys())
+
+    legacy_txt = Path(history_file)
+    if legacy_txt.exists():
         try:
-            processed_urls = set(history_path.read_text(encoding="utf-8").splitlines())
+            for line in legacy_txt.read_text(encoding="utf-8").splitlines():
+                lid = extract_youtube_id(line.strip())
+                if lid:
+                    processed_ids.add(lid)
         except Exception:
             pass
 
@@ -207,6 +268,7 @@ def get_latest_high_cpm_podcast_url(
     random.shuffle(queries)
 
     print(f"[*] Auto-Discovering latest episodes in niche: {HIGH_CPM_NICHES[selected_niche]['title']} (Day rotation: {selected_niche})")
+    print(f"[*] Known processed videos count: {len(processed_ids)}")
 
     ydl_opts = {
         "quiet": True,
@@ -220,25 +282,25 @@ def get_latest_high_cpm_podcast_url(
             try:
                 res = ydl.extract_info(f"ytsearch5:{q}", download=False)
                 for entry in res.get("entries", []):
-                    vurl = entry.get("url") or (f"https://www.youtube.com/watch?v={entry.get('id')}" if entry.get("id") else None)
+                    vid = entry.get("id")
+                    vurl = entry.get("url") or (f"https://www.youtube.com/watch?v={vid}" if vid else None)
                     vtitle = entry.get("title", "Unknown Title")
                     duration = entry.get("duration") or 0
+                    
+                    # Canonical ID check
+                    canon_id = extract_youtube_id(vurl or vid or "")
+                    if canon_id and canon_id in processed_ids:
+                        continue
+                    
                     # Filter for real podcast episodes (> 10 mins)
-                    if vurl and duration > 600 and vurl not in processed_urls:
-                        candidate_videos.append((vurl, vtitle))
+                    if vurl and duration > 600:
+                        candidate_videos.append((vurl, vtitle, canon_id))
             except Exception as e:
                 print(f"[-] Search query error for '{q}': {e}")
 
     if candidate_videos:
-        chosen_url, chosen_title = candidate_videos[0]
+        chosen_url, chosen_title, chosen_id = candidate_videos[0]
         print(f"[+] Found fresh high-CPM podcast episode: '{chosen_title}' ({chosen_url})")
-        # Record to history
-        try:
-            history_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(history_path, "a", encoding="utf-8") as f:
-                f.write(f"{chosen_url}\n")
-        except Exception:
-            pass
         return chosen_url
 
     # Fallback to popular evergreen business episode if nothing found

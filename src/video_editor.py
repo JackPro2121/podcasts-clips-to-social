@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 from src.config import (
     OUTPUT_WIDTH, OUTPUT_HEIGHT, FPS, VIDEO_CRF, AUDIO_BITRATE,
-    TARGET_LUFS, TARGET_TRUE_PEAK, HIGHPASS_FREQ, VOCAL_PRESENCE_FREQ, VOCAL_AIR_FREQ, CLIPS_DIR
+    TARGET_LUFS, TARGET_TRUE_PEAK, HIGHPASS_FREQ, VOCAL_PRESENCE_FREQ, VOCAL_AIR_FREQ, CLIPS_DIR,
+    ENABLE_PUNCH_ZOOM, ENABLE_BGM, AUDIO_ASSETS_DIR
 )
 from src.face_tracker import FramingDecision
 
@@ -25,7 +26,7 @@ def build_video_filtergraph(
 ) -> str:
     """
     Constructs the complete FFmpeg video filtergraph based on the framing decision:
-    - single_smooth: Face-centered 9:16 crop
+    - single_smooth: Face-centered 9:16 crop with subtle dynamic punch zoom
     - split_screen: Dual-speaker stacked layout (Host top / Guest bottom)
     - blur_stack: Full 16:9 centered over ambient blurred/darkened background
     """
@@ -36,10 +37,13 @@ def build_video_filtergraph(
     # 2. S-Curve Dynamic Color Grading: contrast=1.12, brightness=0.01, saturation=1.18
     studio_grade = "unsharp=lx=7:ly=7:la=0.95:cx=5:cy=5:ca=0.55,eq=contrast=1.12:brightness=0.01:saturation=1.18"
 
+    # Dynamic Retention Punch Zoom: subtle 1.10x zoom cut every 7 seconds (4.2s normal, 2.8s punch-in)
+    punch_zoom = ",crop='if(lt(mod(t,7),4.2),1080,980)':'if(lt(mod(t,7),4.2),1920,1742)':(iw-ow)/2:(ih-oh)/2.5,scale=1080:1920:flags=lanczos" if ENABLE_PUNCH_ZOOM else ""
+
     if framing.mode == "dynamic_cut" and framing.crop_x_expr:
         # Target aspect ratio 9:16 with dynamic multi-camera angle switching
         crop_w = int(framing.video_height * (9 / 16))
-        v_filter = f"[0:v]crop={crop_w}:{framing.video_height}:'{framing.crop_x_expr}':0,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos,{studio_grade},fps={FPS}[base]"
+        v_filter = f"[0:v]crop={crop_w}:{framing.video_height}:'{framing.crop_x_expr}':0,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos,{studio_grade}{punch_zoom},fps={FPS}[base]"
 
     elif framing.mode == "single_smooth":
         # Target aspect ratio 9:16
@@ -47,7 +51,7 @@ def build_video_filtergraph(
         # Ensure center_x keeps crop window within bounds
         cx = framing.smoothed_center_x or (framing.video_width // 2)
         crop_x = max(0, min(cx - crop_w // 2, framing.video_width - crop_w))
-        v_filter = f"[0:v]crop={crop_w}:{framing.video_height}:{crop_x}:0,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos,{studio_grade},fps={FPS}[base]"
+        v_filter = f"[0:v]crop={crop_w}:{framing.video_height}:{crop_x}:0,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos,{studio_grade}{punch_zoom},fps={FPS}[base]"
 
     elif framing.mode == "split_screen" and framing.speaker1_box and framing.speaker2_box:
         # Split-screen stack: Top pane (1080x960), Bottom pane (1080x960)
@@ -111,11 +115,12 @@ def render_viral_clip(
     output_clip_path: Path,
     framing: FramingDecision,
     ass_subtitle_path: Optional[Path] = None,
-    burn_subtitles: bool = True
+    burn_subtitles: bool = True,
+    bgm_path: Optional[Path] = None
 ) -> Path:
     """
     Executes FFmpeg with exact start/end cut, audio mastering, video framing,
-    and subtitle burning.
+    subtitle burning, and optional ambient BGM ducking.
     """
     duration = end_time - start_time
     output_clip_path.parent.mkdir(parents=True, exist_ok=True)
@@ -136,7 +141,22 @@ def render_viral_clip(
     except Exception:
         has_audio = True
 
-    if has_audio:
+    active_bgm = bgm_path or (AUDIO_ASSETS_DIR / "ambient_lofi_loop.mp3")
+    use_bgm = ENABLE_BGM and active_bgm and active_bgm.exists()
+
+    input_args = ["-ss", f"{start_time:.2f}", "-t", f"{duration:.2f}", "-i", str(source_video_path)]
+    if use_bgm:
+        input_args.extend(["-stream_loop", "-1", "-i", str(active_bgm)])
+
+    if has_audio and use_bgm:
+        combined_filter = (
+            f"{video_filters};"
+            f"[0:a]highpass=f={HIGHPASS_FREQ},equalizer=f={VOCAL_PRESENCE_FREQ}:width_type=h:width=1000:g=2.5,equalizer=f={VOCAL_AIR_FREQ}:width_type=h:width=2500:g=1.8[voice];"
+            f"[1:a]volume=-22dB[bgm_duck];"
+            f"[voice][bgm_duck]amix=inputs=2:duration=first:dropout_transition=2,loudnorm=I={TARGET_LUFS}:TP={TARGET_TRUE_PEAK}:LRA=11[outa]"
+        )
+        map_args = ["-map", "[outv]", "-map", "[outa]"]
+    elif has_audio:
         combined_filter = f"{video_filters};[0:a]{audio_filters}[outa]"
         map_args = ["-map", "[outv]", "-map", "[outa]"]
     else:
@@ -145,9 +165,7 @@ def render_viral_clip(
 
     cmd = [
         "ffmpeg", "-y",
-        "-ss", f"{start_time:.2f}",
-        "-t", f"{duration:.2f}",
-        "-i", str(source_video_path),
+        *input_args,
         "-filter_complex", combined_filter,
         *map_args,
         "-c:v", "libx264",

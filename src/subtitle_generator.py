@@ -55,7 +55,7 @@ PlayResY: {OUTPUT_HEIGHT}
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,{font_name},{font_size},{primary_col},&H000000FF,{outline_col},{shadow_col},-1,0,0,0,100,100,1.5,0,1,{outline_w},{shadow_d},{alignment},100,100,{margin_v},1
-Style: TopHeader,Trebuchet MS,44,&H00FFFFFF,&H000000FF,&H0084323B,&H00000000,-1,0,0,0,100,100,1.2,0,3,16,0,8,100,100,220,1
+Style: TopHeader,Montserrat Black,34,&H00FFFFFF,&H000000FF,&H600A0A0A,&H00000000,-1,0,0,0,100,100,1.2,0,3,14,0,8,100,100,220,1
 Style: Watermark,Arial,28,&H99FFFFFF,&H000000FF,&H99000000,&H00000000,-1,0,0,0,100,100,1.2,0,1,1.5,0.0,8,60,60,315,1
 
 [Events]
@@ -152,17 +152,18 @@ def create_styled_ass_subtitles(
     if active_watermark:
         lines.insert(0, f"Dialogue: 2,0:00:00.00,{dur_str},Watermark,,0,0,0,,{active_watermark.strip()}")
 
-    # If a viral hook title is provided, burn it persistently at the top safe zone
+    # If a viral hook title is provided, burn it as a dynamic top capsule badge for the first 6.5 seconds
     if header_title:
         clean_title = header_title.strip().upper()
         # If title is long, wrap it at a balanced word boundary to fit cleanly inside 1080px portrait
-        if len(clean_title) > 24 and " " in clean_title:
+        if len(clean_title) > 26 and " " in clean_title:
             words = clean_title.split()
             mid = len(words) // 2
             clean_title = " ".join(words[:mid]) + "\\N" + " ".join(words[mid:])
         
-        # Clean title without star emojis
-        lines.insert(0, f"Dialogue: 1,0:00:00.00,{dur_str},TopHeader,,0,0,0,,{clean_title}")
+        hook_dur = format_ass_timestamp(min(6.5, clip_end - clip_start))
+        prefix = "⚡ " if not any(e in clean_title for e in ("🔥", "⚡", "💡", "💰", "🚨")) else ""
+        lines.insert(0, f"Dialogue: 1,0:00:00.00,{hook_dur},TopHeader,,0,0,0,,{{\\fad(250,400)}}{prefix}{clean_title}")
 
     full_content = header + "\n".join(lines) + "\n"
 

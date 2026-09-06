@@ -18,6 +18,8 @@ from src.subtitle_generator import create_styled_ass_subtitles
 from src.video_editor import render_viral_clip
 from src.github_uploader import upload_clip_to_github_release
 from src.buffer_client import BufferClient
+from src.slack_notifier import SlackNotifier
+from src.channel_discovery import record_history
 
 def run_pipeline(
     url_or_path: str,
@@ -27,7 +29,8 @@ def run_pipeline(
     subtitles_mode: str = "auto",
     post_to_buffer: bool = False,
     dry_run: bool = False,
-    watermark: Optional[str] = None
+    watermark: Optional[str] = None,
+    niche: str = "auto"
 ):
     print("=" * 70)
     print("🚀 AUTONOMOUS AI PODCAST CLIPPER & BUFFER SOCIAL PUBLISHER ($0)")
@@ -129,7 +132,7 @@ def run_pipeline(
     # Step 6: Permanent Hosting & Buffer Social Distribution
     print("\n--- [6/6] PERMANENT HOSTING & BUFFER SOCIAL PUBLISHING ---")
     buffer_client = BufferClient() if post_to_buffer else None
-
+    clips_report = []
     for item in rendered_clips:
         clip_path = item["path"]
         moment = item["moment"]
@@ -138,15 +141,27 @@ def run_pipeline(
         direct_url = upload_clip_to_github_release(clip_path)
 
         # If Buffer posting requested and public URL exists:
+        buffer_status = "Local Only"
         if post_to_buffer and direct_url:
             caption_text = f"{moment.title}\n\n{moment.social_caption}\n\n{' '.join(moment.hashtags)}"
-            buffer_client.schedule_video_post(
+            schedule_results = buffer_client.schedule_video_post(
                 video_url=direct_url,
                 text=caption_text,
-                title=moment.title
+                title=moment.title,
+                source_url=url_or_path
             )
+            buffer_status = "Scheduled" if schedule_results else "Failed"
         elif post_to_buffer and not direct_url:
             print("[-] Cannot post to Buffer because direct video URL is not available.")
+            buffer_status = "No URL"
+
+        clips_report.append({
+            "title": moment.title,
+            "virality_score": moment.virality_score,
+            "duration": moment.end_time - moment.start_time,
+            "download_url": direct_url or "",
+            "buffer_status": buffer_status
+        })
 
     # Step 7: Storage Hygiene: Auto-delete releases older than 5 days
     print("\n--- [7/7] STORAGE HYGIENE: AUTO-CLEANUP RELEASES > 5 DAYS ---")
@@ -155,6 +170,24 @@ def run_pipeline(
         clean_old_releases(days=5)
     except Exception as e:
         print(f"[-] Auto-cleanup warning: {e}")
+
+    # Record to persistent zero-duplicate history
+    try:
+        record_history(video_url=url_or_path, title=video_title, niche=niche)
+    except Exception as e:
+        print(f"[-] History record warning: {e}")
+
+    # Dispatch Slack Operational Report Card
+    try:
+        slack = SlackNotifier()
+        slack.send_run_report(
+            podcast_title=video_title,
+            podcast_url=url_or_path,
+            niche=niche,
+            clips=clips_report
+        )
+    except Exception as e:
+        print(f"[-] Slack alert warning: {e}")
 
     print("\n" + "=" * 70)
     print("✨ ALL CLIPS PROCESSED SUCCESSFULLY!")
@@ -235,7 +268,8 @@ def main():
         subtitles_mode=args.subtitles,
         post_to_buffer=args.post_to_buffer,
         dry_run=args.dry_run,
-        watermark=args.watermark
+        watermark=args.watermark,
+        niche=args.niche
     )
 
 if __name__ == "__main__":

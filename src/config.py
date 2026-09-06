@@ -10,11 +10,17 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DOWNLOADS_DIR = BASE_DIR / "downloads"
 CLIPS_DIR = BASE_DIR / "clips"
 SUBTITLES_DIR = BASE_DIR / "subtitles"
+DATA_DIR = BASE_DIR / "data"
+ASSETS_DIR = BASE_DIR / "assets"
+AUDIO_ASSETS_DIR = ASSETS_DIR / "audio"
+HISTORY_FILE = DATA_DIR / "history.json"
 
-# Ensure output directories exist
+# Ensure directories exist
 DOWNLOADS_DIR.mkdir(exist_ok=True, parents=True)
 CLIPS_DIR.mkdir(exist_ok=True, parents=True)
 SUBTITLES_DIR.mkdir(exist_ok=True, parents=True)
+DATA_DIR.mkdir(exist_ok=True, parents=True)
+AUDIO_ASSETS_DIR.mkdir(exist_ok=True, parents=True)
 
 # API Keys & Credentials
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -51,6 +57,12 @@ CHOCODATA_API_KEY = (
     ""
 )
 YOUTUBE_COOKIES = os.getenv("YOUTUBE_COOKIES", "")
+SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
+
+# Visual Retention & Audio Features
+ENABLE_PUNCH_ZOOM = os.getenv("ENABLE_PUNCH_ZOOM", "true").lower() in ("true", "1", "yes")
+ENABLE_TOP_HOOK_BADGE = os.getenv("ENABLE_TOP_HOOK_BADGE", "true").lower() in ("true", "1", "yes")
+ENABLE_BGM = os.getenv("ENABLE_BGM", "false").lower() in ("true", "1", "yes")
 
 # Video & Format Defaults (Ultra HD 60FPS Broadcast Studio)
 OUTPUT_WIDTH = 1080
