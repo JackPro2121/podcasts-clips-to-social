@@ -142,7 +142,8 @@ def run_pipeline(
             caption_text = f"{moment.title}\n\n{moment.social_caption}\n\n{' '.join(moment.hashtags)}"
             buffer_client.schedule_video_post(
                 video_url=direct_url,
-                text=caption_text
+                text=caption_text,
+                title=moment.title
             )
         elif post_to_buffer and not direct_url:
             print("[-] Cannot post to Buffer because direct video URL is not available.")

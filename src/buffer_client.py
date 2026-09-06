@@ -73,20 +73,25 @@ class BufferClient:
         self,
         video_url: str,
         text: str,
-        channel_ids: Optional[List[str]] = None
+        title: Optional[str] = None,
+        channel_ids: Optional[List[str]] = None,
+        due_at: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Schedules video clip on specified or all connected Buffer channels.
-        Uses the createPost mutation with assets [{ video: { url: ... } }].
+        Uses the createPost mutation with assets [{ video: { url: ... } }],
+        needsApproval: False, and proper platform metadata (e.g. YouTube).
         """
         if not self.token:
             print("[-] Cannot post to Buffer: BUFFER_ACCESS_TOKEN is missing.")
             return []
 
+        connected = self.get_channels()
+        channel_service_map = {ch["id"]: ch.get("service", "youtube") for ch in connected}
+
         target_channels = channel_ids or BUFFER_CHANNEL_IDS
         if not target_channels:
             print("[*] No channel IDs specified. Discovering connected channels from Buffer account...")
-            connected = self.get_channels()
             if not connected:
                 print("[-] No channels found in Buffer account. Connect your TikTok/Instagram/Shorts on Buffer.")
                 return []
@@ -100,6 +105,7 @@ class BufferClient:
               post {
                 id
                 status
+                dueAt
               }
             }
             ... on MutationError {
@@ -111,27 +117,56 @@ class BufferClient:
 
         results = []
         for channel_id in target_channels:
+            service = channel_service_map.get(channel_id, "youtube")
+
+            # Prepare YouTube-specific metadata if posting to YouTube
+            metadata = None
+            if service == "youtube":
+                clean_title = (title or text.split("\n")[0]).strip()
+                if "#shorts" not in clean_title.lower():
+                    clean_title = f"{clean_title} #shorts"
+                if len(clean_title) > 95:
+                    clean_title = clean_title[:90] + "... #shorts"
+
+                metadata = {
+                    "youtube": {
+                        "title": clean_title,
+                        "categoryId": "22",
+                        "madeForKids": False,
+                        "privacy": "public"
+                    }
+                }
+
+            post_input = {
+                "channelId": channel_id,
+                "text": text,
+                "schedulingType": "automatic",
+                "mode": "customScheduled" if due_at else "addToQueue",
+                "needsApproval": False,
+                "assets": [
+                    {
+                        "video": {
+                            "url": video_url
+                        }
+                    }
+                ]
+            }
+
+            if due_at:
+                post_input["dueAt"] = due_at
+
+            if metadata:
+                post_input["metadata"] = metadata
+
             payload = {
                 "query": mutation,
                 "variables": {
-                    "input": {
-                        "channelId": channel_id,
-                        "text": text,
-                        "schedulingType": "automatic",
-                        "mode": "addToQueue",
-                        "assets": [
-                            {
-                                "video": {
-                                    "url": video_url
-                                }
-                            }
-                        ]
-                    }
+                    "input": post_input
                 }
             }
 
             try:
-                print(f"[*] Dispatching video to Buffer channel: {channel_id}...")
+                print(f"[*] Dispatching video to Buffer channel: {channel_id} ({service})...")
                 res = requests.post(
                     BUFFER_GRAPHQL_ENDPOINT,
                     headers=self.headers,
@@ -147,7 +182,8 @@ class BufferClient:
 
                 post_data = res_data.get("data", {}).get("createPost", {})
                 if "post" in post_data:
-                    print(f"[+] Successfully queued post on Buffer channel {channel_id}! Post ID: {post_data['post'].get('id')}")
+                    post_info = post_data["post"]
+                    print(f"[+] Successfully queued post on Buffer channel {channel_id}! Post ID: {post_info.get('id')} (Status: {post_info.get('status')})")
                 else:
                     error_msg = post_data.get("message", res.text)
                     print(f"[-] Buffer rejected post on {channel_id}: {error_msg}")
@@ -157,3 +193,4 @@ class BufferClient:
                 results.append({"channel_id": channel_id, "error": str(e)})
 
         return results
+
