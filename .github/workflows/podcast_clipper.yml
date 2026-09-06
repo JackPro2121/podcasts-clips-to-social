@@ -1,12 +1,31 @@
 name: Podcast Viral Clips to Social (Buffer)
 
 on:
+  schedule:
+    # Runs daily at 10:00 UTC (06:00 AM EDT / New York).
+    # Generates 3 clips and queues them for Buffer slots:
+    # 08:30 AM EDT, 01:15 PM EDT, 07:30 PM EDT (US/UK Prime Time).
+    - cron: '0 10 * * *'
+
   workflow_dispatch:
     inputs:
       video_url:
-        description: 'YouTube Video URL, Podcast Episode Link, or Direct MP4 URL'
-        required: true
+        description: 'YouTube Video URL (Leave blank to auto-discover latest high-CPM podcast)'
+        required: false
+        default: ''
         type: string
+      niche:
+        description: 'High-CPM Niche for Auto-Discovery (if video_url is empty)'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+          - 'auto'
+          - 'finance'
+          - 'business'
+          - 'ai_tech'
+          - 'health_longevity'
+          - 'real_estate'
       num_clips:
         description: 'Number of viral clips to extract (1 to 5)'
         required: true
@@ -98,21 +117,41 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
-          POST_FLAG=""
-          if [ "${{ github.event.inputs.post_to_buffer }}" = "true" ]; then
-            POST_FLAG="--post-to-buffer"
+          # Determine execution mode (scheduled cron vs manual dispatch)
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "[*] Triggered by daily schedule! Running automated High-CPM discovery..."
+            python main.py \
+              --num-clips 3 \
+              --framing auto \
+              --subtitle-style hormozi \
+              --subtitles auto \
+              --watermark "@allinonepodcastsss" \
+              --post-to-buffer
+          else
+            echo "[*] Triggered manually via workflow_dispatch."
+            POST_FLAG=""
+            if [ "${{ github.event.inputs.post_to_buffer }}" = "true" ]; then
+              POST_FLAG="--post-to-buffer"
+            fi
+
+            WATERMARK="${{ github.event.inputs.watermark || '@allinonepodcastsss' }}"
+            URL_ARG=""
+            if [ -n "${{ github.event.inputs.video_url }}" ]; then
+              URL_ARG="--url '${{ github.event.inputs.video_url }}'"
+            fi
+
+            NICHE="${{ github.event.inputs.niche || 'auto' }}"
+
+            eval python main.py \
+              $URL_ARG \
+              --niche "$NICHE" \
+              --num-clips "${{ github.event.inputs.num_clips || '3' }}" \
+              --framing "${{ github.event.inputs.framing || 'auto' }}" \
+              --subtitle-style "${{ github.event.inputs.subtitle_style || 'hormozi' }}" \
+              --subtitles "${{ github.event.inputs.subtitles_mode || 'auto' }}" \
+              --watermark "$WATERMARK" \
+              $POST_FLAG
           fi
-
-          WATERMARK="${{ github.event.inputs.watermark || '@allinonepodcastsss' }}"
-
-          python main.py \
-            --url "${{ github.event.inputs.video_url }}" \
-            --num-clips "${{ github.event.inputs.num_clips }}" \
-            --framing "${{ github.event.inputs.framing }}" \
-            --subtitle-style "${{ github.event.inputs.subtitle_style }}" \
-            --subtitles "${{ github.event.inputs.subtitles_mode }}" \
-            --watermark "$WATERMARK" \
-            $POST_FLAG
 
       - name: Upload Output Clips as Artifacts
         if: always()

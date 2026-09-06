@@ -162,6 +162,72 @@ def extract_high_cpm_channels(
         print(f"[-] Exception during channel discovery: {e}")
         return []
 
+def get_latest_high_cpm_podcast_url(
+    niche: Optional[str] = None,
+    history_file: str = "downloads/processed_episodes.txt"
+) -> str:
+    """
+    Discovers the latest high-CPM podcast episode URL automatically.
+    Prioritizes fresh episodes not previously processed.
+    Uses free yt-dlp search across top high-CPM channels.
+    """
+    import random
+    import yt_dlp
+    from pathlib import Path
+
+    history_path = Path(history_file)
+    processed_urls = set()
+    if history_path.exists():
+        try:
+            processed_urls = set(history_path.read_text(encoding="utf-8").splitlines())
+        except Exception:
+            pass
+
+    # Select niche queries
+    selected_niche = niche if niche in HIGH_CPM_NICHES else random.choice(list(HIGH_CPM_NICHES.keys()))
+    queries = HIGH_CPM_NICHES[selected_niche]["search_queries"].copy()
+    random.shuffle(queries)
+
+    print(f"[*] Auto-Discovering latest episodes in niche: {HIGH_CPM_NICHES[selected_niche]['title']}")
+
+    ydl_opts = {
+        "quiet": True,
+        "extract_flat": True,
+        "default_search": "ytsearch5"
+    }
+
+    candidate_videos = []
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        for q in queries[:2]:
+            try:
+                res = ydl.extract_info(f"ytsearch5:{q}", download=False)
+                for entry in res.get("entries", []):
+                    vurl = entry.get("url") or (f"https://www.youtube.com/watch?v={entry.get('id')}" if entry.get("id") else None)
+                    vtitle = entry.get("title", "Unknown Title")
+                    duration = entry.get("duration") or 0
+                    # Filter for real podcast episodes (> 10 mins)
+                    if vurl and duration > 600 and vurl not in processed_urls:
+                        candidate_videos.append((vurl, vtitle))
+            except Exception as e:
+                print(f"[-] Search query error for '{q}': {e}")
+
+    if candidate_videos:
+        chosen_url, chosen_title = candidate_videos[0]
+        print(f"[+] Found fresh high-CPM podcast episode: '{chosen_title}' ({chosen_url})")
+        # Record to history
+        try:
+            history_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(history_path, "a", encoding="utf-8") as f:
+                f.write(f"{chosen_url}\n")
+        except Exception:
+            pass
+        return chosen_url
+
+    # Fallback to popular evergreen business episode if nothing found
+    fallback = "https://www.youtube.com/watch?v=UF8uR6Z6KLc"
+    print(f"[*] Defaulting to verified episode: {fallback}")
+    return fallback
+
 def main():
     parser = argparse.ArgumentParser(
         description="High-CPM Podcast Channel Discovery Tool powered by Apify"

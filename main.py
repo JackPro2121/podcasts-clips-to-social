@@ -167,8 +167,15 @@ def main():
     )
     parser.add_argument(
         "--url", "-u",
-        required=True,
-        help="YouTube video URL, podcast link, or path to local video file."
+        required=False,
+        default=None,
+        help="YouTube video URL, podcast link, or path to local video file. If omitted, automatically discovers top trending high-CPM podcast."
+    )
+    parser.add_argument(
+        "--niche",
+        choices=["finance", "business", "ai_tech", "health_longevity", "real_estate", "auto"],
+        default="auto",
+        help="Target high-CPM niche for automatic podcast discovery (default: auto)."
     )
     parser.add_argument(
         "--num-clips", "-n",
@@ -213,8 +220,15 @@ def main():
 
     args = parser.parse_args()
 
+    target_url = args.url
+    if not target_url or target_url.strip().lower() in ("auto", "none", ""):
+        print("[*] No URL provided. Activating Automated High-CPM Podcast Discovery...")
+        from src.channel_discovery import get_latest_high_cpm_podcast_url
+        target_niche = None if args.niche == "auto" else args.niche
+        target_url = get_latest_high_cpm_podcast_url(niche=target_niche)
+
     run_pipeline(
-        url_or_path=args.url,
+        url_or_path=target_url,
         num_clips=args.num_clips,
         framing_mode=args.framing,
         subtitle_style=args.subtitle_style,
@@ -226,3 +240,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
