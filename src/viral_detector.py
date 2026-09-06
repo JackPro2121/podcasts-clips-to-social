@@ -1,6 +1,7 @@
 import json
 import re
 import time
+import requests
 import warnings
 from typing import List, Optional
 from pydantic import BaseModel, Field
@@ -19,7 +20,7 @@ except ImportError:
         except ImportError:
             legacy_genai = None
 
-from src.config import GEMINI_API_KEY
+from src.config import GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY
 from src.transcriber import TranscriptSegment
 
 class ViralClipCandidate(BaseModel):
@@ -48,20 +49,8 @@ def format_transcript_with_timestamps(segments: List[TranscriptSegment], max_cha
         lines.append(line)
     return "\n".join(lines)
 
-def detect_viral_moments(
-    segments: List[TranscriptSegment],
-    num_clips: int = 3,
-    api_key: Optional[str] = None
-) -> List[ViralClipCandidate]:
-    """
-    Uses Google Gemini Flash (Free Tier) to identify high-retention viral moments.
-    Returns sorted list of top viral clip candidates.
-    """
-    key = api_key or GEMINI_API_KEY
-    if not key:
-        print("[!] GEMINI_API_KEY is not set. Falling back to heuristic/rule-based moment detector.")
-        return fallback_rule_based_detector(segments, num_clips)
-
+def query_gemini_models(prompt: str, key: str) -> Optional[str]:
+    """Queries Google Gemini Flash free tier with exponential retry backoff."""
     models_to_try = [
         "gemini-2.0-flash",
         "gemini-2.0-flash-lite",
@@ -69,6 +58,158 @@ def detect_viral_moments(
         "gemini-1.5-flash-8b",
         "gemini-2.5-flash"
     ]
+    for model_name in models_to_try:
+        print(f"[*] Trying Gemini Flash ({model_name})...")
+        for attempt in range(3):
+            try:
+                if HAS_NEW_GENAI:
+                    client = genai.Client(api_key=key)
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config=genai_types.GenerateContentConfig(
+                            temperature=0.4,
+                            response_mime_type="application/json"
+                        )
+                    )
+                    raw = response.text.strip()
+                elif legacy_genai is not None:
+                    legacy_genai.configure(api_key=key)
+                    model = legacy_genai.GenerativeModel(model_name)
+                    response = model.generate_content(
+                        prompt,
+                        generation_config=legacy_genai.GenerationConfig(
+                            temperature=0.4,
+                            response_mime_type="application/json"
+                        )
+                    )
+                    raw = response.text.strip()
+                else:
+                    return None
+
+                if raw and len(raw) > 20:
+                    return raw
+            except Exception as e:
+                err_str = str(e)
+                if ("503" in err_str or "429" in err_str or "UNAVAILABLE" in err_str) and attempt < 2:
+                    wait_sec = 2 ** (attempt + 1)
+                    print(f"[-] Model {model_name} busy ({e}). Retrying in {wait_sec}s...")
+                    time.sleep(wait_sec)
+                else:
+                    print(f"[-] Model {model_name} failed: {e}")
+                    break
+    return None
+
+def query_groq_free_models(prompt: str, key: str) -> Optional[str]:
+    """Queries Groq free tier models (ultra-fast inference, $0 budget)."""
+    models = ["groq/compound-mini", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    for m in models:
+        print(f"[*] Trying Groq Free Model ({m})...")
+        try:
+            payload = {
+                "model": m,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3,
+                "response_format": {"type": "json_object"}
+            }
+            r = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=25)
+            if r.status_code == 200:
+                content = r.json()["choices"][0]["message"]["content"]
+                if content and len(content) > 20:
+                    print(f"[+] Groq free model ({m}) returned viral moments successfully!")
+                    return content
+            else:
+                print(f"[-] Groq {m} returned status {r.status_code}")
+        except Exception as e:
+            print(f"[-] Groq {m} error: {e}")
+    return None
+
+def query_openrouter_free_models(prompt: str, key: str) -> Optional[str]:
+    """Queries OpenRouter verified 100% free models (:free tier)."""
+    models = ["minimax/minimax-m3:free", "minimax/minimax-m2.7:free", "liquid/lfm-2.5-2.6b:free"]
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/JackPro2121/podcasts-clips-to-social",
+        "X-Title": "Podcast Clipper"
+    }
+    for m in models:
+        print(f"[*] Trying OpenRouter Free Model ({m})...")
+        try:
+            payload = {
+                "model": m,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3,
+                "response_format": {"type": "json_object"}
+            }
+            r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=25)
+            if r.status_code == 200:
+                content = r.json()["choices"][0]["message"]["content"]
+                if content and len(content) > 20:
+                    print(f"[+] OpenRouter free model ({m}) returned viral moments successfully!")
+                    return content
+            else:
+                print(f"[-] OpenRouter {m} returned status {r.status_code}")
+        except Exception as e:
+            print(f"[-] OpenRouter {m} error: {e}")
+    return None
+
+def parse_clips_json(raw_text: str, segments: List[TranscriptSegment], num_clips: int) -> List[ViralClipCandidate]:
+    """Parses raw LLM JSON into validated ViralClipCandidate objects."""
+    clean_text = raw_text.strip()
+    if clean_text.startswith("```json"):
+        clean_text = clean_text[7:]
+    if clean_text.startswith("```"):
+        clean_text = clean_text[3:]
+    if clean_text.endswith("```"):
+        clean_text = clean_text[:-3]
+
+    parsed = json.loads(clean_text.strip())
+    clips_data = parsed.get("clips", [])
+    
+    candidates = []
+    for c in clips_data:
+        start = float(c.get("start_time", 0.0))
+        end = float(c.get("end_time", start + 40.0))
+        if end <= start:
+            end = start + 40.0
+        
+        dur = end - start
+        if dur > 65.0:
+            end = start + 55.0
+            dur = 55.0
+        elif dur < 25.0:
+            end = min(start + 40.0, segments[-1].end if segments else start + 40.0)
+            dur = end - start
+
+        candidate = ViralClipCandidate(
+            title=c.get("title", "Viral Moment").strip().upper(),
+            start_time=start,
+            end_time=end,
+            duration=dur,
+            viral_score=int(c.get("viral_score", 85)),
+            hook_reason=c.get("hook_reason", "High engagement segment"),
+            social_caption=c.get("social_caption", "Wait until the end... #shorts"),
+            hashtags=c.get("hashtags", ["#podcast", "#viral", "#shorts"])
+        )
+        candidates.append(candidate)
+
+    candidates.sort(key=lambda x: x.viral_score, reverse=True)
+    return candidates[:num_clips]
+
+def detect_viral_moments(
+    segments: List[TranscriptSegment],
+    num_clips: int = 3,
+    api_key: Optional[str] = None
+) -> List[ViralClipCandidate]:
+    """
+    Multi-Tier Zero-Cost Autonomous AI Viral Detection:
+    1. Primary: Google Gemini Flash Free Tier
+    2. Fallback 1: Groq Free Tier (groq/compound-mini, openai/gpt-oss-120b)
+    3. Fallback 2: OpenRouter Free Tier (minimax/minimax-m3:free)
+    4. Fallback 3: Semantic topic extraction from spoken dialogue
+    """
     transcript_text = format_transcript_with_timestamps(segments)
 
     prompt = f"""
@@ -105,106 +246,37 @@ Output MUST be valid JSON only matching this schema:
 Do not include markdown backticks or commentary outside the JSON.
 """
 
-    import time
+    gemini_key = api_key or GEMINI_API_KEY
     raw_text = None
-    last_err = None
-    for model_name in models_to_try:
-        print(f"[*] Sending transcript to Gemini Flash ({model_name}) for viral moment hunting...")
-        for attempt in range(3):
-            try:
-                if HAS_NEW_GENAI:
-                    client = genai.Client(api_key=key)
-                    response = client.models.generate_content(
-                        model=model_name,
-                        contents=prompt,
-                        config=genai_types.GenerateContentConfig(
-                            temperature=0.4,
-                            response_mime_type="application/json"
-                        )
-                    )
-                    raw_text = response.text.strip()
-                elif legacy_genai is not None:
-                    legacy_genai.configure(api_key=key)
-                    model = legacy_genai.GenerativeModel(model_name)
-                    response = model.generate_content(
-                        prompt,
-                        generation_config=legacy_genai.GenerationConfig(
-                            temperature=0.4,
-                            response_mime_type="application/json"
-                        )
-                    )
-                    raw_text = response.text.strip()
-                else:
-                    raise RuntimeError("No Google GenAI library installed.")
 
-                if raw_text:
-                    break
-            except Exception as e:
-                last_err = e
-                err_str = str(e)
-                if ("503" in err_str or "429" in err_str or "UNAVAILABLE" in err_str) and attempt < 2:
-                    wait_sec = 2 ** (attempt + 1)
-                    print(f"[-] Model {model_name} busy ({e}). Retrying in {wait_sec}s (Attempt {attempt+1}/3)...")
-                    time.sleep(wait_sec)
-                else:
-                    print(f"[-] Model {model_name} failed: {e}. Trying next model...")
-                    break
+    # Tier 1: Gemini Flash Free Tier
+    if gemini_key:
+        print("[*] Tier 1: Sending transcript to Google Gemini Flash...")
+        raw_text = query_gemini_models(prompt, gemini_key)
 
-        if raw_text:
-            break
+    # Tier 2: Groq Free Tier
+    if not raw_text and GROQ_API_KEY:
+        print("[*] Tier 2: Falling back to Groq free models...")
+        raw_text = query_groq_free_models(prompt, GROQ_API_KEY)
 
-    if not raw_text:
-        print(f"[-] All Gemini models failed ({last_err}). Falling back to intelligent heuristic detector.")
-        return fallback_rule_based_detector(segments, num_clips)
+    # Tier 3: OpenRouter Free Tier
+    if not raw_text and OPENROUTER_API_KEY:
+        print("[*] Tier 3: Falling back to OpenRouter free models...")
+        raw_text = query_openrouter_free_models(prompt, OPENROUTER_API_KEY)
 
-    try:
-        # Clean any accidental wrapping
-        if raw_text.startswith("```json"):
-            raw_text = raw_text[7:]
-        if raw_text.startswith("```"):
-            raw_text = raw_text[3:]
-        if raw_text.endswith("```"):
-            raw_text = raw_text[:-3]
+    # Parse JSON if any LLM responded
+    if raw_text:
+        try:
+            candidates = parse_clips_json(raw_text, segments, num_clips)
+            if candidates:
+                print(f"[+] Successfully detected {len(candidates)} viral candidates via AI!")
+                return candidates
+        except Exception as e:
+            print(f"[-] Parsing AI response failed ({e}). Falling back to semantic topic detector.")
 
-        parsed = json.loads(raw_text.strip())
-        clips_data = parsed.get("clips", [])
-        
-        candidates = []
-        for c in clips_data:
-            start = float(c.get("start_time", 0.0))
-            end = float(c.get("end_time", start + 40.0))
-            if end <= start:
-                end = start + 40.0
-            
-            # Enforce 30-60s constraints
-            dur = end - start
-            if dur > 65.0:
-                end = start + 55.0
-                dur = 55.0
-            elif dur < 25.0:
-                end = min(start + 40.0, segments[-1].end if segments else start + 40.0)
-                dur = end - start
-
-            candidate = ViralClipCandidate(
-                title=c.get("title", "Viral Moment").strip().upper(),
-                start_time=start,
-                end_time=end,
-                duration=dur,
-                viral_score=int(c.get("viral_score", 85)),
-                hook_reason=c.get("hook_reason", "High engagement segment"),
-                social_caption=c.get("social_caption", "Wait until the end... #shorts"),
-                hashtags=c.get("hashtags", ["#podcast", "#viral", "#shorts"])
-            )
-            candidates.append(candidate)
-
-        # Sort by viral_score descending
-        candidates.sort(key=lambda x: x.viral_score, reverse=True)
-        print(f"[+] Successfully detected {len(candidates)} viral candidates via Gemini!")
-        return candidates[:num_clips]
-
-    except Exception as e:
-        print(f"[-] Parsing Gemini response failed ({e}). Falling back to intelligent heuristic detector.")
-        return fallback_rule_based_detector(segments, num_clips)
+    # Tier 4: Semantic dialogue topic extraction
+    print("[*] Tier 4: Using intelligent semantic topic detector.")
+    return fallback_rule_based_detector(segments, num_clips)
 
 def fallback_rule_based_detector(segments: List[TranscriptSegment], num_clips: int = 3) -> List[ViralClipCandidate]:
     """Intelligent semantic fallback that extracts meaningful topic titles from transcript speech."""

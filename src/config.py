@@ -35,6 +35,16 @@ APIFY_API_TOKEN = (
     os.getenv("apify_key") or
     ""
 )
+GROQ_API_KEY = (
+    os.getenv("GROQ_API_KEY") or
+    os.getenv("groq_api_key") or
+    ""
+)
+OPENROUTER_API_KEY = (
+    os.getenv("OPENROUTER_API_KEY") or
+    os.getenv("openrouter_api_key") or
+    ""
+)
 
 # Video & Format Defaults (Ultra HD 60FPS Broadcast Studio)
 OUTPUT_WIDTH = 1080
