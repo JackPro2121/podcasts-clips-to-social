@@ -78,6 +78,7 @@ class BufferClient:
                 boards {{
                   id
                   name
+                  serviceId
                 }}
               }}
             }}
@@ -173,10 +174,11 @@ class BufferClient:
                     ch_name = next((ch["name"] for ch in connected if ch["id"] == channel_id), channel_id)
                     print(f"[-] Pinterest channel '{ch_name}' has no boards configured yet. Please create a board on Pinterest (e.g., 'Podcast Clips') to enable automated pinning. Skipping Pinterest.")
                     continue
+                board_service_id = boards[0].get("serviceId") or boards[0].get("id")
                 metadata = {
                     "pinterest": {
                         "title": clean_title[:95],
-                        "boardServiceId": boards[0]["id"]
+                        "boardServiceId": board_service_id
                     }
                 }
 
