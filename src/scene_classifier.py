@@ -186,13 +186,13 @@ def detect_clip_shots(
     video_path: Path,
     start_sec: float,
     end_sec: float,
-    min_shot_duration: float = 1.0
+    min_shot_duration: float = 0.4
 ) -> List[Tuple[float, float]]:
     """
     Splits video segment [start_sec, end_sec] into discrete camera cuts / shot intervals.
     Uses PySceneDetect with AdaptiveDetector.
     Gracefully falls back to full segment if no scene cuts found or if scenedetect is unavailable.
-    Merges any micro-glitches shorter than min_shot_duration.
+    Merges any micro-glitches shorter than min_shot_duration (0.4s handles sub-second podcast reaction cuts).
     """
     duration = max(0.1, end_sec - start_sec)
     default_shot = [(round(start_sec, 2), round(end_sec, 2))]
@@ -209,7 +209,8 @@ def detect_clip_shots(
         
         video.seek(start_tc)
         sm = SceneManager()
-        sm.add_detector(AdaptiveDetector(adaptive_threshold=3.0, min_scene_len=int(fps * min_shot_duration)))
+        # Adaptive threshold 2.5 & min_scene_len 0.4s to reliably catch quick reaction cuts
+        sm.add_detector(AdaptiveDetector(adaptive_threshold=2.5, min_scene_len=max(2, int(fps * min_shot_duration))))
         sm.detect_scenes(video, frame_skip=2, duration=dur_tc)
         scene_list = sm.get_scene_list()
         

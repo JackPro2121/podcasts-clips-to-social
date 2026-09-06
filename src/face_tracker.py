@@ -118,8 +118,8 @@ def analyze_faces_in_clip(
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
-    # Detect visual shot boundaries using PySceneDetect
-    detected_cuts = detect_clip_shots(video_path, start_time, end_time, min_shot_duration=1.0)
+    # Detect visual shot boundaries using PySceneDetect (0.4s catches sub-second reaction cuts)
+    detected_cuts = detect_clip_shots(video_path, start_time, end_time, min_shot_duration=0.4)
     print(f"[*] Visual Shot Segmentation: Detected {len(detected_cuts)} distinct camera cuts.")
 
     timeline_samples: List[Tuple[float, List[FaceBox], bool]] = []
@@ -248,19 +248,53 @@ def analyze_faces_in_clip(
         else:
             # Shot is a single human speaker talking
             eye_level_y = height * 0.35
-            single_faces = [min(faces, key=lambda f: abs(f.center_y - eye_level_y)) for faces in valid_face_samples]
-            avg_cx = int(np.median([f.center_x for f in single_faces]))
-            avg_cy = int(np.median([f.center_y for f in single_faces]))
-            crop_x = max(0, min(avg_cx - target_crop_w // 2, width - target_crop_w))
-            shot_plans.append(ShotPlan(
-                start=rel_s,
-                end=rel_e,
-                mode='portrait_face',
-                crop_x=crop_x,
-                center_y=avg_cy,
-                margin_v=220
-            ))
-            print(f"    Shot [{rel_s:.1f}s - {rel_e:.1f}s]: Full Portrait Speaker (Center X: {avg_cx}, Crop X: {crop_x})")
+            timed_single_faces = [(s[0], min(s[1], key=lambda f: abs(f.center_y - eye_level_y))) for s in shot_samples if s[1]]
+            
+            # Check for intra-shot face position jumps (sub-second camera shifts)
+            jump_indices = []
+            for j in range(1, len(timed_single_faces)):
+                prev_cx = timed_single_faces[j-1][1].center_x
+                curr_cx = timed_single_faces[j][1].center_x
+                if abs(curr_cx - prev_cx) > width * 0.14:
+                    jump_indices.append(j)
+
+            if jump_indices and len(timed_single_faces) >= 4:
+                # Sub-segment this shot dynamically based on face shifts
+                split_points = [0] + jump_indices + [len(timed_single_faces)]
+                for k in range(len(split_points) - 1):
+                    sub_faces = timed_single_faces[split_points[k]:split_points[k+1]]
+                    if not sub_faces:
+                        continue
+                    sub_s = round(sub_faces[0][0], 2) if k > 0 else rel_s
+                    sub_e = round(sub_faces[-1][0], 2) if k < len(split_points) - 2 else rel_e
+                    if sub_e <= sub_s:
+                        sub_e = sub_s + 0.2
+                    sub_cx = int(np.median([f[1].center_x for f in sub_faces]))
+                    sub_cy = int(np.median([f[1].center_y for f in sub_faces]))
+                    sub_crop_x = max(0, min(sub_cx - target_crop_w // 2, width - target_crop_w))
+                    shot_plans.append(ShotPlan(
+                        start=sub_s,
+                        end=sub_e,
+                        mode='portrait_face',
+                        crop_x=sub_crop_x,
+                        center_y=sub_cy,
+                        margin_v=220
+                    ))
+                    print(f"    Sub-Shot [{sub_s:.1f}s - {sub_e:.1f}s]: Portrait Speaker (Center X: {sub_cx}, Crop X: {sub_crop_x})")
+            else:
+                single_faces = [f[1] for f in timed_single_faces] if timed_single_faces else [min(faces, key=lambda f: abs(f.center_y - eye_level_y)) for faces in valid_face_samples]
+                avg_cx = int(np.median([f.center_x for f in single_faces]))
+                avg_cy = int(np.median([f.center_y for f in single_faces]))
+                crop_x = max(0, min(avg_cx - target_crop_w // 2, width - target_crop_w))
+                shot_plans.append(ShotPlan(
+                    start=rel_s,
+                    end=rel_e,
+                    mode='portrait_face',
+                    crop_x=crop_x,
+                    center_y=avg_cy,
+                    margin_v=220
+                ))
+                print(f"    Shot [{rel_s:.1f}s - {rel_e:.1f}s]: Full Portrait Speaker (Center X: {avg_cx}, Crop X: {crop_x})")
 
     # Ensure shot plans span the entire duration without gaps
     if shot_plans:
