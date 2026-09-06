@@ -3,20 +3,27 @@ import json
 import logging
 from typing import List, Dict, Any, Optional
 import requests
-from src.config import SLACK_WEBHOOK_URL
+from src.config import SLACK_WEBHOOK_URL, SLACK_BOT_TOKEN, SLACK_CHANNEL
 
 logger = logging.getLogger(__name__)
 
 class SlackNotifier:
     """
     Broadcasts operational reports and alert cards to Slack channels
-    using Slack's Incoming Webhook Block Kit UI.
+    using Slack's Incoming Webhook or Bot Token chat.postMessage API.
     """
-    def __init__(self, webhook_url: Optional[str] = None):
+    def __init__(
+        self,
+        webhook_url: Optional[str] = None,
+        bot_token: Optional[str] = None,
+        channel: Optional[str] = None
+    ):
         self.webhook_url = webhook_url or SLACK_WEBHOOK_URL
+        self.bot_token = bot_token or SLACK_BOT_TOKEN
+        self.channel = channel or SLACK_CHANNEL or "podcast-clip"
 
     def is_enabled(self) -> bool:
-        return bool(self.webhook_url and self.webhook_url.startswith("http"))
+        return bool((self.webhook_url and self.webhook_url.startswith("http")) or (self.bot_token and self.bot_token.startswith("xoxb-")))
 
     def send_run_report(
         self,
@@ -124,24 +131,50 @@ class SlackNotifier:
             ]
         })
 
-        payload = {"blocks": blocks}
+        return self._dispatch_blocks(blocks)
 
+    def _dispatch_blocks(self, blocks: List[Dict[str, Any]]) -> bool:
+        """Dispatches blocks via Incoming Webhook URL or Bot Token API."""
         try:
-            res = requests.post(
-                self.webhook_url,
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                timeout=15
-            )
-            if res.status_code == 200:
-                print("[+] Slack notification delivered successfully!")
-                return True
-            else:
-                print(f"[-] Slack webhook error: {res.status_code} - {res.text}")
-                return False
+            if self.webhook_url and self.webhook_url.startswith("http"):
+                res = requests.post(
+                    self.webhook_url,
+                    json={"blocks": blocks},
+                    headers={"Content-Type": "application/json"},
+                    timeout=15
+                )
+                if res.status_code == 200:
+                    print(f"[+] Slack notification delivered successfully to #{self.channel} via Webhook!")
+                    return True
+                else:
+                    print(f"[-] Slack webhook error: {res.status_code} - {res.text}")
+                    return False
+
+            elif self.bot_token and self.bot_token.startswith("xoxb-"):
+                res = requests.post(
+                    "https://slack.com/api/chat.postMessage",
+                    json={
+                        "channel": self.channel,
+                        "blocks": blocks,
+                        "text": "Autonomous Podcast Clipper Update"
+                    },
+                    headers={
+                        "Authorization": f"Bearer {self.bot_token}",
+                        "Content-Type": "application/json"
+                    },
+                    timeout=15
+                )
+                data = res.json()
+                if data.get("ok"):
+                    print(f"[+] Slack notification delivered successfully to #{self.channel} via Bot Token!")
+                    return True
+                else:
+                    print(f"[-] Slack API error: {data.get('error')}")
+                    return False
         except Exception as e:
             print(f"[-] Exception sending Slack notification: {e}")
             return False
+        return False
 
     def send_error_alert(
         self,
@@ -174,8 +207,4 @@ class SlackNotifier:
             }
         ]
 
-        try:
-            requests.post(self.webhook_url, json={"blocks": blocks}, timeout=10)
-            return True
-        except Exception:
-            return False
+        return self._dispatch_blocks(blocks)

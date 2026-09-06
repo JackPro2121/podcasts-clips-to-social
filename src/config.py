@@ -58,6 +58,8 @@ CHOCODATA_API_KEY = (
 )
 YOUTUBE_COOKIES = os.getenv("YOUTUBE_COOKIES", "")
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
+SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN", "")
+SLACK_CHANNEL = os.getenv("SLACK_CHANNEL", "podcast-clip")
 
 # Visual Retention & Audio Features
 ENABLE_PUNCH_ZOOM = os.getenv("ENABLE_PUNCH_ZOOM", "true").lower() in ("true", "1", "yes")
