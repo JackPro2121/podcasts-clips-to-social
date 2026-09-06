@@ -3,6 +3,7 @@ import numpy as np
 import os
 import requests
 from pathlib import Path
+from typing import List, Tuple, Optional, Dict, Any
 from dataclasses import dataclass, field
 from src.scene_classifier import classify_frame_scene, detect_clip_shots
 
