@@ -5,6 +5,7 @@ import requests
 from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional
 from dataclasses import dataclass
+from src.scene_classifier import classify_frame_scene
 
 @dataclass
 class FaceBox:
@@ -107,6 +108,8 @@ def analyze_faces_in_clip(
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
     timeline_samples: List[Tuple[float, List[FaceBox]]] = []
+    presentation_votes = 0
+    scene_check_count = 0
     
     current_frame = start_frame
     while current_frame <= end_frame:
@@ -117,6 +120,16 @@ def analyze_faces_in_clip(
         if (current_frame - start_frame) % frame_step == 0:
             rel_t = (current_frame - start_frame) / fps
             faces: List[FaceBox] = []
+
+            # Check for presentation/slides every 2nd sample (~1.25 Hz)
+            if (current_frame - start_frame) % (frame_step * 2) == 0:
+                scene_check_count += 1
+                try:
+                    scene_info = classify_frame_scene(frame)
+                    if scene_info.get("is_presentation"):
+                        presentation_votes += 1
+                except Exception:
+                    pass
 
             if detector_type == "yunet":
                 detector.setInputSize((frame.shape[1], frame.shape[0]))
@@ -200,7 +213,9 @@ def analyze_faces_in_clip(
     # 2. Single Speaker vs Document / Presentation / Infographic Detection
     # If the video shows slides, charts, research papers, or screenshares for most of the clip,
     # cropping into a 9:16 portrait viewport destroys the diagram.
-    # An intelligent tool checks if genuine human faces are present for at least 50% of the clip.
+    # Dual-signal verification:
+    # 1. Genuine human faces present < 50% of the clip, OR
+    # 2. Scene classifier detects document/diagram/presentation in >= 35% of samples.
     single_samples: List[Tuple[float, int, int]] = []
     for rel_t, faces in timeline_samples:
         if faces:
@@ -209,10 +224,11 @@ def analyze_faces_in_clip(
             single_samples.append((rel_t, best_face.center_x, best_face.center_y))
 
     face_presence_ratio = len(single_samples) / max(1, len(timeline_samples))
-    if face_presence_ratio < 0.50 or not single_samples:
-        # Less than 50% face presence -> Document/chart/slide presentation detected!
-        # Automatically preserve 100% of the diagram in blur_stack mode!
-        print(f"[*] Visual graphics / slide detected (Face presence: {face_presence_ratio*100:.1f}% < 50%). Activating intelligent Blur-Stack presentation framing!")
+    presentation_ratio = (presentation_votes / max(1, scene_check_count)) if scene_check_count > 0 else 0.0
+
+    if face_presence_ratio < 0.50 or presentation_ratio >= 0.35 or not single_samples:
+        # Presentation detected: Automatically preserve 100% of the diagram in blur_stack mode!
+        print(f"[*] Visual graphics / slide detected (Face presence: {face_presence_ratio*100:.1f}%, Presentation ratio: {presentation_ratio*100:.1f}%). Activating intelligent Blur-Stack presentation framing!")
         return FramingDecision(mode='blur_stack', face_count=0, video_width=width, video_height=height)
 
     # Detect camera angle switches (clusters of face centers separated by significant X shift)

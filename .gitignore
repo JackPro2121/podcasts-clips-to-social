@@ -47,3 +47,6 @@ venv.bak/
 *.swo
 .DS_Store
 Thumbs.db
+scratch/
+*.mp4
+src/models/*.onnx

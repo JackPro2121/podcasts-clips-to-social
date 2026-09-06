@@ -152,6 +152,35 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertIn("equalizer=f=3000", af)
         self.assertIn(f"loudnorm=I={TARGET_LUFS}", af)
 
+    def test_studio_clarity_unsharp_in_filtergraph(self):
+        decision = FramingDecision(
+            mode="single_smooth",
+            face_count=1,
+            smoothed_center_x=960,
+            video_width=1920,
+            video_height=1080
+        )
+        fg = build_video_filtergraph(decision, burn_subtitles=False)
+        self.assertIn("unsharp=lx=7:ly=7:la=1.10", fg)
+        self.assertIn("eq=contrast=1.08", fg)
+
+    def test_scene_classifier_document_detection(self):
+        import numpy as np
+        import cv2
+        from src.scene_classifier import detect_slide_heuristics, classify_frame_scene
+
+        # Create synthetic document frame (white background with text lines)
+        doc_frame = np.ones((720, 1280, 3), dtype=np.uint8) * 245
+        for row in range(80, 650, 50):
+            cv2.putText(doc_frame, "Clinical Study: Metabolic Biomarkers & Longevity", (80, row),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (20, 20, 20), 2)
+
+        is_slide = detect_slide_heuristics(doc_frame)
+        self.assertTrue(is_slide, "Synthetic document frame with text lines should be detected as slide/presentation")
+
+        scene_info = classify_frame_scene(doc_frame)
+        self.assertTrue(scene_info["is_presentation"])
+
     def test_sanitize_ffmpeg_path(self):
         p = Path("C:/videos/clip 1.ass")
         sanitized = sanitize_ffmpeg_path(p)
