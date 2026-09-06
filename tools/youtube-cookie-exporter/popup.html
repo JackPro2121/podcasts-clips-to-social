@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YouTube Cookie Exporter</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    body {
+      width: 360px;
+      background: #0f1117;
+      color: #f0f2f5;
+      padding: 16px;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .logo {
+      width: 32px;
+      height: 32px;
+      background: #ff0000;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 12px rgba(255, 0, 0, 0.35);
+    }
+
+    .logo svg {
+      width: 18px;
+      height: 18px;
+      fill: #fff;
+    }
+
+    .title-group h1 {
+      font-size: 15px;
+      font-weight: 700;
+      color: #ffffff;
+      letter-spacing: -0.2px;
+    }
+
+    .title-group p {
+      font-size: 11px;
+      color: #9ba1b0;
+    }
+
+    .status-card {
+      background: #181b24;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 14px;
+    }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+
+    .status-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .status-label {
+      color: #9ba1b0;
+    }
+
+    .status-value {
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .badge-ok {
+      color: #10b981;
+    }
+
+    .badge-warn {
+      color: #f59e0b;
+    }
+
+    .btn-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    button {
+      width: 100%;
+      border: none;
+      border-radius: 8px;
+      padding: 11px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.18s ease;
+    }
+
+    .btn-primary {
+      background: #5b34ea;
+      color: #ffffff;
+      box-shadow: 0 4px 14px rgba(91, 52, 234, 0.4);
+    }
+
+    .btn-primary:hover {
+      background: #4d27dc;
+      transform: translateY(-1px);
+    }
+
+    .btn-primary:active {
+      transform: translateY(0);
+    }
+
+    .btn-secondary {
+      background: #232734;
+      color: #e2e8f0;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .btn-secondary:hover {
+      background: #2c3242;
+    }
+
+    .btn-success {
+      background: #10b981 !important;
+      box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35) !important;
+    }
+
+    .guide-box {
+      background: rgba(91, 52, 234, 0.08);
+      border: 1px solid rgba(91, 52, 234, 0.2);
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 11px;
+      line-height: 1.5;
+      color: #cbd5e1;
+    }
+
+    .guide-box strong {
+      color: #a78bfa;
+    }
+
+    .guide-box ol {
+      margin-left: 16px;
+      margin-top: 4px;
+    }
+
+    .guide-box li {
+      margin-bottom: 2px;
+    }
+
+    .code-pill {
+      background: #090a0f;
+      padding: 2px 5px;
+      border-radius: 4px;
+      font-family: monospace;
+      color: #38bdf8;
+      font-size: 10px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="logo">
+      <svg viewBox="0 0 24 24">
+        <path d="M10 15l5.19-3L10 9v6m11.56-7.83c.13.47.22 1.1.28 1.9.07.8.1 1.49.1 2.09L22 12c0 2.19-.16 3.8-.44 4.83-.25.9-.83 1.48-1.73 1.73-.47.13-1.33.22-2.65.28-1.3.07-2.49.1-3.59.1L12 19c-4.19 0-6.8-.16-7.83-.44-.9-.25-1.48-.83-1.73-1.73-.13-.47-.22-1.1-.28-1.9-.07-.8-.1-1.49-.1-2.09L2 12c0-2.19.16-3.8.44-4.83.25-.9.83-1.48 1.73-1.73.47-.13 1.33-.22 2.65-.28 1.3-.07 2.49-.1 3.59-.1L12 5c4.19 0 6.8.16 7.83.44.9.25 1.48.83 1.73 1.73z"/>
+      </svg>
+    </div>
+    <div class="title-group">
+      <h1>YouTube Cookie Exporter</h1>
+      <p>Netscape Format for yt-dlp & Clipper</p>
+    </div>
+  </div>
+
+  <div class="status-card">
+    <div class="status-row">
+      <span class="status-label">YouTube Session:</span>
+      <span class="status-value" id="session-status">Checking...</span>
+    </div>
+    <div class="status-row">
+      <span class="status-label">Cookies Found:</span>
+      <span class="status-value" id="cookie-count">0</span>
+    </div>
+  </div>
+
+  <div class="btn-group">
+    <button id="btn-copy" class="btn-primary">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+      </svg>
+      Copy Cookies to Clipboard
+    </button>
+    <button id="btn-download" class="btn-secondary">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+        <polyline points="7 10 12 15 17 10"></polyline>
+        <line x1="12" y1="15" x2="12" y2="3"></line>
+      </svg>
+      Download cookies.txt
+    </button>
+  </div>
+
+  <div class="guide-box">
+    <strong>⚡ How to use for $0 GitHub Actions:</strong>
+    <ol>
+      <li>Click <strong>Copy Cookies to Clipboard</strong> above.</li>
+      <li>Open GitHub Repo ➡️ <strong>Settings</strong> ➡️ <strong>Secrets and variables</strong> ➡️ <strong>Actions</strong>.</li>
+      <li>Create Secret: <span class="code-pill">YOUTUBE_COOKIES</span> and paste!</li>
+    </ol>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
