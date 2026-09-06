@@ -105,9 +105,9 @@ def download_via_apify(
             print("[-] Could not retrieve Apify run ID.")
             return None
 
-        print(f"[*] Apify run started ({run_id}). Polling for download completion...")
+        print(f"[*] Apify run started ({run_id}). Polling for download completion (up to 10 mins)...")
         final_run_data = None
-        for attempt in range(45):
+        for attempt in range(150):
             time.sleep(4)
             status_res = requests.get(
                 f"https://api.apify.com/v2/actor-runs/{run_id}",
@@ -117,7 +117,7 @@ def download_via_apify(
             if status_res.status_code == 200:
                 final_run_data = status_res.json().get("data", {})
                 status = final_run_data.get("status")
-                if attempt % 2 == 0:
+                if attempt % 5 == 0:
                     print(f"[*] Apify download status: {status} (elapsed: {(attempt + 1) * 4}s)")
                 if status in ("SUCCEEDED", "FAILED", "TIMED-OUT", "ABORTED"):
                     break
