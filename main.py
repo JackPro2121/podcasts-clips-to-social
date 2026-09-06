@@ -157,7 +157,7 @@ def run_pipeline(
 
         clips_report.append({
             "title": moment.title,
-            "virality_score": moment.virality_score,
+            "virality_score": getattr(moment, "viral_score", 85),
             "duration": moment.end_time - moment.start_time,
             "download_url": direct_url or "",
             "buffer_status": buffer_status
