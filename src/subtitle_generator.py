@@ -1,7 +1,7 @@
 import math
 import re
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Any, Dict, Tuple
 from src.config import SUBTITLE_THEMES, SUBTITLES_DIR, OUTPUT_WIDTH, OUTPUT_HEIGHT, CHANNEL_WATERMARK
 from src.transcriber import TranscriptSegment, WordTimestamp
 
