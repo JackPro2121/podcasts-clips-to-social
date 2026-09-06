@@ -53,7 +53,7 @@ def get_face_detector(width: int, height: int) -> Tuple[str, Any]:
     # 1. Try YuNet
     if model_path.exists() and hasattr(cv2, "FaceDetectorYN_create"):
         try:
-            detector = cv2.FaceDetectorYN_create(str(model_path), "", (width, height), score_threshold=0.55)
+            detector = cv2.FaceDetectorYN_create(str(model_path), "", (width, height), score_threshold=0.70)
             return "yunet", detector
         except Exception as e:
             print(f"[-] YuNet init failed: {e}. Trying Haar fallback...")
@@ -151,12 +151,33 @@ def analyze_faces_in_clip(
     if not timeline_samples:
         return FramingDecision(mode='blur_stack', face_count=0, video_width=width, video_height=height)
 
-    # 1. Evaluate ratio of 2-speaker wide frames
-    two_face_samples = [faces for (_, faces) in timeline_samples if len(faces) == 2]
+    # 1. Evaluate genuine 2-speaker wide frames (Host + Guest seated side-by-side)
+    # A true 2-speaker shot requires:
+    # - Substantial horizontal separation: >= width * 0.22
+    # - Similar eye/seated level: abs(y1 - y2) <= height * 0.22 (filters out coffee cups/hands)
+    # - Comparable face size: 0.35 <= (w1*h1) / (w2*h2) <= 2.8
+    def is_valid_two_speaker_frame(face_pair: List[FaceBox]) -> bool:
+        if len(face_pair) != 2:
+            return False
+        f1, f2 = face_pair[0], face_pair[1]
+        x_dist = abs(f1.center_x - f2.center_x)
+        y_dist = abs(f1.center_y - f2.center_y)
+        area1 = f1.w * f1.h
+        area2 = f2.w * f2.h
+        if area1 == 0 or area2 == 0:
+            return False
+        area_ratio = area1 / area2
+        return (
+            x_dist >= width * 0.22 and
+            y_dist <= height * 0.22 and
+            0.35 <= area_ratio <= 2.8
+        )
+
+    two_face_samples = [faces for (_, faces) in timeline_samples if is_valid_two_speaker_frame(faces)]
     total_valid_samples = [faces for (_, faces) in timeline_samples if len(faces) > 0]
     
-    if total_valid_samples and (len(two_face_samples) / len(total_valid_samples) >= 0.35):
-        # High prevalence of 2 speakers in shot -> Dynamic Split Screen
+    if total_valid_samples and (len(two_face_samples) / len(total_valid_samples) >= 0.40):
+        # High prevalence of 2 genuine speakers in shot -> Dynamic Split Screen
         s1_centers = [f[0].center_x for f in two_face_samples]
         s2_centers = [f[1].center_x for f in two_face_samples]
         s1_cx = int(np.median(s1_centers))
@@ -178,9 +199,10 @@ def analyze_faces_in_clip(
     # 2. Single Speaker or Multi-Camera Switching Shots
     single_samples: List[Tuple[float, int]] = []
     for rel_t, faces in timeline_samples:
-        if len(faces) >= 1:
-            # Use most dominant/prominent face
-            single_samples.append((rel_t, faces[0].center_x))
+        if faces:
+            # Pick the face closest to eye level (Y: ~35% of frame) to ignore desk objects/mugs
+            best_face = min(faces, key=lambda f: abs(f.center_y - height * 0.35))
+            single_samples.append((rel_t, best_face.center_x))
 
     if not single_samples:
         # 0 faces detected consistently -> Safe Blur Stack
