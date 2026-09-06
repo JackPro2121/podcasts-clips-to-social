@@ -1,4 +1,6 @@
 import json
+import re
+import time
 import warnings
 from typing import List, Optional
 from pydantic import BaseModel, Field
@@ -60,7 +62,13 @@ def detect_viral_moments(
         print("[!] GEMINI_API_KEY is not set. Falling back to heuristic/rule-based moment detector.")
         return fallback_rule_based_detector(segments, num_clips)
 
-    models_to_try = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-1.5-flash"]
+    models_to_try = [
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite",
+        "gemini-1.5-flash-latest",
+        "gemini-1.5-flash-8b",
+        "gemini-2.5-flash"
+    ]
     transcript_text = format_transcript_with_timestamps(segments)
 
     prompt = f"""
@@ -73,6 +81,7 @@ Your goal is to analyze the following podcast transcript and extract the top {nu
 3. **Standalone Cohesion**: The clip must make complete sense on its own without needing the rest of the 2-hour podcast.
 4. **Optimal Duration**: Each clip MUST be strictly between 30 and 60 seconds (target: 35-50s).
 5. **Exact Timestamps**: Use the provided transcript timestamps to specify precise start_time and end_time.
+6. **Punchy Viral Title**: Give each clip an engaging, click-worthy hook title in ALL CAPS (e.g., "THE SECRET TO BETTER SLEEP", "HOW CORTISOL PEAKS", "DO THIS EVERY MORNING"). Max 5-7 words.
 
 ### PODCAST TRANSCRIPT:
 {transcript_text}
@@ -82,7 +91,7 @@ Output MUST be valid JSON only matching this schema:
 {{
   "clips": [
     {{
-      "title": "Short punchy title",
+      "title": "PUNCHY VIRAL TITLE",
       "start_time": 124.5,
       "end_time": 172.0,
       "duration": 47.5,
@@ -96,44 +105,56 @@ Output MUST be valid JSON only matching this schema:
 Do not include markdown backticks or commentary outside the JSON.
 """
 
+    import time
     raw_text = None
     last_err = None
     for model_name in models_to_try:
         print(f"[*] Sending transcript to Gemini Flash ({model_name}) for viral moment hunting...")
-        try:
-            if HAS_NEW_GENAI:
-                client = genai.Client(api_key=key)
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt,
-                    config=genai_types.GenerateContentConfig(
-                        temperature=0.4,
-                        response_mime_type="application/json"
+        for attempt in range(3):
+            try:
+                if HAS_NEW_GENAI:
+                    client = genai.Client(api_key=key)
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config=genai_types.GenerateContentConfig(
+                            temperature=0.4,
+                            response_mime_type="application/json"
+                        )
                     )
-                )
-                raw_text = response.text.strip()
-            elif legacy_genai is not None:
-                legacy_genai.configure(api_key=key)
-                model = legacy_genai.GenerativeModel(model_name)
-                response = model.generate_content(
-                    prompt,
-                    generation_config=legacy_genai.GenerationConfig(
-                        temperature=0.4,
-                        response_mime_type="application/json"
+                    raw_text = response.text.strip()
+                elif legacy_genai is not None:
+                    legacy_genai.configure(api_key=key)
+                    model = legacy_genai.GenerativeModel(model_name)
+                    response = model.generate_content(
+                        prompt,
+                        generation_config=legacy_genai.GenerationConfig(
+                            temperature=0.4,
+                            response_mime_type="application/json"
+                        )
                     )
-                )
-                raw_text = response.text.strip()
-            else:
-                raise RuntimeError("No Google GenAI library installed.")
-            
-            if raw_text:
-                break
-        except Exception as e:
-            last_err = e
-            print(f"[-] Model {model_name} failed: {e}. Trying fallback model...")
+                    raw_text = response.text.strip()
+                else:
+                    raise RuntimeError("No Google GenAI library installed.")
+
+                if raw_text:
+                    break
+            except Exception as e:
+                last_err = e
+                err_str = str(e)
+                if ("503" in err_str or "429" in err_str or "UNAVAILABLE" in err_str) and attempt < 2:
+                    wait_sec = 2 ** (attempt + 1)
+                    print(f"[-] Model {model_name} busy ({e}). Retrying in {wait_sec}s (Attempt {attempt+1}/3)...")
+                    time.sleep(wait_sec)
+                else:
+                    print(f"[-] Model {model_name} failed: {e}. Trying next model...")
+                    break
+
+        if raw_text:
+            break
 
     if not raw_text:
-        print(f"[-] All Gemini models failed ({last_err}). Falling back to heuristic detector.")
+        print(f"[-] All Gemini models failed ({last_err}). Falling back to intelligent heuristic detector.")
         return fallback_rule_based_detector(segments, num_clips)
 
     try:
@@ -165,7 +186,7 @@ Do not include markdown backticks or commentary outside the JSON.
                 dur = end - start
 
             candidate = ViralClipCandidate(
-                title=c.get("title", "Viral Moment"),
+                title=c.get("title", "Viral Moment").strip().upper(),
                 start_time=start,
                 end_time=end,
                 duration=dur,
@@ -182,11 +203,11 @@ Do not include markdown backticks or commentary outside the JSON.
         return candidates[:num_clips]
 
     except Exception as e:
-        print(f"[-] Parsing Gemini response failed ({e}). Falling back to heuristic detector.")
+        print(f"[-] Parsing Gemini response failed ({e}). Falling back to intelligent heuristic detector.")
         return fallback_rule_based_detector(segments, num_clips)
 
 def fallback_rule_based_detector(segments: List[TranscriptSegment], num_clips: int = 3) -> List[ViralClipCandidate]:
-    """Heuristic fallback if AI API is unavailable or offline."""
+    """Intelligent semantic fallback that extracts meaningful topic titles from transcript speech."""
     if not segments:
         return []
 
@@ -201,14 +222,29 @@ def fallback_rule_based_detector(segments: List[TranscriptSegment], num_clips: i
         start_t = closest_seg.start
         end_t = min(start_t + 45.0, segments[-1].end)
         
+        # Extract speech text within this window to form a relevant semantic title
+        chunk_words = []
+        for s in segments:
+            if s.end >= start_t and s.start <= end_t:
+                chunk_words.extend(s.text.split())
+        
+        # Derive a punchy 4-7 word title from the opening statement
+        clean_words = [re.sub(r'[^\w\s]', '', w) for w in chunk_words[:12] if len(w) > 1]
+        if clean_words:
+            # Pick first 4-6 words as capitalized headline
+            title_words = clean_words[:5]
+            derived_title = " ".join(title_words).upper()
+        else:
+            derived_title = f"POWERFUL PODCAST INSIGHT #{i+1}"
+        
         candidates.append(ViralClipCandidate(
-            title=f"Viral Highlight #{i+1}",
+            title=derived_title,
             start_time=round(start_t, 1),
             end_time=round(end_t, 1),
             duration=round(end_t - start_t, 1),
             viral_score=80 - (i * 5),
-            hook_reason="Engaging dialogue section with continuous speech",
-            social_caption=f"Check out this moment from the podcast! Let us know what you think below. 👇",
-            hashtags=["#podcast", "#clips", "#reels", "#tiktok", "#shorts"]
+            hook_reason="Engaging dialogue section with high-retention speech",
+            social_caption=f"{derived_title}\n\nWhat are your thoughts on this? Let us know below! 👇",
+            hashtags=["#podcast", "#mindset", "#shorts", "#reels", "#viral"]
         ))
     return candidates

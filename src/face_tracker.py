@@ -1,5 +1,7 @@
 import cv2
 import numpy as np
+import os
+import requests
 from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional
 from dataclasses import dataclass
@@ -15,36 +17,71 @@ class FaceBox:
 
 @dataclass
 class FramingDecision:
-    mode: str  # 'single_smooth', 'split_screen', 'blur_stack'
+    mode: str  # 'single_smooth', 'dynamic_cut', 'split_screen', 'blur_stack'
     face_count: int
     speaker1_box: Optional[Tuple[int, int, int, int]] = None  # (x, y, w, h) for top or single
     speaker2_box: Optional[Tuple[int, int, int, int]] = None  # (x, y, w, h) for bottom (split-screen)
     smoothed_center_x: int = 0
+    crop_x_expr: Optional[str] = None  # Dynamic FFmpeg expression for multi-camera angle switching
     video_width: int = 1920
     video_height: int = 1080
 
-def get_face_cascade() -> Optional[Any]:
-    """Loads OpenCV's default frontal face Haar cascade with safe fallback."""
+def get_face_detector(width: int, height: int) -> Tuple[str, Any]:
+    """
+    Initializes the most accurate face detector available:
+    1. Primary: OpenCV YuNet Deep Learning Detector (Fast, accurate on profiles/glasses/dark lighting)
+    2. Fallback: Haar Cascade Classifier
+    3. Fallback: None (triggers blur_stack)
+    """
+    model_dir = Path(__file__).resolve().parent / "models"
+    model_path = model_dir / "face_detection_yunet_2023mar.onnx"
+
+    # Auto-download YuNet ONNX model if not already present
+    if not model_path.exists():
+        try:
+            model_dir.mkdir(parents=True, exist_ok=True)
+            url = "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
+            print(f"[*] Downloading modern YuNet face detector model to {model_path}...")
+            r = requests.get(url, allow_redirects=True, timeout=20)
+            if r.status_code == 200 and len(r.content) > 100000:
+                with open(model_path, "wb") as f:
+                    f.write(r.content)
+                print(f"[+] YuNet model downloaded successfully ({len(r.content) / 1024:.1f} KB).")
+        except Exception as e:
+            print(f"[-] Could not auto-download YuNet model: {e}")
+
+    # 1. Try YuNet
+    if model_path.exists() and hasattr(cv2, "FaceDetectorYN_create"):
+        try:
+            detector = cv2.FaceDetectorYN_create(str(model_path), "", (width, height), score_threshold=0.55)
+            return "yunet", detector
+        except Exception as e:
+            print(f"[-] YuNet init failed: {e}. Trying Haar fallback...")
+
+    # 2. Try Haar Cascade
     try:
         if hasattr(cv2, 'CascadeClassifier') and hasattr(cv2, 'data') and hasattr(cv2.data, 'haarcascades'):
             cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-            cascade = cv2.CascadeClassifier(cascade_path)
-            if not cascade.empty():
-                return cascade
+            if os.path.exists(cascade_path):
+                cascade = cv2.CascadeClassifier(cascade_path)
+                if not cascade.empty():
+                    return "haar", cascade
     except Exception as e:
-        print(f"[-] Could not load face cascade: {e}")
-    return None
+        print(f"[-] Haar cascade init failed: {e}")
+
+    return "none", None
 
 def analyze_faces_in_clip(
     video_path: Path,
     start_time: float,
     end_time: float,
-    sample_fps: float = 3.0
+    sample_fps: float = 2.5
 ) -> FramingDecision:
     """
-    Samples frames at sample_fps (e.g. 3 frames/sec) across the clip duration.
-    Detects faces, determines layout type (1 face, 2 faces split, or group),
-    and calculates smoothed camera coordinates.
+    Universal multi-camera & shot-adaptive face analysis:
+    1. Samples faces at sample_fps across the entire clip.
+    2. Identifies if shot is single-speaker, multi-camera switching, or side-by-side wide angle.
+    3. Generates precise FFmpeg crop expressions or split-screen layouts.
     """
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -54,10 +91,11 @@ def analyze_faces_in_clip(
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 1920
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 1080
+    target_crop_w = int(height * (9 / 16))
 
-    cascade = get_face_cascade()
-    if cascade is None:
-        print("[-] Face detector cascade unavailable. Defaulting to blur_stack framing.")
+    detector_type, detector = get_face_detector(width, height)
+    if detector_type == "none":
+        print("[-] No face detector available. Defaulting to blur_stack framing.")
         cap.release()
         return FramingDecision(mode='blur_stack', face_count=0, video_width=width, video_height=height)
 
@@ -67,9 +105,7 @@ def analyze_faces_in_clip(
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
-    face_counts: List[int] = []
-    speaker1_centers_x: List[int] = []
-    speaker2_centers_x: List[int] = []
+    timeline_samples: List[Tuple[float, List[FaceBox]]] = []
     
     current_frame = start_frame
     while current_frame <= end_frame:
@@ -78,67 +114,54 @@ def analyze_faces_in_clip(
             break
 
         if (current_frame - start_frame) % frame_step == 0:
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            # Resize for super-fast detection on CPU
-            small_gray = cv2.resize(gray, (0, 0), fx=0.5, fy=0.5)
-            detected = cascade.detectMultiScale(
-                small_gray,
-                scaleFactor=1.15,
-                minNeighbors=5,
-                minSize=(30, 30)
-            )
-
-            # Map coordinates back to original resolution
+            rel_t = (current_frame - start_frame) / fps
             faces: List[FaceBox] = []
-            for (x, y, w, h) in detected:
-                rx, ry, rw, rh = x * 2, y * 2, w * 2, h * 2
-                faces.append(FaceBox(
-                    x=rx, y=ry, w=rw, h=rh,
-                    center_x=rx + rw // 2,
-                    center_y=ry + rh // 2
-                ))
 
-            # Sort faces from left to right
+            if detector_type == "yunet":
+                detector.setInputSize((frame.shape[1], frame.shape[0]))
+                _, det_faces = detector.detect(frame)
+                if det_faces is not None:
+                    for f in det_faces:
+                        fx, fy, fw, fh = int(f[0]), int(f[1]), int(f[2]), int(f[3])
+                        faces.append(FaceBox(
+                            x=fx, y=fy, w=fw, h=fh,
+                            center_x=fx + fw // 2,
+                            center_y=fy + fh // 2
+                        ))
+
+            elif detector_type == "haar":
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                small_gray = cv2.resize(gray, (0, 0), fx=0.5, fy=0.5)
+                detected = detector.detectMultiScale(small_gray, scaleFactor=1.15, minNeighbors=5, minSize=(30, 30))
+                for (x, y, w, h) in detected:
+                    rx, ry, rw, rh = x * 2, y * 2, w * 2, h * 2
+                    faces.append(FaceBox(
+                        x=rx, y=ry, w=rw, h=rh,
+                        center_x=rx + rw // 2,
+                        center_y=ry + rh // 2
+                    ))
+
             faces.sort(key=lambda f: f.center_x)
-            face_counts.append(len(faces))
-
-            if len(faces) == 1:
-                speaker1_centers_x.append(faces[0].center_x)
-            elif len(faces) >= 2:
-                speaker1_centers_x.append(faces[0].center_x)
-                speaker2_centers_x.append(faces[1].center_x)
+            timeline_samples.append((rel_t, faces))
 
         current_frame += 1
 
     cap.release()
 
-    if not face_counts:
+    if not timeline_samples:
         return FramingDecision(mode='blur_stack', face_count=0, video_width=width, video_height=height)
 
-    # Median face count to filter out momentary false positives
-    avg_face_count = int(round(np.median(face_counts)))
+    # 1. Evaluate ratio of 2-speaker wide frames
+    two_face_samples = [faces for (_, faces) in timeline_samples if len(faces) == 2]
+    total_valid_samples = [faces for (_, faces) in timeline_samples if len(faces) > 0]
+    
+    if total_valid_samples and (len(two_face_samples) / len(total_valid_samples) >= 0.35):
+        # High prevalence of 2 speakers in shot -> Dynamic Split Screen
+        s1_centers = [f[0].center_x for f in two_face_samples]
+        s2_centers = [f[1].center_x for f in two_face_samples]
+        s1_cx = int(np.median(s1_centers))
+        s2_cx = int(np.median(s2_centers))
 
-    # Decision Matrix:
-    # 1 Face: Single speaker crop with camera smoothing
-    if avg_face_count == 1:
-        avg_cx = int(np.mean(speaker1_centers_x)) if speaker1_centers_x else width // 2
-        # Ensure crop window fits within video bounds
-        target_crop_w = int(height * (9 / 16))
-        left_bound = max(0, min(avg_cx - target_crop_w // 2, width - target_crop_w))
-        return FramingDecision(
-            mode='single_smooth',
-            face_count=1,
-            smoothed_center_x=left_bound + target_crop_w // 2,
-            video_width=width,
-            video_height=height
-        )
-
-    # 2 Faces side-by-side in wide shot: Dynamic Split Screen
-    elif avg_face_count == 2 and speaker1_centers_x and speaker2_centers_x:
-        s1_cx = int(np.mean(speaker1_centers_x))
-        s2_cx = int(np.mean(speaker2_centers_x))
-        
-        # Crop width for half-height pane (1080x960 -> aspect ratio 1080/960 = 9:8)
         half_crop_w = int(height * 0.9)
         s1_x = max(0, min(s1_cx - half_crop_w // 2, width - half_crop_w))
         s2_x = max(0, min(s2_cx - half_crop_w // 2, width - half_crop_w))
@@ -152,11 +175,98 @@ def analyze_faces_in_clip(
             video_height=height
         )
 
-    # 3+ Faces (Panel discussion) or 0 Faces: Blurred Stack Failsafe
-    else:
+    # 2. Single Speaker or Multi-Camera Switching Shots
+    single_samples: List[Tuple[float, int]] = []
+    for rel_t, faces in timeline_samples:
+        if len(faces) >= 1:
+            # Use most dominant/prominent face
+            single_samples.append((rel_t, faces[0].center_x))
+
+    if not single_samples:
+        # 0 faces detected consistently -> Safe Blur Stack
+        return FramingDecision(mode='blur_stack', face_count=0, video_width=width, video_height=height)
+
+    # Detect camera angle switches (clusters of face centers separated by significant X shift)
+    # Threshold for camera angle shift: 20% of video width (e.g. 384px in 1920p)
+    shift_threshold = width * 0.20
+
+    shots: List[Dict[str, Any]] = []
+    current_shot_centers = [single_samples[0][1]]
+    current_shot_start = single_samples[0][0]
+
+    for i in range(1, len(single_samples)):
+        t_cur, cx_cur = single_samples[i]
+        median_cx = np.median(current_shot_centers)
+        
+        if abs(cx_cur - median_cx) > shift_threshold:
+            # Camera cut detected
+            shots.append({
+                "start": current_shot_start,
+                "end": t_cur,
+                "cx": int(median_cx)
+            })
+            current_shot_start = t_cur
+            current_shot_centers = [cx_cur]
+        else:
+            current_shot_centers.append(cx_cur)
+
+    # Append last shot
+    shots.append({
+        "start": current_shot_start,
+        "end": (end_time - start_time),
+        "cx": int(np.median(current_shot_centers))
+    })
+
+    # Filter out momentary glitch shots (< 1.2 seconds)
+    filtered_shots = []
+    for s in shots:
+        dur = s["end"] - s["start"]
+        if dur >= 1.2 or not filtered_shots:
+            filtered_shots.append(s)
+        else:
+            # Merge with previous shot
+            filtered_shots[-1]["end"] = s["end"]
+
+    # If only 1 shot or camera angles are all close:
+    if len(filtered_shots) <= 1:
+        avg_cx = filtered_shots[0]["cx"] if filtered_shots else width // 2
+        left_bound = max(0, min(avg_cx - target_crop_w // 2, width - target_crop_w))
         return FramingDecision(
-            mode='blur_stack',
-            face_count=avg_face_count,
+            mode='single_smooth',
+            face_count=1,
+            smoothed_center_x=left_bound + target_crop_w // 2,
             video_width=width,
             video_height=height
         )
+
+    # Multi-camera switching detected: Build piecewise FFmpeg crop expression!
+    def build_crop_expr(shot_list: List[Dict[str, Any]]) -> str:
+        def get_x(cx: int) -> int:
+            return max(0, min(cx - target_crop_w // 2, width - target_crop_w))
+
+        if len(shot_list) == 1:
+            return str(get_x(shot_list[0]["cx"]))
+
+        cur = str(get_x(shot_list[-1]["cx"]))
+        for s in reversed(shot_list[:-1]):
+            t_switch = s["end"]
+            x_val = get_x(s["cx"])
+            cur = f"if(lt(t\\,{t_switch:.2f})\\,{x_val}\\,{cur})"
+        return cur
+
+    crop_expr = build_crop_expr(filtered_shots)
+    first_cx = filtered_shots[0]["cx"]
+    first_x = max(0, min(first_cx - target_crop_w // 2, width - target_crop_w))
+
+    print(f"[+] Multi-Camera shot switching detected! {len(filtered_shots)} shots framed dynamically.")
+    for idx, s in enumerate(filtered_shots):
+        print(f"    Shot #{idx+1}: [{s['start']:.1f}s - {s['end']:.1f}s] Center X: {s['cx']}")
+
+    return FramingDecision(
+        mode='dynamic_cut',
+        face_count=len(filtered_shots),
+        smoothed_center_x=first_x + target_crop_w // 2,
+        crop_x_expr=crop_expr,
+        video_width=width,
+        video_height=height
+    )

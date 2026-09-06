@@ -33,15 +33,16 @@ def generate_ass_header(
     shadow_col = theme["shadow_color"]
     shadow_d = theme["shadow_depth"]
 
-    # Safe Zone MarginV:
-    # In split_screen, place captions right along the middle divider (center alignment)
-    # In single crop or blur stack, place in the lower-third safe zone (above TikTok bottom UI)
+    # Safe Zone Placement:
+    # In split_screen: captions placed right at the middle horizontal divider (center alignment 5)
+    # In single_smooth, dynamic_cut, or blur_stack: placed strictly in the lower-third safe zone (margin_v: 460)
+    # This prevents any overlap with TikTok/Reels/Shorts bottom description, sound title, or comment button.
     if layout_mode == "split_screen":
         alignment = 5  # Middle Center
         margin_v = 0
     else:
         alignment = 2  # Bottom Center
-        margin_v = 420  # Safe above TikTok/Reels bottom UI bar (380px)
+        margin_v = 460  # Y = 1460px (76% height, perfectly above bottom 22% UI overlay)
 
     header = f"""[Script Info]
 Title: Viral Social Captions
@@ -54,8 +55,8 @@ PlayResY: {OUTPUT_HEIGHT}
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,{font_name},{font_size},{primary_col},&H000000FF,{outline_col},{shadow_col},-1,0,0,0,100,100,1.5,0,1,{outline_w},{shadow_d},{alignment},100,100,{margin_v},1
-Style: TopHeader,Trebuchet MS,46,&H00FFFFFF,&H000000FF,&H0084323B,&H00000000,-1,0,0,0,100,100,1.2,0,3,18,0,8,120,120,210,1
-Style: Watermark,Arial,28,&H80FFFFFF,&H000000FF,&H80000000,&H00000000,-1,0,0,0,100,100,1.2,0,1,1.5,0.0,8,60,60,330,1
+Style: TopHeader,Trebuchet MS,44,&H00FFFFFF,&H000000FF,&H0084323B,&H00000000,-1,0,0,0,100,100,1.2,0,3,16,0,8,100,100,220,1
+Style: Watermark,Arial,28,&H99FFFFFF,&H000000FF,&H99000000,&H00000000,-1,0,0,0,100,100,1.2,0,1,1.5,0.0,8,60,60,315,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -155,7 +156,7 @@ def create_styled_ass_subtitles(
     if header_title:
         clean_title = header_title.strip().upper()
         # If title is long, wrap it at a balanced word boundary to fit cleanly inside 1080px portrait
-        if len(clean_title) > 30 and " " in clean_title:
+        if len(clean_title) > 24 and " " in clean_title:
             words = clean_title.split()
             mid = len(words) // 2
             clean_title = " ".join(words[:mid]) + "\\N" + " ".join(words[mid:])

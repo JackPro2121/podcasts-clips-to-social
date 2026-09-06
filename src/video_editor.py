@@ -36,7 +36,12 @@ def build_video_filtergraph(
     # 2. S-Curve Dynamic Color Grading: contrast=1.12, brightness=0.01, saturation=1.18
     studio_grade = "unsharp=lx=7:ly=7:la=0.95:cx=5:cy=5:ca=0.55,eq=contrast=1.12:brightness=0.01:saturation=1.18"
 
-    if framing.mode == "single_smooth":
+    if framing.mode == "dynamic_cut" and framing.crop_x_expr:
+        # Target aspect ratio 9:16 with dynamic multi-camera angle switching
+        crop_w = int(framing.video_height * (9 / 16))
+        v_filter = f"[0:v]crop={crop_w}:{framing.video_height}:'{framing.crop_x_expr}':0,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos,{studio_grade},fps={FPS}[base]"
+
+    elif framing.mode == "single_smooth":
         # Target aspect ratio 9:16
         crop_w = int(framing.video_height * (9 / 16))
         # Ensure center_x keeps crop window within bounds

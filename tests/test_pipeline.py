@@ -57,7 +57,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         header_single = generate_ass_header(theme_key="hormozi", layout_mode="single_smooth")
         self.assertIn("Montserrat Black", header_single)
         self.assertIn("&H00FFFFFF", header_single)  # Crisp white
-        self.assertIn("100,100,420,1", header_single.replace(" ", ""))
+        self.assertIn("100,100,460,1", header_single.replace(" ", ""))
 
         header_split = generate_ass_header(theme_key="neon_green", layout_mode="split_screen")
         self.assertIn("PlayResX: 1080", header_split)
@@ -133,6 +133,18 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         fg_blur = build_video_filtergraph(blur_decision, burn_subtitles=False)
         self.assertIn("boxblur=", fg_blur)
         self.assertIn("overlay=0:", fg_blur)
+
+        # 4. Dynamic Cut (Multi-camera switching)
+        dynamic_decision = FramingDecision(
+            mode="dynamic_cut",
+            face_count=2,
+            crop_x_expr="if(lt(t\\,20.5)\\,200\\,1200)",
+            video_width=1920,
+            video_height=1080
+        )
+        fg_dynamic = build_video_filtergraph(dynamic_decision, burn_subtitles=False)
+        self.assertIn("crop=", fg_dynamic)
+        self.assertIn("if(lt(t\\,20.5)\\,200\\,1200)", fg_dynamic)
 
     def test_audio_mastering_filters(self):
         af = build_audio_filtergraph()
