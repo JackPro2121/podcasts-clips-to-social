@@ -50,7 +50,7 @@ def run_pipeline(
 
     # Step 2: Extract or transcribe word-level transcript
     print("\n--- [2/6] SPEECH-TO-TEXT / TRANSCRIPT EXTRACTION ---")
-    segments = get_transcript(video_path, native_transcript)
+    segments = get_transcript(video_path, native_transcript, video_id=download_info.get('video_id'))
     if not segments:
         print("[-] Error: Could not obtain transcript for video. Exiting.")
         sys.exit(1)

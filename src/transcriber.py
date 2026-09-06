@@ -1,7 +1,10 @@
 import os
+import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
+import requests
+from src.config import CHOCODATA_API_KEY
 
 @dataclass
 class WordTimestamp:
@@ -15,6 +18,34 @@ class TranscriptSegment:
     end: float
     text: str
     words: List[WordTimestamp]
+
+def fetch_transcript_chocodata(video_id: str, api_key: Optional[str] = None) -> Optional[List[TranscriptSegment]]:
+    """
+    Fetches official timestamped YouTube transcript via Chocodata REST API in 0.4s.
+    Bypasses all bot-detection, datacenter blocks, and local Whisper CPU compute.
+    Cost: $0.0009 / call.
+    """
+    key = api_key or CHOCODATA_API_KEY or os.getenv("CHOCODATA_API_KEY", "")
+    if not key:
+        return None
+
+    url = f"https://api.chocodata.com/api/v1/youtube/transcript?api_key={key}&video_id={video_id}"
+    try:
+        print(f"[*] Fetching transcript via Chocodata API for video {video_id}...")
+        res = requests.get(url, timeout=15)
+        if res.status_code == 200:
+            data = res.json()
+            raw_segments = data.get("segments", [])
+            if raw_segments:
+                print(f"[+] Chocodata returned {len(raw_segments)} timed segments in <1s!")
+                return parse_native_transcript(raw_segments)
+            else:
+                print("[-] Chocodata: No transcript segments found for this video.")
+        else:
+            print(f"[-] Chocodata transcript error: {res.status_code} - {res.text[:100]}")
+    except Exception as e:
+        print(f"[-] Chocodata transcript fetch warning: {e}")
+    return None
 
 def parse_native_transcript(raw_transcript: List[Dict[str, Any]]) -> List[TranscriptSegment]:
     """Converts YouTubeTranscriptApi format into TranscriptSegment structures."""
@@ -107,12 +138,25 @@ def transcribe_audio_whisper(
 
 def get_transcript(
     video_path: Path,
-    native_transcript: Optional[List[Dict[str, Any]]] = None
+    native_transcript: Optional[List[Dict[str, Any]]] = None,
+    video_id: Optional[str] = None
 ) -> List[TranscriptSegment]:
-    """Fetches transcript either from native YouTube data or falls back to Whisper."""
+    """Fetches transcript with multi-tier fallback: Native YouTube -> Chocodata API -> Whisper CPU."""
     if native_transcript:
         print("[+] Using native YouTube transcript (0 compute cost).")
         return parse_native_transcript(native_transcript)
-    
-    print("[!] Native transcript not found. Running faster-whisper speech-to-text...")
+
+    # Fast Tier 1.5: Chocodata API
+    target_id = video_id
+    if not target_id:
+        match = re.search(r'([0-9A-Za-z_-]{11})', video_path.stem)
+        if match:
+            target_id = match.group(1)
+
+    if target_id and CHOCODATA_API_KEY:
+        choco_segments = fetch_transcript_chocodata(target_id)
+        if choco_segments:
+            return choco_segments
+
+    print("[!] Native/Chocodata transcript not found. Running faster-whisper speech-to-text...")
     return transcribe_audio_whisper(video_path)

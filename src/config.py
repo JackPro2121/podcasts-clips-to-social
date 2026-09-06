@@ -45,6 +45,12 @@ OPENROUTER_API_KEY = (
     os.getenv("openrouter_api_key") or
     ""
 )
+CHOCODATA_API_KEY = (
+    os.getenv("CHOCODATA_API_KEY") or
+    os.getenv("chocodata_api_key") or
+    ""
+)
+YOUTUBE_COOKIES = os.getenv("YOUTUBE_COOKIES", "")
 
 # Video & Format Defaults (Ultra HD 60FPS Broadcast Studio)
 OUTPUT_WIDTH = 1080

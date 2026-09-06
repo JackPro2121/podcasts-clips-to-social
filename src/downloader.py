@@ -167,9 +167,78 @@ def download_via_apify(
         print(f"[-] Apify download encountered an exception: {e}")
         return None
 
+from src.config import DOWNLOADS_DIR, APIFY_API_TOKEN, YOUTUBE_COOKIES
+
+def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[str] = None, transcript: Optional[Any] = None) -> Optional[Dict[str, Any]]:
+    """
+    Downloads video using yt-dlp with iOS/Android mobile clients and optional cookie authentication.
+    Runs 100% free with 0 Apify compute cost.
+    """
+    out_template = str(target_dir / "%(id)s_%(title).50s.%(ext)s")
+    ydl_opts = {
+        'format': 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best[height<=1080]/best',
+        'outtmpl': out_template,
+        'merge_output_format': 'mp4',
+        'quiet': False,
+        'no_warnings': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['ios', 'android', 'mweb', 'web_embedded']
+            }
+        },
+        'postprocessors': [{
+            'key': 'FFmpegVideoConvertor',
+            'preferedformat': 'mp4',
+        }]
+    }
+
+    # Pass YouTube cookies if configured (bypasses datacenter bot checks)
+    cookie_path = None
+    if YOUTUBE_COOKIES and YOUTUBE_COOKIES.strip():
+        try:
+            cookie_path = target_dir / "yt_cookies.txt"
+            cookie_path.write_text(YOUTUBE_COOKIES.strip(), encoding="utf-8")
+            ydl_opts['cookiefile'] = str(cookie_path)
+            print("[*] Loaded YouTube cookies from environment/secret.")
+        except Exception as e:
+            print(f"[-] Cookie setup warning: {e}")
+
+    try:
+        print("[*] Attempting zero-cost direct download via yt-dlp (iOS/Android mobile client)...")
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url_or_path, download=True)
+            downloaded_file = ydl.prepare_filename(info)
+            if not os.path.exists(downloaded_file):
+                candidate = str(Path(downloaded_file).with_suffix('.mp4'))
+                if os.path.exists(candidate):
+                    downloaded_file = candidate
+
+            print(f"[+] Successfully downloaded video via yt-dlp ($0 cost): {downloaded_file}")
+            return {
+                'video_path': Path(downloaded_file).resolve(),
+                'title': info.get('title', f"YouTube_{video_id or 'podcast'}"),
+                'duration': float(info.get('duration', 0.0)),
+                'transcript': transcript,
+                'video_id': video_id or info.get('id'),
+                'is_local': False
+            }
+    except Exception as e:
+        print(f"[-] yt-dlp direct download encountered error: {e}")
+        return None
+    finally:
+        # Clean up temporary cookies file if created
+        if cookie_path and cookie_path.exists():
+            try:
+                cookie_path.unlink()
+            except Exception:
+                pass
+
 def download_video(url_or_path: str, output_dir: Optional[Path] = None) -> Dict[str, Any]:
     """
-    Downloads the video using Apify Actor (preferred) or yt-dlp fallback.
+    Smart multi-tier downloader:
+    1. Local file check.
+    2. Zero-cost yt-dlp with iOS/Android client + Cookies.
+    3. Apify Actor proxy fallback if datacenter blocks occur.
     """
     target_dir = output_dir or DOWNLOADS_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -182,6 +251,7 @@ def download_video(url_or_path: str, output_dir: Optional[Path] = None) -> Dict[
             'title': local_path.stem,
             'duration': 0.0,
             'transcript': None,
+            'video_id': extract_youtube_id(local_path.stem),
             'is_local': True
         }
 
@@ -191,46 +261,18 @@ def download_video(url_or_path: str, output_dir: Optional[Path] = None) -> Dict[
     if video_id:
         transcript = fetch_youtube_transcript(video_id)
 
-    # 1. If Apify API token is configured, use Apify for 100% cloud bot-bypass
+    # 1. First attempt: Direct yt-dlp ($0 cost, 0 Apify credits)
+    ytdlp_result = download_via_ytdlp(url_or_path, target_dir, video_id=video_id, transcript=transcript)
+    if ytdlp_result:
+        return ytdlp_result
+
+    # 2. Fallback attempt: Apify Actor proxy (bypasses severe datacenter blocks)
     if APIFY_API_TOKEN and ("youtube.com" in url_or_path or "youtu.be" in url_or_path):
+        print("[!] Direct yt-dlp failed or blocked. Engaging Apify proxy downloader...")
         apify_result = download_via_apify(url_or_path, target_dir, quality="1080")
         if apify_result:
             apify_result['transcript'] = transcript
+            apify_result['video_id'] = video_id
             return apify_result
-        print("[!] Apify download failed or timed out. Falling back to yt-dlp...")
 
-    # Download with yt-dlp (up to 1080p, AAC audio, mp4 container)
-    out_template = str(target_dir / "%(id)s_%(title).50s.%(ext)s")
-    ydl_opts = {
-        'format': 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'outtmpl': out_template,
-        'merge_output_format': 'mp4',
-        'quiet': False,
-        'no_warnings': True,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'tv']
-            }
-        },
-        'postprocessors': [{
-            'key': 'FFmpegVideoConvertor',
-            'preferedformat': 'mp4',
-        }]
-    }
-
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url_or_path, download=True)
-        downloaded_file = ydl.prepare_filename(info)
-        # Handle possible extension change after merge
-        if not os.path.exists(downloaded_file):
-            candidate = str(Path(downloaded_file).with_suffix('.mp4'))
-            if os.path.exists(candidate):
-                downloaded_file = candidate
-
-        return {
-            'video_path': Path(downloaded_file).resolve(),
-            'title': info.get('title', 'podcast_episode'),
-            'duration': float(info.get('duration', 0.0)),
-            'transcript': transcript,
-            'is_local': False
-        }
+    raise RuntimeError(f"Failed to download video from {url_or_path} using both yt-dlp and Apify.")

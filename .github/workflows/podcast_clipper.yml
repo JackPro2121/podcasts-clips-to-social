@@ -115,6 +115,8 @@ jobs:
           BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY || secrets.BUFFER_ACCESS_TOKEN }}
           BUFFER_CHANNEL_IDS: ${{ secrets.BUFFER_CHANNEL_IDS }}
           CHANNEL_WATERMARK: ${{ secrets.CHANNEL_WATERMARK || '@allinonepodcastsss' }}
+          CHOCODATA_API_KEY: ${{ secrets.CHOCODATA_API_KEY }}
+          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
           APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
