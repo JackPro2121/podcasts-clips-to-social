@@ -45,7 +45,7 @@ def build_video_filtergraph(
     punch_zoom = ",crop='if(between(mod(t,9),4.0,7.0),964,1080)':'if(between(mod(t,9),4.0,7.0),1714,1920)':(iw-ow)/2:(ih-oh)*0.35,scale=1080:1920:flags=lanczos" if ENABLE_PUNCH_ZOOM else ""
 
     if framing.mode == "multi_shot_dynamic" and framing.shots:
-        fg_height = int(OUTPUT_WIDTH * (9 / 16))  # 608px
+        fg_height = int(round(OUTPUT_WIDTH * (9 / 16) / 2) * 2)  # 608px (even number)
         fg_y = (OUTPUT_HEIGHT - fg_height) // 2   # 656px
         target_crop_w = int(framing.video_height * (9 / 16))
         half_h = OUTPUT_HEIGHT // 2
@@ -62,7 +62,7 @@ def build_video_filtergraph(
                 shot_f = (
                     f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,split=2[s{i}_fg_in][s{i}_bg_in];"
                     f"[s{i}_bg_in]scale=270:480,boxblur=8:2,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}[s{i}_bg];"
-                    f"[s{i}_fg_in]scale={OUTPUT_WIDTH}:{fg_height}:force_original_aspect_ratio=decrease,pad={OUTPUT_WIDTH}:{fg_height}:(ow-iw)/2:(oh-ih)/2[s{i}_fg];"
+                    f"[s{i}_fg_in]scale={OUTPUT_WIDTH}:{fg_height}:flags=lanczos,{studio_grade}[s{i}_fg];"
                     f"[s{i}_bg][s{i}_fg]overlay=0:{fg_y},scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},setsar=1:1,fps={FPS}[{label}]"
                 )
             elif shot.mode == "split_screen" and shot.speaker1_box and shot.speaker2_box:
