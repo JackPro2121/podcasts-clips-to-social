@@ -176,7 +176,7 @@ def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[st
     """
     out_template = str(target_dir / "%(id)s_%(title).50s.%(ext)s")
     ydl_opts = {
-        'format': 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best[height<=1080]/best',
+        'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
         'outtmpl': out_template,
         'merge_output_format': 'mp4',
         'quiet': False,
