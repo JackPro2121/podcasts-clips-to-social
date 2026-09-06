@@ -55,8 +55,8 @@ PlayResY: {OUTPUT_HEIGHT}
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,{font_name},{font_size},{primary_col},&H000000FF,{outline_col},{shadow_col},-1,0,0,0,100,100,1.5,0,1,{outline_w},{shadow_d},{alignment},100,100,{margin_v},1
-Style: TopHeader,Montserrat Black,34,&H00FFFFFF,&H000000FF,&H600A0A0A,&H00000000,-1,0,0,0,100,100,1.2,0,3,14,0,8,100,100,220,1
-Style: Watermark,Arial,28,&H99FFFFFF,&H000000FF,&H99000000,&H00000000,-1,0,0,0,100,100,1.2,0,1,1.5,0.0,8,60,60,315,1
+Style: TopHeader,Montserrat Black,46,&H00FFFFFF,&H000000FF,&H00B86B62,&H00000000,-1,0,0,0,100,100,1.2,0,3,18,0,8,120,120,210,1
+Style: Watermark,Arial,28,&H99FFFFFF,&H000000FF,&H99000000,&H00000000,-1,0,0,0,100,100,1.2,0,1,1.5,0.0,8,60,60,335,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -159,10 +159,10 @@ def create_styled_ass_subtitles(
         clean_title = re.sub(r'[^\w\s\-\'\,\.\?]', '', clean_title).strip()
         clean_title = re.sub(r'\s+', ' ', clean_title)
 
-        # If title is long, wrap it cleanly at a balanced word boundary to fit inside 1080px portrait
-        if len(clean_title) > 26 and " " in clean_title:
-            words = clean_title.split()
-            mid = len(words) // 2
+        # Balance hook title cleanly across 2 punchy lines (e.g. THE EYE TRICK TO TURN \N YOUR MIND OFF & SLEEP)
+        words = clean_title.split()
+        if len(words) >= 2:
+            mid = (len(words) + 1) // 2
             clean_title = " ".join(words[:mid]) + "\\N" + " ".join(words[mid:])
         
         hook_dur = format_ass_timestamp(min(6.5, clip_end - clip_start))

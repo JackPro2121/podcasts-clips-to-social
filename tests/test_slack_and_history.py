@@ -82,7 +82,8 @@ class TestSlackAndHistory(unittest.TestCase):
             )
             content = out_ass.read_text(encoding="utf-8")
             self.assertIn("TopHeader", content)
-            self.assertIn("WHY WE AGE FASTER", content)
+            self.assertIn("&H00B86B62", content)
+            self.assertIn("WHY WE\\NAGE FASTER", content)
         finally:
             if out_ass.exists():
                 out_ass.unlink()
