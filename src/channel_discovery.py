@@ -266,14 +266,13 @@ def resolve_daily_niche(niche: Optional[str] = None) -> str:
     day_idx = datetime.datetime.now(datetime.timezone.utc).weekday()
     return DAY_OF_WEEK_NICHES[day_idx]
 
-def get_daily_discovery_episode(
+def get_daily_discovery_candidates(
     niche: Optional[str] = None,
     history_file: str = "history.txt"
-) -> str:
+) -> List[str]:
     """
-    Discovers the latest high-CPM podcast episode URL automatically.
-    Prioritizes fresh episodes not previously processed in history.
-    Uses free yt-dlp search across top high-CPM channels.
+    Discovers fresh high-CPM podcast episodes automatically and returns a list
+    of candidates in priority order (fresh unclipped episodes).
     """
     import random
     import yt_dlp
@@ -331,14 +330,23 @@ def get_daily_discovery_episode(
                 print(f"[-] Search query error for '{q}': {e}")
 
     if candidate_videos:
-        chosen_url, chosen_title, chosen_id = candidate_videos[0]
-        print(f"[+] Found fresh high-CPM podcast episode: '{chosen_title}' ({chosen_url})")
-        return chosen_url
+        print(f"[+] Found {len(candidate_videos)} fresh high-CPM podcast candidates:")
+        for idx, (vurl, vtitle, _) in enumerate(candidate_videos[:3], 1):
+            print(f"    #{idx}: '{vtitle}' ({vurl})")
+        return [c[0] for c in candidate_videos]
 
     # Fallback to popular evergreen business episode if nothing found
     fallback = "https://www.youtube.com/watch?v=UF8uR6Z6KLc"
     print(f"[*] Defaulting to verified episode: {fallback}")
-    return fallback
+    return [fallback]
+
+def get_daily_discovery_episode(
+    niche: Optional[str] = None,
+    history_file: str = "history.txt"
+) -> str:
+    """Discovers top high-CPM podcast episode URL automatically."""
+    candidates = get_daily_discovery_candidates(niche=niche, history_file=history_file)
+    return candidates[0] if candidates else "https://www.youtube.com/watch?v=UF8uR6Z6KLc"
 
 def main():
     parser = argparse.ArgumentParser(

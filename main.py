@@ -45,7 +45,23 @@ def run_pipeline(
 
     # Step 1: Download video & extract native captions if available
     print("\n--- [1/6] INGESTION & DOWNLOAD ---")
-    download_info = download_video(url_or_path)
+    candidates = [url_or_path] if isinstance(url_or_path, str) else list(url_or_path)
+    download_info = None
+    active_source_url = candidates[0]
+    for cand_url in candidates:
+        try:
+            print(f"[*] Ingesting video candidate: {cand_url}")
+            download_info = download_video(cand_url)
+            if download_info:
+                active_source_url = cand_url
+                break
+        except Exception as e:
+            print(f"[-] Candidate '{cand_url}' download failed: {e}. Trying next candidate...")
+
+    if not download_info:
+        print("[-] Fatal: All candidate downloads failed. Exiting.")
+        sys.exit(1)
+
     video_path = download_info['video_path']
     video_title = download_info['title']
     native_transcript = download_info.get('transcript')
@@ -149,7 +165,7 @@ def run_pipeline(
                 video_url=direct_url,
                 text=caption_text,
                 title=moment.title,
-                source_url=url_or_path
+                source_url=active_source_url
             )
             buffer_status = "Scheduled" if schedule_results else "Failed"
         elif post_to_buffer and not direct_url:
@@ -174,7 +190,7 @@ def run_pipeline(
 
     # Record to persistent zero-duplicate history
     try:
-        record_history(video_url=url_or_path, title=video_title, niche=niche)
+        record_history(video_url=active_source_url, title=video_title, niche=niche)
     except Exception as e:
         print(f"[-] History record warning: {e}")
 
@@ -183,7 +199,7 @@ def run_pipeline(
         slack = SlackNotifier()
         slack.send_run_report(
             podcast_title=video_title,
-            podcast_url=url_or_path,
+            podcast_url=active_source_url,
             niche=niche,
             clips=clips_report
         )
@@ -258,9 +274,9 @@ def main():
     resolved_niche = args.niche
     if not target_url or target_url.strip().lower() in ("auto", "none", ""):
         print("[*] No URL provided. Activating Automated High-CPM Podcast Discovery...")
-        from src.channel_discovery import get_daily_discovery_episode, resolve_daily_niche
+        from src.channel_discovery import get_daily_discovery_candidates, resolve_daily_niche
         resolved_niche = resolve_daily_niche(args.niche if args.niche != "auto" else None)
-        target_url = get_daily_discovery_episode(niche=resolved_niche)
+        target_url = get_daily_discovery_candidates(niche=resolved_niche)
     elif resolved_niche == "auto":
         from src.channel_discovery import resolve_daily_niche
         resolved_niche = resolve_daily_niche()
