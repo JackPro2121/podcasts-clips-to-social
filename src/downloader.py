@@ -167,7 +167,7 @@ def download_via_apify(
         print(f"[-] Apify download encountered an exception: {e}")
         return None
 
-from src.config import DOWNLOADS_DIR, APIFY_API_TOKEN, YOUTUBE_COOKIES
+from src.config import DOWNLOADS_DIR, APIFY_API_TOKEN, YOUTUBE_COOKIES, YTDLP_PROXY, RAPIDAPI_KEY
 
 def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[str] = None, transcript: Optional[Any] = None) -> Optional[Dict[str, Any]]:
     """
@@ -188,6 +188,13 @@ def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[st
             'preferedformat': 'mp4',
         }]
     }
+
+    # Option 1: Route traffic through proxy if configured (bypasses datacenter blocks)
+    if YTDLP_PROXY and YTDLP_PROXY.strip():
+        proxy_str = YTDLP_PROXY.strip()
+        base_opts['proxy'] = proxy_str
+        masked_proxy = proxy_str.split('@')[-1] if '@' in proxy_str else proxy_str[:15] + "..."
+        print(f"[*] Configured proxy routing for yt-dlp: {masked_proxy}")
 
     # Pass YouTube cookies if configured (bypasses datacenter bot checks)
     cookie_path = None
@@ -279,12 +286,66 @@ def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[st
             except Exception:
                 pass
 
+def download_via_rapidapi(
+    video_url: str,
+    output_dir: Path,
+    api_key: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Option 2: Downloads YouTube video via RapidAPI YouTube Downloader endpoints.
+    Provides 50-100 free requests per month without bot captcha.
+    """
+    key = api_key or RAPIDAPI_KEY
+    if not key:
+        return None
+
+    vid_id = extract_youtube_id(video_url)
+    if not vid_id:
+        return None
+
+    print(f"[*] Attempting YouTube download via RapidAPI Downloader (Option 2)...")
+    headers = {
+        "x-rapidapi-key": key,
+        "x-rapidapi-host": "youtube-media-downloader.p.rapidapi.com"
+    }
+    url = f"https://youtube-media-downloader.p.rapidapi.com/v2/video/details?videoId={vid_id}"
+    try:
+        res = requests.get(url, headers=headers, timeout=25)
+        if res.status_code == 200:
+            data = res.json()
+            videos = data.get("videos", {}).get("items", [])
+            download_url = None
+            for v in videos:
+                if v.get("url"):
+                    download_url = v["url"]
+                    break
+            if download_url:
+                out_file = output_dir / f"{vid_id}_rapidapi.mp4"
+                print(f"[*] Streaming video from RapidAPI CDN ({out_file.name})...")
+                with requests.get(download_url, stream=True, timeout=180) as stream_res:
+                    stream_res.raise_for_status()
+                    with open(out_file, "wb") as f:
+                        for chunk in stream_res.iter_content(chunk_size=1024 * 1024):
+                            if chunk:
+                                f.write(chunk)
+                print(f"[+] Download complete via RapidAPI: {out_file} ({out_file.stat().st_size / (1024*1024):.2f} MB)")
+                return {
+                    "video_path": out_file.resolve(),
+                    "title": data.get("title", f"YouTube_{vid_id}"),
+                    "duration": float(data.get("lengthSeconds", 0.0)),
+                    "is_local": False
+                }
+    except Exception as e:
+        print(f"[-] RapidAPI download error: {e}")
+    return None
+
 def download_video(url_or_path: str, output_dir: Optional[Path] = None) -> Dict[str, Any]:
     """
     Smart multi-tier downloader:
     1. Local file check.
-    2. Zero-cost yt-dlp with iOS/Android client + Cookies.
-    3. Apify Actor proxy fallback if datacenter blocks occur.
+    2. Zero-cost yt-dlp (bgutil PO token provider + optional Webshare proxy / cookies).
+    3. RapidAPI YouTube Downloader fallback (Option 2).
+    4. Apify Actor proxy fallback (Option 3).
     """
     target_dir = output_dir or DOWNLOADS_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -307,18 +368,27 @@ def download_video(url_or_path: str, output_dir: Optional[Path] = None) -> Dict[
     if video_id:
         transcript = fetch_youtube_transcript(video_id)
 
-    # 1. First attempt: Direct yt-dlp ($0 cost, 0 Apify credits)
+    # 1. Tier 1: Direct yt-dlp ($0 cost, uses bgutil PO Token + Proxy if set)
     ytdlp_result = download_via_ytdlp(url_or_path, target_dir, video_id=video_id, transcript=transcript)
     if ytdlp_result:
         return ytdlp_result
 
-    # 2. Fallback attempt: Apify Actor proxy (bypasses severe datacenter blocks)
+    # 2. Tier 2: RapidAPI Downloader fallback (Option 2)
+    if RAPIDAPI_KEY:
+        print("[!] Direct yt-dlp failed. Engaging RapidAPI downloader fallback...")
+        rapidapi_result = download_via_rapidapi(url_or_path, target_dir)
+        if rapidapi_result:
+            rapidapi_result['transcript'] = transcript
+            rapidapi_result['video_id'] = video_id
+            return rapidapi_result
+
+    # 3. Tier 3: Apify Actor proxy fallback
     if APIFY_API_TOKEN and ("youtube.com" in url_or_path or "youtu.be" in url_or_path):
-        print("[!] Direct yt-dlp failed or blocked. Engaging Apify proxy downloader...")
+        print("[!] Engaging Apify proxy downloader...")
         apify_result = download_via_apify(url_or_path, target_dir, quality="1080")
         if apify_result:
             apify_result['transcript'] = transcript
             apify_result['video_id'] = video_id
             return apify_result
 
-    raise RuntimeError(f"Failed to download video from {url_or_path} using both yt-dlp and Apify.")
+    raise RuntimeError(f"Failed to download video from {url_or_path} using yt-dlp, RapidAPI, and Apify.")

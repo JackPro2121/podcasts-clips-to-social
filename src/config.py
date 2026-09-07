@@ -58,6 +58,17 @@ CHOCODATA_API_KEY = (
     ""
 )
 YOUTUBE_COOKIES = os.getenv("YOUTUBE_COOKIES", "")
+YTDLP_PROXY = (
+    os.getenv("YTDLP_PROXY") or
+    os.getenv("HTTP_PROXY") or
+    os.getenv("PROXY_URL") or
+    ""
+)
+RAPIDAPI_KEY = (
+    os.getenv("RAPIDAPI_KEY") or
+    os.getenv("rapidapi_key") or
+    ""
+)
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
 SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN", "")
 SLACK_CHANNEL = os.getenv("SLACK_CHANNEL", "podcast-clip")
