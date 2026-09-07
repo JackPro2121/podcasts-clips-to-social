@@ -31,7 +31,26 @@ async function loadCookies() {
   const countEl = document.getElementById("cookie-count");
 
   try {
-    const cookies = await chrome.cookies.getAll({ domain: "youtube.com" });
+    const ytCookies = await chrome.cookies.getAll({ domain: "youtube.com" });
+    let googleCookies = [];
+    try {
+      googleCookies = await chrome.cookies.getAll({ domain: "google.com" });
+    } catch (_) {}
+
+    const authNames = new Set([
+      "SAPISID", "APISID", "SSID", "HSID", "SID",
+      "__Secure-1PSID", "__Secure-3PSID", "__Secure-1PAPISID", "__Secure-3PAPISID",
+      "LOGIN_INFO", "PREF", "VISITOR_INFO1_LIVE", "YSC"
+    ]);
+    const relevantGoogle = (googleCookies || []).filter((c) => authNames.has(c.name));
+
+    const cookies = [...(ytCookies || [])];
+    const existing = new Set(cookies.map((c) => `${c.domain}:${c.name}`));
+    for (const gc of relevantGoogle) {
+      if (!existing.has(`${gc.domain}:${gc.name}`)) {
+        cookies.push(gc);
+      }
+    }
 
     if (!cookies || cookies.length === 0) {
       sessionStatusEl.innerHTML = '<span class="badge-warn">⚠️ No cookies found</span>';
@@ -43,7 +62,7 @@ async function loadCookies() {
 
     // Check if user is logged into YouTube (has LOGIN_INFO, SID, or __Secure-3PSID)
     const hasAuth = cookies.some((c) =>
-      ["LOGIN_INFO", "SID", "SSID", "__Secure-3PSID", "__Secure-1PSID"].includes(c.name)
+      ["LOGIN_INFO", "SID", "SSID", "__Secure-3PSID", "__Secure-1PSID", "SAPISID"].includes(c.name)
     );
 
     if (hasAuth) {
