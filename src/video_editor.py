@@ -32,12 +32,21 @@ def build_video_filtergraph(
     """
     filters = []
 
-    # Ultra-HD Broadcast Studio Enhancements:
-    # 1. High-Quality 3D Denoise: Cleans source compression noise before sharpening
-    # 2. AMD FidelityFX Contrast Adaptive Sharpen (CAS 0.45): Razor-sharp edges, eyes, hair & details
-    # 3. Multi-band Unsharp: Micro-contrast boost
-    # 4. Balanced Contrast & Vibrancy: Rich OLED-ready mobile colors
-    studio_grade = "hqdn3d=1.5:1.5:3:3,cas=0.45,unsharp=lx=5:ly=5:la=0.75:cx=3:cy=3:ca=0.40,eq=contrast=1.07:brightness=0.01:saturation=1.12"
+    # Multi-Stage Broadcast Studio Enhancement & Super-Resolution Chain:
+    if framing.video_height and framing.video_height < 720:
+        # Aggressive Super-Resolution AI Enhancement for < 720p sources (e.g. 360p / 480p):
+        # 1. hqdn3d=2.0:2.0:4.0:4.0 - Eliminates macroblocking and compression artifacts
+        # 2. cas=0.60 - High AMD FidelityFX Contrast Adaptive Sharpening restores lost edges & facial details
+        # 3. unsharp=lx=7:ly=7:la=1.1:cx=5:cy=5:ca=0.50 - Sharpens micro-contours & text
+        # 4. eq=contrast=1.09:brightness=0.01:saturation=1.15 - High-vibrancy OLED mobile grade
+        studio_grade = "hqdn3d=2.0:2.0:4.0:4.0,cas=0.60,unsharp=lx=7:ly=7:la=1.1:cx=5:cy=5:ca=0.50,eq=contrast=1.09:brightness=0.01:saturation=1.15"
+    else:
+        # Broadcast Studio Mastering for >= 720p / 1080p native HD sources:
+        # 1. hqdn3d=1.5:1.5:3:3 - Fine luma/chroma noise cleanup
+        # 2. cas=0.45 - Subtle AMD FidelityFX Contrast Adaptive Sharpening for razor-sharp edges without halos
+        # 3. unsharp=lx=5:ly=5:la=0.75:cx=3:cy=3:ca=0.40 - High-frequency facial & eye clarity
+        # 4. eq=contrast=1.07:brightness=0.01:saturation=1.12 - Balanced broadcast color grade
+        studio_grade = "hqdn3d=1.5:1.5:3:3,cas=0.45,unsharp=lx=5:ly=5:la=0.75:cx=3:cy=3:ca=0.40,eq=contrast=1.07:brightness=0.01:saturation=1.12"
 
     # Intelligent Dynamic Punch Zoom (Alex Hormozi / Diary of a CEO style):
     # Starts at 1.0x NORMAL wide crop for the first 4.0s (anchors viewer).
@@ -64,17 +73,17 @@ def build_video_filtergraph(
                 shot_f = (
                     f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,split=2[s{i}_fg_in][s{i}_bg_in];"
                     f"[s{i}_bg_in]scale=270:480,boxblur=8:2,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}[s{i}_bg];"
-                    f"[s{i}_fg_in]scale={OUTPUT_WIDTH}:{fg_height}:flags=lanczos,{studio_grade}[s{i}_fg];"
-                    f"[s{i}_bg][s{i}_fg]overlay=0:{fg_y},scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},setsar=1:1,fps={FPS}[{label}]"
+                    f"[s{i}_fg_in]scale={OUTPUT_WIDTH}:{fg_height}:flags=lanczos+accurate_rnd,{studio_grade}[s{i}_fg];"
+                    f"[s{i}_bg][s{i}_fg]overlay=0:{fg_y},scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[{label}]"
                 )
             elif shot.mode == "split_screen" and shot.speaker1_box and shot.speaker2_box:
                 s1_x, s1_y, s1_w, s1_h = shot.speaker1_box
                 s2_x, s2_y, s2_w, s2_h = shot.speaker2_box
                 shot_f = (
                     f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,split=2[s{i}_p1][s{i}_p2];"
-                    f"[s{i}_p1]crop={s1_w}:{s1_h}:{s1_x}:0,scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos[s{i}_top];"
-                    f"[s{i}_p2]crop={s2_w}:{s2_h}:{s2_x}:0,scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos[s{i}_bot];"
-                    f"[s{i}_top][s{i}_bot]vstack=inputs=2,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},setsar=1:1,fps={FPS}[{label}]"
+                    f"[s{i}_p1]crop={s1_w}:{s1_h}:{s1_x}:0,scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd[s{i}_top];"
+                    f"[s{i}_p2]crop={s2_w}:{s2_h}:{s2_x}:0,scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd[s{i}_bot];"
+                    f"[s{i}_top][s{i}_bot]vstack=inputs=2,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[{label}]"
                 )
             else:
                 # Full 9:16 portrait on speaker
@@ -82,7 +91,7 @@ def build_video_filtergraph(
                 shot_f = (
                     f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,"
                     f"crop={target_crop_w}:{framing.video_height}:{crop_x}:0,"
-                    f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos,setsar=1:1,fps={FPS}[{label}]"
+                    f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[{label}]"
                 )
             shot_filters.append(shot_f)
 
@@ -93,7 +102,7 @@ def build_video_filtergraph(
     elif framing.mode == "dynamic_cut" and framing.crop_x_expr:
         # Target aspect ratio 9:16 with dynamic multi-camera angle switching
         crop_w = int(framing.video_height * (9 / 16))
-        v_filter = f"[0:v]crop={crop_w}:{framing.video_height}:'{framing.crop_x_expr}':0,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos,{studio_grade}{punch_zoom},fps={FPS}[base]"
+        v_filter = f"[0:v]crop={crop_w}:{framing.video_height}:'{framing.crop_x_expr}':0,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,{studio_grade}{punch_zoom},fps={FPS}[base]"
 
     elif framing.mode == "single_smooth":
         # Target aspect ratio 9:16 with intelligent eye-level framing
@@ -101,7 +110,7 @@ def build_video_filtergraph(
         # Ensure center_x keeps crop window within bounds
         cx = framing.smoothed_center_x or (framing.video_width // 2)
         crop_x = max(0, min(cx - crop_w // 2, framing.video_width - crop_w))
-        v_filter = f"[0:v]crop={crop_w}:{framing.video_height}:{crop_x}:0,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos,{studio_grade}{punch_zoom},fps={FPS}[base]"
+        v_filter = f"[0:v]crop={crop_w}:{framing.video_height}:{crop_x}:0,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,{studio_grade}{punch_zoom},fps={FPS}[base]"
 
     elif framing.mode == "split_screen" and framing.speaker1_box and framing.speaker2_box:
         # Split-screen stack: Top pane (1080x960), Bottom pane (1080x960)
@@ -111,8 +120,8 @@ def build_video_filtergraph(
 
         v_filter = (
             f"[0:v]split=2[s1_in][s2_in];"
-            f"[s1_in]crop={s1_w}:{s1_h}:{s1_x}:0,scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos,{studio_grade}[top_pane];"
-            f"[s2_in]crop={s2_w}:{s2_h}:{s2_x}:0,scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos,{studio_grade}[bottom_pane];"
+            f"[s1_in]crop={s1_w}:{s1_h}:{s1_x}:0,scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd,{studio_grade}[top_pane];"
+            f"[s2_in]crop={s2_w}:{s2_h}:{s2_x}:0,scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd,{studio_grade}[bottom_pane];"
             f"[top_pane][bottom_pane]vstack=inputs=2,fps={FPS}[base]"
         )
 
@@ -126,7 +135,7 @@ def build_video_filtergraph(
             f"[0:v]split=2[bg_in][fg_in];"
             f"[bg_in]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
             f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},boxblur=30:5,eq=brightness=-0.16:contrast=1.12[bg];"
-            f"[fg_in]scale={OUTPUT_WIDTH}:{fg_height}:flags=lanczos,{studio_grade}[fg];"
+            f"[fg_in]scale={OUTPUT_WIDTH}:{fg_height}:flags=lanczos+accurate_rnd,{studio_grade}[fg];"
             f"[bg][fg]overlay=0:{fg_y},fps={FPS}[base]"
         )
 

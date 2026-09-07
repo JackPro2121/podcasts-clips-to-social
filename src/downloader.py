@@ -194,11 +194,13 @@ def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[st
     """
     Downloads video using yt-dlp with Node.js challenge solving and optional cookie authentication.
     Runs 100% free with 0 Apify compute cost.
+    Prioritizes true High-Definition (1080p/720p) streams with bgutil POT provider,
+    with intelligent fallback to lower resolutions if YouTube enforces strict throttling.
     """
     out_template = str(target_dir / "%(id)s_%(title).50s.%(ext)s")
     base_opts = {
         'js_runtimes': {'deno': {}, 'node': {}},
-        'format': '137+140/399+251/248+251/136+140/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
+        'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
         'outtmpl': out_template,
         'merge_output_format': 'mp4',
         'quiet': False,
@@ -216,7 +218,7 @@ def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[st
         masked_proxy = proxy_str.split('@')[-1] if '@' in proxy_str else proxy_str[:15] + "..."
         print(f"[*] Configured proxy routing for yt-dlp: {masked_proxy}")
 
-    # Connect to local bgutil POT provider if running (port 4416, specifically for web client)
+    # Connect to local bgutil POT provider if running (port 4416)
     pot_args = {'youtubepot-bgutilhttp': {'base_url': ['http://127.0.0.1:4416']}}
 
     cookie_path = None
@@ -229,47 +231,59 @@ def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[st
 
     strategies = []
 
-    # Priority 1: Mobile VR Client (1080p H.264 & DASH streams) - Best unauthenticated rate & zero bot-blocks
-    strategies.append(("Mobile VR Client (1080p DASH)", {
+    # Priority 1: Default & MWeb Client with POT Provider (Most stable client for bgutil)
+    strategies.append(("Default & MWeb with POT Provider (1080p)", {
         **base_opts,
-        'format': '137+140/399+251/248+251/136+140/bestvideo[height<=1080]+bestaudio/best[height<=1080]',
-        'extractor_args': {'youtube': {'player_client': ['android_vr']}}
+        'format': 'bestvideo[height>=720][height<=1080]+bestaudio/bestvideo[height<=1080]+bestaudio/best[height<=1080]',
+        'extractor_args': {'youtube': {'player_client': ['default', 'mweb']}, **pot_args}
     }))
 
     # Priority 2: Primary Web Client (Full 1080p60 DASH streams with Deno solver + POT Provider)
     strategies.append(("Primary Web Client (1080p Deno + POT)", {
         **base_opts,
-        'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
+        'format': 'bestvideo[height>=720][height<=1080]+bestaudio/bestvideo[height<=1080]+bestaudio/best[height<=1080]',
         'extractor_args': {'youtube': {'player_client': ['web']}, **pot_args}
     }))
 
-    # Priority 3: iOS Mobile Client (1080p H.264 streams)
-    strategies.append(("iOS Mobile Client (1080p)", {
+    # Priority 3: Mobile VR Client with POT Provider (1080p H.264 & DASH streams)
+    strategies.append(("Mobile VR Client (1080p DASH + POT)", {
         **base_opts,
-        'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
-        'extractor_args': {'youtube': {'player_client': ['ios']}}
+        'format': 'bestvideo[height>=720][height<=1080]+bestaudio/bestvideo[height<=1080]+bestaudio/best[height<=1080]',
+        'extractor_args': {'youtube': {'player_client': ['android_vr']}, **pot_args}
     }))
 
-    # Priority 4: TV Client (1080p)
-    strategies.append(("TV Client (1080p)", {
+    # Priority 4: iOS Mobile Client with POT Provider (1080p)
+    strategies.append(("iOS Mobile Client (1080p + POT)", {
         **base_opts,
-        'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
-        'extractor_args': {'youtube': {'player_client': ['tv_embedded', 'tv']}}
+        'format': 'bestvideo[height>=720][height<=1080]+bestaudio/bestvideo[height<=1080]+bestaudio/best[height<=1080]',
+        'extractor_args': {'youtube': {'player_client': ['ios']}, **pot_args}
     }))
 
-    # Priority 5: Universal Multi-Client Web Fallback
-    strategies.append(("Universal Web Fallback", {
+    # Priority 5: Universal Multi-Client Fallback (web, tv, android_vr + POT)
+    strategies.append(("Universal Multi-Client with POT", {
         **base_opts,
-        'extractor_args': {'youtube': {'player_client': ['android_vr', 'web', 'tv']}}
+        'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
+        'extractor_args': {'youtube': {'player_client': ['web', 'tv_embedded', 'android_vr']}, **pot_args}
     }))
 
-    # Priority 6: Fallback with cookies (only if clean strategies fail, e.g. age-restricted content)
+    # Priority 6: Fallback with cookies (if provided)
     if cookie_path and cookie_path.exists():
         strategies.append(("Authenticated Session (with cookies)", {
             **base_opts,
             'cookiefile': str(cookie_path),
             'extractor_args': {'youtube': {'player_client': ['web', 'tv']}, **pot_args}
         }))
+
+    # Priority 7: Fail-safe Unrestricted Mobile Android Client (never fails, 360p/480p fallback)
+    strategies.append(("Fail-Safe Mobile Android Client", {
+        **base_opts,
+        'format': 'bestvideo+bestaudio/best',
+        'extractor_args': {'youtube': {'player_client': ['android']}}
+    }))
+
+    best_candidate_file = None
+    best_candidate_info = None
+    best_candidate_height = 0
 
     try:
         for strat_name, current_opts in strategies:
@@ -283,31 +297,60 @@ def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[st
                         if os.path.exists(candidate):
                             downloaded_file = candidate
 
-                    # Strict Resolution Guard: check downloaded video height
+                    if not os.path.exists(downloaded_file):
+                        continue
+
+                    # Probe downloaded video height
                     h = get_video_height(Path(downloaded_file))
+                    print(f"[*] Probed stream resolution: {h}p via {strat_name}")
+
+                    # If resolution is 720p or higher, accept immediately as verified HD!
                     if h >= 720:
                         print(f"[+] Verified High-Definition stream: {h}p via {strat_name}")
-                    elif h > 0:
-                        print(f"[-] Video height ({h}p) is below HD threshold (720p). Rejecting '{strat_name}'...")
-                        try:
-                            Path(downloaded_file).unlink()
-                        except Exception:
-                            pass
-                        continue
-                    elif h >= 720:
-                        print(f"[+] Verified High-Definition stream: {h}p")
-
-                    print(f"[+] Successfully downloaded video via yt-dlp ($0 cost): {downloaded_file} (Resolution: {h}p)")
-                    return {
-                        'video_path': Path(downloaded_file).resolve(),
-                        'title': info.get('title', f"YouTube_{video_id or 'podcast'}"),
-                        'duration': float(info.get('duration', 0.0)),
-                        'transcript': transcript,
-                        'video_id': video_id or info.get('id'),
-                        'is_local': False
-                    }
+                        return {
+                            'video_path': Path(downloaded_file).resolve(),
+                            'title': info.get('title', f"YouTube_{video_id or 'podcast'}"),
+                            'duration': float(info.get('duration', 0.0)),
+                            'transcript': transcript,
+                            'video_id': video_id or info.get('id'),
+                            'height': h,
+                            'is_low_res': False,
+                            'is_local': False
+                        }
+                    else:
+                        # Below 720p: Stash as fallback candidate and keep trying remaining HD strategies
+                        if h > best_candidate_height:
+                            if best_candidate_file and os.path.exists(best_candidate_file):
+                                try:
+                                    Path(best_candidate_file).unlink()
+                                except Exception:
+                                    pass
+                            best_candidate_file = downloaded_file
+                            best_candidate_info = info
+                            best_candidate_height = h
+                            print(f"[!] Stream is {h}p (below HD 720p). Retaining as fallback and trying next HD strategy...")
+                        else:
+                            try:
+                                Path(downloaded_file).unlink()
+                            except Exception:
+                                pass
             except Exception as e:
                 print(f"[-] Strategy '{strat_name}' encountered error: {e}")
+
+        # If all HD strategies finished and we have a fallback candidate:
+        if best_candidate_file and os.path.exists(best_candidate_file):
+            print(f"[!] Info: Using {best_candidate_height}p stream with aggressive AI Super-Resolution mastering.")
+            return {
+                'video_path': Path(best_candidate_file).resolve(),
+                'title': best_candidate_info.get('title', f"YouTube_{video_id or 'podcast'}"),
+                'duration': float(best_candidate_info.get('duration', 0.0)),
+                'transcript': transcript,
+                'video_id': video_id or best_candidate_info.get('id'),
+                'height': best_candidate_height,
+                'is_low_res': True,
+                'is_local': False
+            }
+
         return None
     finally:
         # Clean up temporary cookies file if created

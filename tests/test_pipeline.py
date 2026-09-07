@@ -166,6 +166,21 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertIn("unsharp=lx=5:ly=5:la=0.75", fg)
         self.assertIn("eq=contrast=1.07", fg)
 
+    def test_super_resolution_filtergraph_on_low_res(self):
+        decision = FramingDecision(
+            mode="single_smooth",
+            face_count=1,
+            smoothed_center_x=320,
+            video_width=640,
+            video_height=360
+        )
+        fg = build_video_filtergraph(decision, burn_subtitles=False)
+        self.assertIn("cas=0.60", fg)
+        self.assertIn("hqdn3d=2.0:2.0:4.0:4.0", fg)
+        self.assertIn("unsharp=lx=7:ly=7:la=1.1", fg)
+        self.assertIn("eq=contrast=1.09", fg)
+
+
     def test_scene_classifier_document_detection(self):
         import numpy as np
         import cv2
