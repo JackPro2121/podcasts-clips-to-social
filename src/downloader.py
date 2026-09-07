@@ -193,23 +193,31 @@ def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[st
     if YOUTUBE_COOKIES and YOUTUBE_COOKIES.strip():
         try:
             cookie_path = target_dir / "yt_cookies.txt"
-            cookie_path.write_text(YOUTUBE_COOKIES.strip(), encoding="utf-8")
+            # Strip IP-bound session timestamp tokens (__Secure-1PSIDTS, etc.) that cause
+            # "The page needs to be reloaded" blocks on cloud/datacenter runner IPs.
+            clean_lines = []
+            for line in YOUTUBE_COOKIES.strip().splitlines():
+                parts = line.strip().split('\t')
+                if len(parts) >= 7 and parts[5] in ('__Secure-1PSIDTS', '__Secure-3PSIDTS', '__Secure-1PSIDCC', '__Secure-3PSIDCC', 'SIDCC'):
+                    continue
+                clean_lines.append(line)
+            cookie_path.write_text("\n".join(clean_lines) + "\n", encoding="utf-8")
             base_opts['cookiefile'] = str(cookie_path)
-            print("[*] Loaded YouTube cookies from environment/secret.")
+            print("[*] Loaded & sanitized YouTube cookies from environment/secret.")
         except Exception as e:
             print(f"[-] Cookie setup warning: {e}")
 
     strategies = []
 
     if cookie_path:
-        # 1. Primary web client with cookies and Node challenge solver (extracts up to 1080p)
-        strategies.append(("Primary Web Client (with cookies & Node solver)", dict(base_opts)))
-        # 2. Mobile VR client with cookies
-        strategies.append(("Mobile VR Client (with cookies)", {
+        # 1. Mobile VR Client with sanitized cookies & Node solver (extracts 1080p without IP-binding lock)
+        strategies.append(("Mobile VR Client (with sanitized cookies & Node solver)", {
             **base_opts,
             'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best[height<=720]/best',
             'extractor_args': {'youtube': {'player_client': ['android_vr']}}
         }))
+        # 2. Web Client with sanitized cookies
+        strategies.append(("Primary Web Client (with sanitized cookies & Node solver)", dict(base_opts)))
 
     # Fallbacks (without cookies in case of mobile client or expired cookies)
     opts_no_cookie = dict(base_opts)
