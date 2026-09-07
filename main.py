@@ -265,7 +265,7 @@ def main():
         "--watermark", "-w",
         type=str,
         default=None,
-        help="Channel watermark handle to burn at 50% opacity (default: @allinonepodcastsss)."
+        help="Channel watermark handle to burn at 50%% opacity (default: @allinonepodcastsss)."
     )
 
     args = parser.parse_args()
