@@ -177,7 +177,8 @@ def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[st
     out_template = str(target_dir / "%(id)s_%(title).50s.%(ext)s")
     base_opts = {
         'js_runtimes': {'node': {}},
-        'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/bestvideo+bestaudio/best',
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+        'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best[height<=720]/best',
         'outtmpl': out_template,
         'merge_output_format': 'mp4',
         'quiet': False,
@@ -193,44 +194,47 @@ def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[st
     if YOUTUBE_COOKIES and YOUTUBE_COOKIES.strip():
         try:
             cookie_path = target_dir / "yt_cookies.txt"
-            # Strip IP-bound session timestamp tokens (__Secure-1PSIDTS, etc.) that cause
-            # "The page needs to be reloaded" blocks on cloud/datacenter runner IPs.
-            clean_lines = []
-            for line in YOUTUBE_COOKIES.strip().splitlines():
-                parts = line.strip().split('\t')
-                if len(parts) >= 7 and parts[5] in ('__Secure-1PSIDTS', '__Secure-3PSIDTS', '__Secure-1PSIDCC', '__Secure-3PSIDCC', 'SIDCC'):
-                    continue
-                clean_lines.append(line)
-            cookie_path.write_text("\n".join(clean_lines) + "\n", encoding="utf-8")
+            cookie_path.write_text(YOUTUBE_COOKIES.strip() + "\n", encoding="utf-8")
             base_opts['cookiefile'] = str(cookie_path)
-            print("[*] Loaded & sanitized YouTube cookies from environment/secret.")
+            print("[*] Loaded authenticated YouTube cookies from environment/secret.")
         except Exception as e:
             print(f"[-] Cookie setup warning: {e}")
 
     strategies = []
 
     if cookie_path:
-        # 1. Mobile VR Client with sanitized cookies & Node solver (extracts 1080p without IP-binding lock)
-        strategies.append(("Mobile VR Client (with sanitized cookies & Node solver)", {
+        # 1. TV Downgraded Client with cookies & Node solver (bypasses datacenter IP blocks, extracts 1080p HLS)
+        strategies.append(("TV Downgraded Client (with cookies & Node solver)", {
             **base_opts,
-            'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best[height<=720]/best',
+            'extractor_args': {'youtube': {'player_client': ['tv_downgraded', 'web']}}
+        }))
+        # 2. Primary Web Client with cookies & Node solver
+        strategies.append(("Primary Web Client (with cookies & Node solver)", dict(base_opts)))
+        # 3. Mobile VR Client with cookies
+        strategies.append(("Mobile VR Client (with cookies & Node solver)", {
+            **base_opts,
             'extractor_args': {'youtube': {'player_client': ['android_vr']}}
         }))
-        # 2. Web Client with sanitized cookies
-        strategies.append(("Primary Web Client (with sanitized cookies & Node solver)", dict(base_opts)))
 
-    # Fallbacks (without cookies in case of mobile client or expired cookies)
+    # Fallbacks (without cookies in case of mobile client or unauthenticated stream)
     opts_no_cookie = dict(base_opts)
     opts_no_cookie.pop('cookiefile', None)
+    strategies.append(("TV Downgraded Client (without cookies)", {
+        **opts_no_cookie,
+        'extractor_args': {'youtube': {'player_client': ['tv_downgraded']}}
+    }))
     strategies.append(("Mobile Android Client (without cookies)", {
         **opts_no_cookie,
-        'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best[height<=720]/best',
         'extractor_args': {'youtube': {'player_client': ['android']}}
     }))
     strategies.append(("Mobile VR Client (without cookies)", {
         **opts_no_cookie,
-        'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best[height<=720]/best',
         'extractor_args': {'youtube': {'player_client': ['android_vr']}}
+    }))
+    strategies.append(("Resilient Universal Fallback (any format)", {
+        **opts_no_cookie,
+        'format': 'best',
+        'extractor_args': {'youtube': {'player_client': ['tv_downgraded', 'android', 'web']}}
     }))
     strategies.append(("Web Embedded Client (without cookies)", {
         **opts_no_cookie,
