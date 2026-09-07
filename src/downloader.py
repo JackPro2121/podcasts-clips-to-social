@@ -294,7 +294,9 @@ def download_via_rapidapi(
     """
     Option 2: Downloads YouTube video via RapidAPI YouTube Downloader endpoints.
     Provides 50-100 free requests per month without bot captcha.
+    Muxes crystal-clear 1080p MP4 video with high-bitrate M4A audio via FFmpeg stream copy.
     """
+    import subprocess
     key = api_key or RAPIDAPI_KEY
     if not key:
         return None
@@ -303,7 +305,7 @@ def download_via_rapidapi(
     if not vid_id:
         return None
 
-    print(f"[*] Attempting YouTube download via RapidAPI Downloader (Option 2)...")
+    print(f"[*] Attempting high-speed 1080p download via RapidAPI Downloader...")
     headers = {
         "x-rapidapi-key": key,
         "x-rapidapi-host": "youtube-media-downloader.p.rapidapi.com"
@@ -314,27 +316,67 @@ def download_via_rapidapi(
         if res.status_code == 200:
             data = res.json()
             videos = data.get("videos", {}).get("items", [])
-            download_url = None
-            for v in videos:
-                if v.get("url"):
-                    download_url = v["url"]
+            audios = data.get("audios", {}).get("items", [])
+
+            # Select best video stream (prefer 1080p, then 720p)
+            best_video = None
+            for q in ["1080p", "720p", "480p", "360p"]:
+                for v in videos:
+                    if v.get("quality") == q and v.get("extension") == "mp4" and v.get("url"):
+                        best_video = v
+                        break
+                if best_video:
                     break
-            if download_url:
-                out_file = output_dir / f"{vid_id}_rapidapi.mp4"
-                print(f"[*] Streaming video from RapidAPI CDN ({out_file.name})...")
-                with requests.get(download_url, stream=True, timeout=180) as stream_res:
+
+            # Select best audio stream
+            best_audio = None
+            for a in audios:
+                if a.get("extension") in ("m4a", "mp4") and a.get("url"):
+                    best_audio = a
+                    break
+
+            out_file = output_dir / f"YouTube_{vid_id}.mp4"
+
+            if best_video and best_audio:
+                print(f"[*] RapidAPI stream found: Video {best_video.get('quality')} + Audio {best_audio.get('extension')}. Muxing via FFmpeg...")
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-i", best_video["url"],
+                    "-i", best_audio["url"],
+                    "-c:v", "copy",
+                    "-c:a", "copy",
+                    "-movflags", "+faststart",
+                    str(out_file)
+                ]
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                if proc.returncode == 0 and out_file.exists() and out_file.stat().st_size > 1024 * 1024:
+                    print(f"[+] Download and 1080p mux complete via RapidAPI: {out_file} ({out_file.stat().st_size / (1024*1024):.2f} MB)")
+                    return {
+                        "video_path": out_file.resolve(),
+                        "title": data.get("title", f"YouTube_{vid_id}"),
+                        "duration": float(data.get("lengthSeconds", 0.0)),
+                        "is_local": False
+                    }
+                else:
+                    print(f"[-] FFmpeg mux failed ({proc.returncode}): {proc.stderr[:200]}")
+
+            # Fallback: If single combined stream exists
+            if best_video and best_video.get("hasAudio"):
+                print(f"[*] Streaming combined format ({best_video.get('quality')})...")
+                with requests.get(best_video["url"], stream=True, timeout=180) as stream_res:
                     stream_res.raise_for_status()
                     with open(out_file, "wb") as f:
                         for chunk in stream_res.iter_content(chunk_size=1024 * 1024):
                             if chunk:
                                 f.write(chunk)
-                print(f"[+] Download complete via RapidAPI: {out_file} ({out_file.stat().st_size / (1024*1024):.2f} MB)")
-                return {
-                    "video_path": out_file.resolve(),
-                    "title": data.get("title", f"YouTube_{vid_id}"),
-                    "duration": float(data.get("lengthSeconds", 0.0)),
-                    "is_local": False
-                }
+                if out_file.exists() and out_file.stat().st_size > 0:
+                    print(f"[+] Download complete via RapidAPI: {out_file} ({out_file.stat().st_size / (1024*1024):.2f} MB)")
+                    return {
+                        "video_path": out_file.resolve(),
+                        "title": data.get("title", f"YouTube_{vid_id}"),
+                        "duration": float(data.get("lengthSeconds", 0.0)),
+                        "is_local": False
+                    }
     except Exception as e:
         print(f"[-] RapidAPI download error: {e}")
     return None
