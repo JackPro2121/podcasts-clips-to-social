@@ -161,8 +161,10 @@ class TestPodcastClipperPipeline(unittest.TestCase):
             video_height=1080
         )
         fg = build_video_filtergraph(decision, burn_subtitles=False)
-        self.assertIn("unsharp=lx=7:ly=7:la=1.10", fg)
-        self.assertIn("eq=contrast=1.08", fg)
+        self.assertIn("cas=0.45", fg)
+        self.assertIn("hqdn3d=1.5:1.5:3:3", fg)
+        self.assertIn("unsharp=lx=5:ly=5:la=0.75", fg)
+        self.assertIn("eq=contrast=1.07", fg)
 
     def test_scene_classifier_document_detection(self):
         import numpy as np

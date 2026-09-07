@@ -3,10 +3,31 @@ import re
 import time
 from pathlib import Path
 from typing import Optional, Dict, Any, List
+import subprocess
 import yt_dlp
 import requests
 from youtube_transcript_api import YouTubeTranscriptApi
 from src.config import DOWNLOADS_DIR, APIFY_API_TOKEN
+
+def get_video_height(file_path: Path) -> int:
+    """Probes video stream height using ffprobe to ensure resolution is >= 720p."""
+    try:
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=height",
+            "-of", "csv=p=0",
+            str(file_path)
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        lines = res.stdout.strip().split("\n")
+        for line in lines:
+            line = line.strip()
+            if line.isdigit():
+                return int(line)
+        return 0
+    except Exception:
+        return 0
 
 def extract_youtube_id(url: str) -> Optional[str]:
     """Extract YouTube video ID from various URL formats."""
@@ -178,7 +199,7 @@ def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[st
     base_opts = {
         'js_runtimes': {'deno': {}, 'node': {}},
         'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
-        'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best[height<=720]/best',
+        'format': 'bestvideo[height>=1080]+bestaudio/bestvideo[height>=720]+bestaudio/best[height>=720]',
         'outtmpl': out_template,
         'merge_output_format': 'mp4',
         'quiet': False,
@@ -209,35 +230,35 @@ def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[st
 
     strategies = []
 
-    # Priority 1: Mobile VR Client (android_vr) - Highest success rate, zero bot-checks, clean
-    strategies.append(("Mobile VR Client (android_vr)", {
-        **base_opts,
-        'extractor_args': {'youtube': {'player_client': ['android_vr']}, **pot_args}
-    }))
-
-    # Priority 2: Mobile Android Client (android)
-    strategies.append(("Mobile Android Client (android)", {
-        **base_opts,
-        'extractor_args': {'youtube': {'player_client': ['android']}, **pot_args}
-    }))
-
-    # Priority 3: Primary Web Client (with Deno JS challenge solver + POT)
-    strategies.append(("Primary Web Client (with Deno solver)", {
+    # Priority 1: Primary Web Client (Full 1080p60 / 4K DASH streams with Deno solver + POT Provider)
+    strategies.append(("Primary Web Client (1080p Deno + POT)", {
         **base_opts,
         'extractor_args': {'youtube': {'player_client': ['web']}, **pot_args}
     }))
 
-    # Priority 4: TV Downgraded Client
-    strategies.append(("TV Downgraded Client", {
+    # Priority 2: iOS Mobile Client (1080p H.264 streams)
+    strategies.append(("iOS Mobile Client (1080p)", {
         **base_opts,
-        'extractor_args': {'youtube': {'player_client': ['tv_downgraded']}, **pot_args}
+        'extractor_args': {'youtube': {'player_client': ['ios']}, **pot_args}
     }))
 
-    # Priority 5: Resilient Universal Fallback (multi-client)
-    strategies.append(("Resilient Universal Fallback", {
+    # Priority 3: TV Embedded Client (Formats 137, 248, 399)
+    strategies.append(("TV Embedded Client (1080p)", {
         **base_opts,
-        'format': 'best',
-        'extractor_args': {'youtube': {'player_client': ['android_vr', 'android', 'web']}, **pot_args}
+        'extractor_args': {'youtube': {'player_client': ['tv_embedded', 'tv']}, **pot_args}
+    }))
+
+    # Priority 4: Mobile VR Client with explicit 1080p DASH formats
+    strategies.append(("Mobile VR Client (1080p DASH)", {
+        **base_opts,
+        'format': '137+140/248+251/399+251/136+140/bestvideo[height>=720]+bestaudio',
+        'extractor_args': {'youtube': {'player_client': ['android_vr']}, **pot_args}
+    }))
+
+    # Priority 5: Universal Multi-Client Web Fallback
+    strategies.append(("Universal Web Fallback", {
+        **base_opts,
+        'extractor_args': {'youtube': {'player_client': ['web', 'tv']}, **pot_args}
     }))
 
     # Priority 6: Fallback with cookies (only if clean strategies fail, e.g. age-restricted content)
@@ -245,7 +266,7 @@ def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[st
         strategies.append(("Authenticated Session (with cookies)", {
             **base_opts,
             'cookiefile': str(cookie_path),
-            'extractor_args': {'youtube': {'player_client': ['web', 'tv_downgraded']}, **pot_args}
+            'extractor_args': {'youtube': {'player_client': ['web', 'tv']}, **pot_args}
         }))
 
     try:
@@ -260,7 +281,19 @@ def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[st
                         if os.path.exists(candidate):
                             downloaded_file = candidate
 
-                    print(f"[+] Successfully downloaded video via yt-dlp ($0 cost): {downloaded_file}")
+                    # Strict Resolution Guard: verify downloaded height is at least 720p HD
+                    h = get_video_height(Path(downloaded_file))
+                    if 0 < h < 720:
+                        print(f"[-] Video height ({h}p) is below HD threshold (720p). Rejecting '{strat_name}'...")
+                        try:
+                            Path(downloaded_file).unlink()
+                        except Exception:
+                            pass
+                        continue
+                    elif h >= 720:
+                        print(f"[+] Verified High-Definition stream: {h}p")
+
+                    print(f"[+] Successfully downloaded video via yt-dlp ($0 cost): {downloaded_file} (Resolution: {h}p)")
                     return {
                         'video_path': Path(downloaded_file).resolve(),
                         'title': info.get('title', f"YouTube_{video_id or 'podcast'}"),
@@ -322,9 +355,9 @@ def download_via_rapidapi(
             videos = data.get("videos", {}).get("items", [])
             audios = data.get("audios", {}).get("items", [])
 
-            # Select best video stream (prefer 1080p, then 720p)
+            # Select best video stream (strictly 1080p or 720p)
             best_video = None
-            for q in ["1080p", "720p", "480p", "360p"]:
+            for q in ["1080p", "720p"]:
                 for v in videos:
                     if v.get("quality") == q and v.get("extension") == "mp4" and v.get("url"):
                         best_video = v

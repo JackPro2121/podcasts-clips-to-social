@@ -33,16 +33,18 @@ def build_video_filtergraph(
     filters = []
 
     # Ultra-HD Broadcast Studio Enhancements:
-    # 1. Multi-band Unsharp Mask: lx=7:ly=7:la=1.10 (Razor-sharp text, papers & diagrams) + cx=5:cy=5:ca=0.60 (Crisp facial details)
-    # 2. Balanced Contrast & Vibrancy: contrast=1.08, saturation=1.12
-    studio_grade = "unsharp=lx=7:ly=7:la=1.10:cx=5:cy=5:ca=0.60,eq=contrast=1.08:brightness=0.01:saturation=1.12"
+    # 1. High-Quality 3D Denoise: Cleans source compression noise before sharpening
+    # 2. AMD FidelityFX Contrast Adaptive Sharpen (CAS 0.45): Razor-sharp edges, eyes, hair & details
+    # 3. Multi-band Unsharp: Micro-contrast boost
+    # 4. Balanced Contrast & Vibrancy: Rich OLED-ready mobile colors
+    studio_grade = "hqdn3d=1.5:1.5:3:3,cas=0.45,unsharp=lx=5:ly=5:la=0.75:cx=3:cy=3:ca=0.40,eq=contrast=1.07:brightness=0.01:saturation=1.12"
 
     # Intelligent Dynamic Punch Zoom (Alex Hormozi / Diary of a CEO style):
     # Starts at 1.0x NORMAL wide crop for the first 4.0s (anchors viewer).
     # Cuts cleanly into 1.12x PUNCH ZOOM on the speaker for 3.0s (peaks retention).
     # Then returns to 1.0x normal crop, alternating every 9.0s cycle.
     # Scaled and centered smoothly so the speaker's eyes remain in the upper-third golden ratio.
-    punch_zoom = ",crop='if(between(mod(t,9),4.0,7.0),964,1080)':'if(between(mod(t,9),4.0,7.0),1714,1920)':(iw-ow)/2:(ih-oh)*0.35,scale=1080:1920:flags=lanczos" if ENABLE_PUNCH_ZOOM else ""
+    punch_zoom = ",crop='if(between(mod(t,9),4.0,7.0),964,1080)':'if(between(mod(t,9),4.0,7.0),1714,1920)':(iw-ow)/2:(ih-oh)*0.35,scale=1080:1920:flags=lanczos+accurate_rnd" if ENABLE_PUNCH_ZOOM else ""
 
     if framing.mode == "multi_shot_dynamic" and framing.shots:
         fg_height = int(round(OUTPUT_WIDTH * (9 / 16) / 2) * 2)  # 608px (even number)
