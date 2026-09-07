@@ -50,3 +50,6 @@ Thumbs.db
 scratch/
 *.mp4
 src/models/*.onnx
+analysis_*/
+test_*.ass
+
