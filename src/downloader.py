@@ -176,7 +176,7 @@ def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[st
     """
     out_template = str(target_dir / "%(id)s_%(title).50s.%(ext)s")
     base_opts = {
-        'js_runtimes': {'node': {}},
+        'js_runtimes': {'deno': {}, 'node': {}},
         'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
         'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best[height<=720]/best',
         'outtmpl': out_template,
@@ -207,51 +207,40 @@ def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[st
         except Exception as e:
             print(f"[-] Cookie setup warning: {e}")
 
+    # Connect to local bgutil POT provider if running (port 4416)
+    pot_args = {'youtubepot-bgutilhttp': {'base_url': 'http://127.0.0.1:4416'}}
+
     strategies = []
 
-    if cookie_path:
-        # 1. TV Downgraded Client with cookies & Node solver (bypasses datacenter IP blocks, extracts 1080p HLS)
-        strategies.append(("TV Downgraded Client (with cookies & Node solver)", {
-            **base_opts,
-            'extractor_args': {'youtube': {'player_client': ['tv_downgraded', 'web']}}
-        }))
-        # 2. Primary Web Client with cookies & Node solver
-        strategies.append(("Primary Web Client (with cookies & Node solver)", dict(base_opts)))
-        # 3. Mobile VR Client with cookies
-        strategies.append(("Mobile VR Client (with cookies & Node solver)", {
-            **base_opts,
-            'extractor_args': {'youtube': {'player_client': ['android_vr']}}
-        }))
+    # Priority 1: Mobile VR Client (android_vr) - Highest success rate, bypasses web JS challenges
+    strategies.append(("Mobile VR Client (android_vr)", {
+        **base_opts,
+        'extractor_args': {'youtube': {'player_client': ['android_vr']}, **pot_args}
+    }))
 
-    # Fallbacks (without cookies in case of mobile client or unauthenticated stream)
-    opts_no_cookie = dict(base_opts)
-    opts_no_cookie.pop('cookiefile', None)
-    strategies.append(("TV Downgraded Client (without cookies)", {
-        **opts_no_cookie,
-        'extractor_args': {'youtube': {'player_client': ['tv_downgraded']}}
+    # Priority 2: Mobile Android Client (android)
+    strategies.append(("Mobile Android Client (android)", {
+        **base_opts,
+        'extractor_args': {'youtube': {'player_client': ['android']}, **pot_args}
     }))
-    strategies.append(("Mobile Android Client (without cookies)", {
-        **opts_no_cookie,
-        'extractor_args': {'youtube': {'player_client': ['android']}}
+
+    # Priority 3: Primary Web Client (with Deno JS challenge solver + POT)
+    strategies.append(("Primary Web Client (with Deno solver)", {
+        **base_opts,
+        'extractor_args': {'youtube': {'player_client': ['web']}, **pot_args}
     }))
-    strategies.append(("Mobile VR Client (without cookies)", {
-        **opts_no_cookie,
-        'extractor_args': {'youtube': {'player_client': ['android_vr']}}
+
+    # Priority 4: TV Downgraded Client
+    strategies.append(("TV Downgraded Client", {
+        **base_opts,
+        'extractor_args': {'youtube': {'player_client': ['tv_downgraded']}, **pot_args}
     }))
-    strategies.append(("Resilient Universal Fallback (any format)", {
-        **opts_no_cookie,
+
+    # Priority 5: Resilient Universal Fallback (multi-client)
+    strategies.append(("Resilient Universal Fallback", {
+        **base_opts,
         'format': 'best',
-        'extractor_args': {'youtube': {'player_client': ['tv_downgraded', 'android', 'web']}}
-    }))
-    strategies.append(("Web Embedded Client (without cookies)", {
-        **opts_no_cookie,
-        'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best[height<=720]/best',
-        'extractor_args': {'youtube': {'player_client': ['web_embedded']}}
-    }))
-    strategies.append(("Resilient Universal Fallback (any format)", {
-        **opts_no_cookie,
-        'format': 'best',
-        'extractor_args': {'youtube': {'player_client': ['android', 'mweb', 'web']}}
+        'extractor_args': {'youtube': {'player_client': ['android_vr', 'android', 'web']}, **pot_args}
     }))
 
     try:

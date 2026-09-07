@@ -90,6 +90,31 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Set up Cloudflare WARP (Bypass Datacenter IP Blocks)
+        uses: fscarmen/warp-on-actions@v1.4
+        with:
+          stack: dual
+          mode: wireguard
+
+      - name: Verify Network Egress & WARP Status
+        run: |
+          echo "[*] Runner Outbound IP:"
+          curl -s https://api.ipify.org || true
+          echo ""
+          echo "[*] Cloudflare Trace:"
+          curl -s https://cloudflare.com/cdn-cgi/trace | grep -E "warp|ip|loc" || true
+
+      - name: Set up Deno (Native yt-dlp JS Challenge Solver)
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Start POT Provider Service (bgutil)
+        run: |
+          docker run --name bgutil-provider -d --net=host --init brainicism/bgutil-ytdlp-pot-provider
+          sleep 4
+          curl -s http://127.0.0.1:4416/ping || echo "bgutil ready"
+
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
