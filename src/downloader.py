@@ -202,22 +202,16 @@ def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[st
     strategies = []
 
     if cookie_path:
-        # 1. Android mobile client with cookies (immune to SABR format lock, bypasses bot check)
-        strategies.append(("Mobile Android Client (with cookies)", {
-            **base_opts,
-            'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best[height<=720]/best',
-            'extractor_args': {'youtube': {'player_client': ['android']}}
-        }))
-        # 2. Android VR client with cookies
+        # 1. Primary web client with cookies and Node challenge solver (extracts up to 1080p)
+        strategies.append(("Primary Web Client (with cookies & Node solver)", dict(base_opts)))
+        # 2. Mobile VR client with cookies
         strategies.append(("Mobile VR Client (with cookies)", {
             **base_opts,
             'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best[height<=720]/best',
             'extractor_args': {'youtube': {'player_client': ['android_vr']}}
         }))
-        # 3. Web client with cookies
-        strategies.append(("Web Client (with cookies)", dict(base_opts)))
 
-    # Fallbacks (without cookies in case cookies are expired or trigger page-reload checks)
+    # Fallbacks (without cookies in case of mobile client or expired cookies)
     opts_no_cookie = dict(base_opts)
     opts_no_cookie.pop('cookiefile', None)
     strategies.append(("Mobile Android Client (without cookies)", {
