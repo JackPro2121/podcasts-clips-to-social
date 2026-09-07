@@ -200,23 +200,25 @@ def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[st
             print(f"[-] Cookie setup warning: {e}")
 
     strategies = [
-        ("Primary (1080p stream with Node solver)", dict(base_opts)),
         ("Mobile Client (android_vr/android with Node solver + cookies)" if cookie_path else "Mobile Client (android_vr/android with Node solver)", {
             **base_opts,
+            'format': 'bestvideo+bestaudio/best[height<=1080]/best',
             'extractor_args': {'youtube': {'player_client': ['android_vr', 'android']}}
         }),
+        ("Primary (1080p stream with Node solver)", dict(base_opts)),
     ]
     if cookie_path:
         opts_no_cookie = dict(base_opts)
         opts_no_cookie.pop('cookiefile', None)
-        strategies.append(("Fallback (Without cookies)", opts_no_cookie))
         strategies.append(("Mobile Client (android_vr/android without cookies)", {
             **opts_no_cookie,
+            'format': 'bestvideo+bestaudio/best[height<=1080]/best',
             'extractor_args': {'youtube': {'player_client': ['android_vr', 'android']}}
         }))
+        strategies.append(("Fallback (Without cookies)", opts_no_cookie))
 
     opts_resilient = dict(base_opts)
-    opts_resilient['format'] = 'best[height<=1080]/best'
+    opts_resilient['format'] = 'bestvideo+bestaudio/best[height<=1080]/best'
     opts_resilient.pop('cookiefile', None)
     opts_resilient['extractor_args'] = {'youtube': {'player_client': ['android_vr', 'android', 'web']}}
     strategies.append(("Resilient Fallback (Standard best format)", opts_resilient))
