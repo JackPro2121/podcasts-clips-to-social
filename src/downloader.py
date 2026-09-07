@@ -196,23 +196,20 @@ def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[st
         masked_proxy = proxy_str.split('@')[-1] if '@' in proxy_str else proxy_str[:15] + "..."
         print(f"[*] Configured proxy routing for yt-dlp: {masked_proxy}")
 
-    # Pass YouTube cookies if configured (bypasses datacenter bot checks)
+    # Connect to local bgutil POT provider if running (port 4416)
+    pot_args = {'youtubepot-bgutilhttp': {'base_url': 'http://127.0.0.1:4416'}}
+
     cookie_path = None
     if YOUTUBE_COOKIES and YOUTUBE_COOKIES.strip():
         try:
             cookie_path = target_dir / "yt_cookies.txt"
             cookie_path.write_text(YOUTUBE_COOKIES.strip() + "\n", encoding="utf-8")
-            base_opts['cookiefile'] = str(cookie_path)
-            print("[*] Loaded authenticated YouTube cookies from environment/secret.")
         except Exception as e:
             print(f"[-] Cookie setup warning: {e}")
 
-    # Connect to local bgutil POT provider if running (port 4416)
-    pot_args = {'youtubepot-bgutilhttp': {'base_url': 'http://127.0.0.1:4416'}}
-
     strategies = []
 
-    # Priority 1: Mobile VR Client (android_vr) - Highest success rate, bypasses web JS challenges
+    # Priority 1: Mobile VR Client (android_vr) - Highest success rate, zero bot-checks, clean
     strategies.append(("Mobile VR Client (android_vr)", {
         **base_opts,
         'extractor_args': {'youtube': {'player_client': ['android_vr']}, **pot_args}
@@ -242,6 +239,14 @@ def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[st
         'format': 'best',
         'extractor_args': {'youtube': {'player_client': ['android_vr', 'android', 'web']}, **pot_args}
     }))
+
+    # Priority 6: Fallback with cookies (only if clean strategies fail, e.g. age-restricted content)
+    if cookie_path and cookie_path.exists():
+        strategies.append(("Authenticated Session (with cookies)", {
+            **base_opts,
+            'cookiefile': str(cookie_path),
+            'extractor_args': {'youtube': {'player_client': ['web', 'tv_downgraded']}, **pot_args}
+        }))
 
     try:
         for strat_name, current_opts in strategies:
