@@ -1,6 +1,7 @@
 # Core AI & LLM (Gemini Free Tier API)
+# google-genai is the maintained SDK; the legacy google-generativeai package is
+# end-of-life and was redundant (viral_detector prefers google-genai).
 google-genai>=0.1.1
-google-generativeai>=0.8.0
 
 # Video & Media Processing
 yt-dlp>=2024.8.6

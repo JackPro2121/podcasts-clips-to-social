@@ -3,7 +3,7 @@ import re
 import time
 import requests
 import warnings
-from typing import List, Optional
+from typing import List, Optional, Any
 from pydantic import BaseModel, Field
 
 # Support both google.genai (new official SDK) and google.generativeai
@@ -63,7 +63,12 @@ def query_gemini_models(prompt: str, key: str) -> Optional[str]:
         for attempt in range(3):
             try:
                 if HAS_NEW_GENAI:
-                    client = genai.Client(api_key=key)
+                    # 60s HTTP timeout so a hung Gemini call can't stall the whole
+                    # pipeline (the requests-based fallbacks already time out).
+                    client = genai.Client(
+                        api_key=key,
+                        http_options=genai_types.HttpOptions(timeout=60_000),
+                    )
                     response = client.models.generate_content(
                         model=model_name,
                         contents=prompt,
@@ -72,7 +77,7 @@ def query_gemini_models(prompt: str, key: str) -> Optional[str]:
                             response_mime_type="application/json"
                         )
                     )
-                    raw = response.text.strip()
+                    raw = (response.text or "").strip()
                 elif legacy_genai is not None:
                     legacy_genai.configure(api_key=key)
                     model = legacy_genai.GenerativeModel(model_name)
@@ -81,9 +86,10 @@ def query_gemini_models(prompt: str, key: str) -> Optional[str]:
                         generation_config=legacy_genai.GenerationConfig(
                             temperature=0.4,
                             response_mime_type="application/json"
-                        )
+                        ),
+                        request_options={"timeout": 60},
                     )
-                    raw = response.text.strip()
+                    raw = (response.text or "").strip()
                 else:
                     return None
 
@@ -102,7 +108,8 @@ def query_gemini_models(prompt: str, key: str) -> Optional[str]:
 
 def query_groq_free_models(prompt: str, key: str) -> Optional[str]:
     """Queries Groq free tier models (ultra-fast inference, $0 budget)."""
-    models = ["groq/compound-mini", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
+    # Verified Groq-hosted model IDs (free tier). Update if Groq changes its catalog.
+    models = ["llama-3.3-70b-versatile", "openai/gpt-oss-20b", "llama-3.1-8b-instant"]
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     for m in models:
         print(f"[*] Trying Groq Free Model ({m})...")
@@ -127,7 +134,8 @@ def query_groq_free_models(prompt: str, key: str) -> Optional[str]:
 
 def query_openrouter_free_models(prompt: str, key: str) -> Optional[str]:
     """Queries OpenRouter verified 100% free models (:free tier)."""
-    models = ["minimax/minimax-m3:free", "minimax/minimax-m2.7:free", "liquid/lfm-2.5-2.6b:free"]
+    # Verified OpenRouter ":free" model IDs. Update if OpenRouter changes its catalog.
+    models = ["meta-llama/llama-3.3-70b-instruct:free", "deepseek/deepseek-chat-v3-0324:free", "google/gemini-2.0-flash-exp:free"]
     headers = {
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
@@ -154,6 +162,19 @@ def query_openrouter_free_models(prompt: str, key: str) -> Optional[str]:
         except Exception as e:
             print(f"[-] OpenRouter {m} error: {e}")
     return None
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    """Coerce an LLM-supplied score to int, tolerating floats/float-strings/None.
+
+    A raw ``int("92.5")`` raised ValueError and discarded the ENTIRE parsed
+    response (one bad field nuked all clips). We clamp to 1..100 as well.
+    """
+    try:
+        n = int(round(float(value)))
+    except (TypeError, ValueError):
+        return default
+    return max(1, min(100, n))
+
 
 def strip_emojis(text: str) -> str:
     """Removes all emoji characters to enforce clean signature broadcast aesthetic."""
@@ -208,7 +229,7 @@ def parse_clips_json(raw_text: str, segments: List[TranscriptSegment], num_clips
             start_time=start,
             end_time=end,
             duration=dur,
-            viral_score=int(c.get("viral_score", 85)),
+            viral_score=_safe_int(c.get("viral_score", 85), default=85),
             hook_reason=strip_emojis(str(c.get("hook_reason", "High engagement segment"))),
             social_caption=clean_caption,
             hashtags=clean_hashtags or ["#podcast", "#viral", "#shorts"]
@@ -337,7 +358,7 @@ def fallback_rule_based_detector(segments: List[TranscriptSegment], num_clips: i
             duration=round(end_t - start_t, 1),
             viral_score=80 - (i * 5),
             hook_reason="Engaging dialogue section with high-retention speech",
-            social_caption=f"{derived_title}\n\nWhat are your thoughts on this? Let us know below! 👇",
+            social_caption=strip_emojis(f"{derived_title}\n\nWhat are your thoughts on this? Let us know below."),
             hashtags=["#podcast", "#mindset", "#shorts", "#reels", "#viral"]
         ))
     return candidates

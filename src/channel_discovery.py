@@ -216,34 +216,6 @@ def record_history(video_url: str, title: str, niche: str, history_file_path: Op
     except Exception as e:
         print(f"[-] Failed to update history: {e}")
 
-def get_daily_discovery_episode(
-    niche: Optional[str] = None,
-    history_file: str = "history.txt"
-) -> str:
-    """
-    Discovers the latest high-CPM podcast episode URL automatically.
-    Prioritizes fresh episodes not previously processed in history.
-    Uses free yt-dlp search across top high-CPM channels.
-    """
-    import random
-    import yt_dlp
-    from pathlib import Path
-    from src.config import HISTORY_FILE
-
-    # Load persistent history (both JSON and legacy TXT)
-    history_data = load_history(HISTORY_FILE)
-    processed_ids = set(history_data.keys())
-
-    legacy_txt = Path(history_file)
-    if legacy_txt.exists():
-        try:
-            for line in legacy_txt.read_text(encoding="utf-8").splitlines():
-                lid = extract_youtube_id(line.strip())
-                if lid:
-                    processed_ids.add(lid)
-        except Exception:
-            pass
-
 # Day-of-Week Smart Auto-Rotation for maximum CPM & audience engagement:
 # Monday: Finance & Wealth | Tuesday: AI & Tech | Wednesday: Health & Longevity
 # Thursday: Business & Startups | Friday: Real Estate Investing & Wealth
@@ -265,6 +237,66 @@ def resolve_daily_niche(niche: Optional[str] = None) -> str:
     import datetime
     day_idx = datetime.datetime.now(datetime.timezone.utc).weekday()
     return DAY_OF_WEEK_NICHES[day_idx]
+
+def classify_candidate_entry(
+    entry: Dict[str, Any],
+    processed_ids: set,
+) -> Optional[tuple]:
+    """Pure filter: return (url, title, canon_id, is_confirmed_long) for a fresh
+    long-form candidate, else None.
+
+    Flat search entries usually omit ``duration``. The old code required
+    ``duration > 600`` and therefore discarded EVERY flat entry -- discovery was
+    silently inert and always fell back to one hardcoded video. We now treat
+    unknown duration as acceptable and reject only entries we *know* are short.
+    """
+    if not entry:
+        return None
+    vid = entry.get("id")
+    vurl = entry.get("url") or (f"https://www.youtube.com/watch?v={vid}" if vid else None)
+    if not vurl:
+        return None
+    canon_id = extract_youtube_id(vurl or vid or "")
+    if not canon_id or canon_id in processed_ids:
+        return None
+    duration = entry.get("duration")
+    if duration is not None and 0 < duration <= 600:
+        return None  # confirmed Short / clip, skip.
+    title = entry.get("title", "Unknown Title")
+    is_confirmed_long = bool(duration and duration > 600)
+    return (vurl, title, canon_id, is_confirmed_long)
+
+
+def filter_fresh_candidates(
+    ydl_opts: Dict[str, Any],
+    queries: List[str],
+    processed_ids: set,
+    per_query: int = 6,
+) -> List[tuple]:
+    """Run a flat yt-dlp search across queries and return de-duplicated fresh
+    candidates as (url, title, canon_id), confirmed-long episodes ranked first."""
+    import yt_dlp
+    seen: set = set()
+    scored: List[tuple] = []  # (rank, url, title, id)
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        for q in queries:
+            try:
+                res = ydl.extract_info(f"ytsearch{per_query}:{q}", download=False)
+            except Exception as e:
+                print(f"[-] Search query error for '{q}': {e}")
+                continue
+            for entry in (res.get("entries") or []):
+                picked = classify_candidate_entry(entry, processed_ids)
+                if not picked:
+                    continue
+                vurl, title, cid, is_long = picked
+                if cid in seen:
+                    continue
+                seen.add(cid)
+                scored.append((0 if is_long else 1, vurl, title, cid))
+    scored.sort(key=lambda c: c[0])
+    return [(v, t, i) for _, v, t, i in scored]
+
 
 def get_daily_discovery_candidates(
     niche: Optional[str] = None,
@@ -304,36 +336,15 @@ def get_daily_discovery_candidates(
     ydl_opts = {
         "quiet": True,
         "extract_flat": True,
-        "default_search": "ytsearch5"
     }
 
-    candidate_videos = []
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        for q in queries[:2]:
-            try:
-                res = ydl.extract_info(f"ytsearch5:{q}", download=False)
-                for entry in res.get("entries", []):
-                    vid = entry.get("id")
-                    vurl = entry.get("url") or (f"https://www.youtube.com/watch?v={vid}" if vid else None)
-                    vtitle = entry.get("title", "Unknown Title")
-                    duration = entry.get("duration") or 0
-                    
-                    # Canonical ID check
-                    canon_id = extract_youtube_id(vurl or vid or "")
-                    if canon_id and canon_id in processed_ids:
-                        continue
-                    
-                    # Filter for real podcast episodes (> 10 mins)
-                    if vurl and duration > 600:
-                        candidate_videos.append((vurl, vtitle, canon_id))
-            except Exception as e:
-                print(f"[-] Search query error for '{q}': {e}")
+    candidates = filter_fresh_candidates(ydl_opts, queries, processed_ids)
 
-    if candidate_videos:
-        print(f"[+] Found {len(candidate_videos)} fresh high-CPM podcast candidates:")
-        for idx, (vurl, vtitle, _) in enumerate(candidate_videos[:3], 1):
+    if candidates:
+        print(f"[+] Found {len(candidates)} fresh high-CPM podcast candidates:")
+        for idx, (vurl, vtitle, _) in enumerate(candidates[:3], 1):
             print(f"    #{idx}: '{vtitle}' ({vurl})")
-        return [c[0] for c in candidate_videos]
+        return [c[0] for c in candidates]
 
     # Fallback to popular evergreen business episode if nothing found
     fallback = "https://www.youtube.com/watch?v=UF8uR6Z6KLc"

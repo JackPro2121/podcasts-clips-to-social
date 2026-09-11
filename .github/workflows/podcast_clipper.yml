@@ -148,42 +148,37 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          # SECURITY: untrusted workflow_dispatch inputs are passed through the
+          # environment (never interpolated into the shell), so a value like
+          # `'; rm -rf / #` is just data. No `eval`.
+          EVENT_NAME: ${{ github.event_name }}
+          IN_VIDEO_URL: ${{ github.event.inputs.video_url }}
+          IN_NICHE: ${{ github.event.inputs.niche }}
+          IN_NUM_CLIPS: ${{ github.event.inputs.num_clips }}
+          IN_FRAMING: ${{ github.event.inputs.framing }}
+          IN_SUBTITLE_STYLE: ${{ github.event.inputs.subtitle_style }}
+          IN_SUBTITLES_MODE: ${{ github.event.inputs.subtitles_mode }}
+          IN_POST_TO_BUFFER: ${{ github.event.inputs.post_to_buffer }}
+          IN_WATERMARK: ${{ github.event.inputs.watermark }}
         run: |
-          # Determine execution mode (scheduled cron vs manual dispatch)
-          if [ "${{ github.event_name }}" = "schedule" ]; then
+          set -euo pipefail
+          args=()
+          if [ "$EVENT_NAME" = "schedule" ]; then
             echo "[*] Triggered by daily schedule! Running automated High-CPM discovery..."
-            python main.py \
-              --num-clips 3 \
-              --framing auto \
-              --subtitle-style hormozi \
-              --subtitles auto \
-              --watermark "@allinonepodcastsss" \
-              --post-to-buffer
+            args+=(--num-clips 3 --framing auto --subtitle-style hormozi --subtitles auto)
+            args+=(--watermark "@allinonepodcastsss" --post-to-buffer)
           else
             echo "[*] Triggered manually via workflow_dispatch."
-            POST_FLAG=""
-            if [ "${{ github.event.inputs.post_to_buffer }}" = "true" ]; then
-              POST_FLAG="--post-to-buffer"
-            fi
-
-            WATERMARK="${{ github.event.inputs.watermark || '@allinonepodcastsss' }}"
-            URL_ARG=""
-            if [ -n "${{ github.event.inputs.video_url }}" ]; then
-              URL_ARG="--url '${{ github.event.inputs.video_url }}'"
-            fi
-
-            NICHE="${{ github.event.inputs.niche || 'auto' }}"
-
-            eval python main.py \
-              $URL_ARG \
-              --niche "$NICHE" \
-              --num-clips "${{ github.event.inputs.num_clips || '3' }}" \
-              --framing "${{ github.event.inputs.framing || 'auto' }}" \
-              --subtitle-style "${{ github.event.inputs.subtitle_style || 'hormozi' }}" \
-              --subtitles "${{ github.event.inputs.subtitles_mode || 'auto' }}" \
-              --watermark "$WATERMARK" \
-              $POST_FLAG
+            [ -n "${IN_VIDEO_URL:-}" ] && args+=(--url "$IN_VIDEO_URL")
+            args+=(--niche "${IN_NICHE:-auto}")
+            args+=(--num-clips "${IN_NUM_CLIPS:-3}")
+            args+=(--framing "${IN_FRAMING:-auto}")
+            args+=(--subtitle-style "${IN_SUBTITLE_STYLE:-hormozi}")
+            args+=(--subtitles "${IN_SUBTITLES_MODE:-auto}")
+            args+=(--watermark "${IN_WATERMARK:-@allinonepodcastsss}")
+            [ "${IN_POST_TO_BUFFER:-false}" = "true" ] && args+=(--post-to-buffer)
           fi
+          python main.py "${args[@]}"
 
       - name: Persist Processed Video History
         if: always()

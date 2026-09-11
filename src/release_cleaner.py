@@ -21,7 +21,9 @@ def clean_old_releases(
     Prevents storage hoarding and keeps GitHub repository 100% within free limits.
     """
     auth_token = token or GITHUB_TOKEN or os.getenv("GITHUB_ACCESS_TOKEN")
-    target_repo = repo or GITHUB_REPOSITORY or "JackPro2121/podcasts-clips-to-social"
+    # No hardcoded repo fallback: a broadly-scoped token must never delete
+    # releases in someone else's repo just because GITHUB_REPOSITORY is unset.
+    target_repo = repo or GITHUB_REPOSITORY
 
     if not auth_token or not target_repo:
         print("[-] GITHUB_TOKEN or GITHUB_REPOSITORY is missing. Cannot perform release cleanup.")
@@ -40,12 +42,27 @@ def clean_old_releases(
 
     url = f"https://api.github.com/repos/{target_repo}/releases"
     try:
-        res = requests.get(url, headers=headers, timeout=20)
-        if res.status_code != 200:
-            print(f"[-] Failed to fetch releases: {res.status_code} - {res.text}")
-            return {"deleted": 0, "preserved": 0, "freed_bytes": 0}
+        # Paginate through ALL releases. The API returns 30 per page by default;
+        # the old single request meant that once >30 releases accumulated, the
+        # oldest (the ones we actually need to delete) were never even seen.
+        releases: List[Dict[str, Any]] = []
+        page = 1
+        while True:
+            res = requests.get(url, headers=headers,
+                               params={"per_page": 100, "page": page}, timeout=20)
+            if res.status_code != 200:
+                print(f"[-] Failed to fetch releases (page {page}): {res.status_code} - {res.text}")
+                if page == 1:
+                    return {"deleted": 0, "preserved": 0, "freed_bytes": 0}
+                break
+            batch = res.json()
+            if not batch:
+                break
+            releases.extend(batch)
+            if len(batch) < 100:
+                break
+            page += 1
 
-        releases = res.json()
         print(f"[*] Found {len(releases)} total release(s) in repository.")
 
         now = datetime.now(timezone.utc)
@@ -57,8 +74,17 @@ def clean_old_releases(
             rel_id = rel.get("id")
             tag_name = rel.get("tag_name")
             created_str = rel.get("created_at")
-            # Parse ISO format (e.g. 2026-09-05T14:45:05Z)
-            created_at = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
+            # One malformed/missing timestamp must not abort the whole cleanup.
+            if not created_str:
+                print(f"[-] Release '{tag_name}' (ID: {rel_id}) has no created_at; skipping.")
+                preserved_count += 1
+                continue
+            try:
+                created_at = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                print(f"[-] Release '{tag_name}' has unparseable created_at '{created_str}'; skipping.")
+                preserved_count += 1
+                continue
             age_days = (now - created_at).total_seconds() / 86400.0
 
             assets = rel.get("assets", [])

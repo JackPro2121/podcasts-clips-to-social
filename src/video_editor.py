@@ -32,13 +32,13 @@ def build_video_filtergraph(
     """
     filters = []
 
-    # Multi-Stage Broadcast Studio Enhancement & Super-Resolution Chain:
+    # Studio enhancement chain. NOTE: this is conventional DSP -- denoise +
+    # contrast-adaptive sharpen + unsharp mask + colour grade, with Lanczos
+    # scaling. It is NOT AI super-resolution and cannot reconstruct detail absent
+    # from a low-res source; it makes soft footage look crisper, nothing more.
     if framing.video_height and framing.video_height < 720:
-        # Aggressive Super-Resolution AI Enhancement for < 720p sources (e.g. 360p / 480p):
-        # 1. hqdn3d=2.0:2.0:4.0:4.0 - Eliminates macroblocking and compression artifacts
-        # 2. cas=0.60 - High AMD FidelityFX Contrast Adaptive Sharpening restores lost edges & facial details
-        # 3. unsharp=lx=7:ly=7:la=1.1:cx=5:cy=5:ca=0.50 - Sharpens micro-contours & text
-        # 4. eq=contrast=1.09:brightness=0.01:saturation=1.15 - High-vibrancy OLED mobile grade
+        # Heavier cleanup for sub-720p sources (more denoise + sharpen to mask
+        # compression artefacts before the aggressive upscale).
         studio_grade = "hqdn3d=2.0:2.0:4.0:4.0,cas=0.60,unsharp=lx=7:ly=7:la=1.1:cx=5:cy=5:ca=0.50,eq=contrast=1.09:brightness=0.01:saturation=1.15"
     else:
         # Broadcast Studio Mastering for >= 720p / 1080p native HD sources:
@@ -48,12 +48,12 @@ def build_video_filtergraph(
         # 4. eq=contrast=1.07:brightness=0.01:saturation=1.12 - Balanced broadcast color grade
         studio_grade = "hqdn3d=1.5:1.5:3:3,cas=0.45,unsharp=lx=5:ly=5:la=0.75:cx=3:cy=3:ca=0.40,eq=contrast=1.07:brightness=0.01:saturation=1.12"
 
-    # Intelligent Dynamic Punch Zoom (Alex Hormozi / Diary of a CEO style):
-    # Starts at 1.0x NORMAL wide crop for the first 4.0s (anchors viewer).
-    # Cuts cleanly into 1.12x PUNCH ZOOM on the speaker for 3.0s (peaks retention).
-    # Then returns to 1.0x normal crop, alternating every 9.0s cycle.
-    # Scaled and centered smoothly so the speaker's eyes remain in the upper-third golden ratio.
-    punch_zoom = ",crop='if(between(mod(t,9),4.0,7.0),964,1080)':'if(between(mod(t,9),4.0,7.0),1714,1920)':(iw-ow)/2:(ih-oh)*0.35,scale=1080:1920:flags=lanczos+accurate_rnd" if ENABLE_PUNCH_ZOOM else ""
+    # Dynamic punch zoom: DISABLED. The previous expression put a time-varying
+    # size into FFmpeg's crop filter, but crop evaluates w/h ONCE at init (only
+    # x/y are per-frame), so it locked to 1080x1920 -> a no-op identity crop that
+    # never zoomed. A real alternating zoom needs the `zoompan` filter and must be
+    # validated on rendered output; left off rather than shipping a placebo.
+    punch_zoom = ""
 
     if framing.mode == "multi_shot_dynamic" and framing.shots:
         fg_height = int(round(OUTPUT_WIDTH * (9 / 16) / 2) * 2)  # 608px (even number)
@@ -81,8 +81,8 @@ def build_video_filtergraph(
                 s2_x, s2_y, s2_w, s2_h = shot.speaker2_box
                 shot_f = (
                     f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,split=2[s{i}_p1][s{i}_p2];"
-                    f"[s{i}_p1]crop={s1_w}:{s1_h}:{s1_x}:0,scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd[s{i}_top];"
-                    f"[s{i}_p2]crop={s2_w}:{s2_h}:{s2_x}:0,scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd[s{i}_bot];"
+                    f"[s{i}_p1]crop={s1_w}:{s1_h}:{s1_x}:0,scale={OUTPUT_WIDTH}:{half_h}:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd,crop={OUTPUT_WIDTH}:{half_h}[s{i}_top];"
+                    f"[s{i}_p2]crop={s2_w}:{s2_h}:{s2_x}:0,scale={OUTPUT_WIDTH}:{half_h}:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd,crop={OUTPUT_WIDTH}:{half_h}[s{i}_bot];"
                     f"[s{i}_top][s{i}_bot]vstack=inputs=2,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[{label}]"
                 )
             else:
@@ -120,8 +120,8 @@ def build_video_filtergraph(
 
         v_filter = (
             f"[0:v]split=2[s1_in][s2_in];"
-            f"[s1_in]crop={s1_w}:{s1_h}:{s1_x}:0,scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd,{studio_grade}[top_pane];"
-            f"[s2_in]crop={s2_w}:{s2_h}:{s2_x}:0,scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd,{studio_grade}[bottom_pane];"
+            f"[s1_in]crop={s1_w}:{s1_h}:{s1_x}:0,scale={OUTPUT_WIDTH}:{half_h}:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd,crop={OUTPUT_WIDTH}:{half_h},{studio_grade}[top_pane];"
+            f"[s2_in]crop={s2_w}:{s2_h}:{s2_x}:0,scale={OUTPUT_WIDTH}:{half_h}:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd,crop={OUTPUT_WIDTH}:{half_h},{studio_grade}[bottom_pane];"
             f"[top_pane][bottom_pane]vstack=inputs=2,fps={FPS}[base]"
         )
 

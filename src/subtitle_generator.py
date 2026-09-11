@@ -5,17 +5,33 @@ from typing import List, Optional, Any, Dict, Tuple
 from src.config import SUBTITLE_THEMES, SUBTITLES_DIR, OUTPUT_WIDTH, OUTPUT_HEIGHT, CHANNEL_WATERMARK
 from src.transcriber import TranscriptSegment, WordTimestamp
 
+# Default lower-third safe-zone margins per layout (must match generate_ass_header).
+_SAFE_MARGIN_V = {
+    "split_screen": 0,    # centered on the divider (Alignment 5)
+    "blur_stack": 400,    # just below the centered 16:9 panel
+    "single_smooth": 460, # lower-third, clear of the bottom UI overlay
+}
+_DEFAULT_MARGIN_V = 460
+
+
+def default_margin_v(layout_mode: str) -> int:
+    """Safe-zone MarginV for a layout when no per-shot override applies."""
+    return _SAFE_MARGIN_V.get(layout_mode, _DEFAULT_MARGIN_V)
+
+
 def format_ass_timestamp(seconds: float) -> str:
-    """Converts seconds into ASS timestamp format: H:MM:SS.cs (centiseconds)."""
+    """Converts seconds into ASS timestamp format: H:MM:SS.cs (centiseconds).
+
+    Uses a single centisecond accumulator so a rounding carry propagates
+    correctly through seconds -> minutes -> hours (the old code could emit an
+    invalid ``SS=60`` on values like 59.999)."""
     if seconds < 0:
         seconds = 0
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
-    centis = int(round((seconds - int(seconds)) * 100))
-    if centis >= 100:
-        secs += 1
-        centis = 0
+    total_cs = int(round(seconds * 100))
+    hours = total_cs // 360000
+    minutes = (total_cs % 360000) // 6000
+    secs = (total_cs % 6000) // 100
+    centis = total_cs % 100
     return f"{hours}:{minutes:02d}:{secs:02d}.{centis:02d}"
 
 def generate_ass_header(
@@ -115,14 +131,19 @@ def create_styled_ass_subtitles(
         last_end = w_end
     clip_words = monotonic_words
 
+    base_margin_v = default_margin_v(layout_mode)
+
     def get_shot_margin_v(t: float) -> int:
+        # Per-shot override wins; otherwise fall back to the layout's safe-zone
+        # default (NOT 0 -- a 0 here overrode the style and pinned captions to the
+        # very bottom of the frame, under the TikTok/Reels UI).
         if shots:
             for s in shots:
                 s_start = getattr(s, "start", 0.0)
                 s_end = getattr(s, "end", 9999.0)
                 if s_start <= t <= s_end:
-                    return getattr(s, "margin_v", 0)
-        return 420 if layout_mode == "blur_stack" else 0
+                    return getattr(s, "margin_v", None) or base_margin_v
+        return base_margin_v
 
     # Group words into short punchy batches of 2-4 words
     lines: List[str] = []

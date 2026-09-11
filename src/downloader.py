@@ -1,13 +1,102 @@
 import os
 import re
 import time
+import tempfile
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 import subprocess
 import yt_dlp
 import requests
 from youtube_transcript_api import YouTubeTranscriptApi
-from src.config import DOWNLOADS_DIR, APIFY_API_TOKEN
+from src.config import (
+    DOWNLOADS_DIR, APIFY_API_TOKEN, YOUTUBE_COOKIES, YTDLP_PROXY, RAPIDAPI_KEY,
+)
+
+# ---------------------------------------------------------------------------
+# Error classification
+# ---------------------------------------------------------------------------
+# The old downloader treated every failure identically ("try the next strategy"),
+# which meant a permanently-dead video (private/removed/geo-blocked) burned the
+# full 7-strategy x full-download budget before giving up. We now distinguish
+# permanent failures (abort immediately) from transient ones (rotate client).
+
+class VideoUnavailableError(Exception):
+    """Raised when a video is permanently unfetchable (private/removed/geo/age).
+
+    Signals the orchestrator to STOP: no client rotation or paid tier will help.
+    """
+
+
+# Phrases that mean "this video will never download, stop trying".
+_PERMANENT_MARKERS = (
+    "video unavailable",
+    "private video",
+    "this video is private",
+    "has been removed",
+    "account associated with this video has been terminated",
+    "video has been removed",
+    "who has blocked it",
+    "not available in your country",
+    "not made this video available",
+    "members-only",
+    "this live event",
+    "premieres in",
+    "video is not available",
+    "content is not available",
+)
+
+# Phrases that mean "this specific client got blocked/throttled, rotate".
+_TRANSIENT_MARKERS = (
+    "sign in to confirm",
+    "confirm you're not a bot",
+    "http error 429",
+    "too many requests",
+    "unable to download webpage",
+    "read timed out",
+    "connection reset",
+    "temporarily unavailable",
+    "failed to extract",
+    "requested format is not available",
+    "no video formats found",
+    "unable to extract",
+    "precondition check failed",
+)
+
+
+def classify_ytdlp_error(exc: Exception) -> str:
+    """Return one of: 'permanent' | 'transient' | 'unknown' for a yt-dlp error."""
+    msg = str(exc).lower()
+    for marker in _PERMANENT_MARKERS:
+        if marker in msg:
+            return "permanent"
+    for marker in _TRANSIENT_MARKERS:
+        if marker in msg:
+            return "transient"
+    return "unknown"
+
+
+def best_available_height(info: Dict[str, Any]) -> int:
+    """Given a yt-dlp info dict (from a metadata-only probe), return the tallest
+    downloadable video height on offer. 0 if none / unknown."""
+    best = 0
+    for f in (info.get("formats") or []):
+        if f.get("vcodec") in (None, "none"):
+            continue
+        h = f.get("height") or 0
+        try:
+            h = int(h)
+        except (TypeError, ValueError):
+            h = 0
+        if h > best:
+            best = h
+    # Some extractors expose a top-level height instead of per-format.
+    top = info.get("height") or 0
+    try:
+        top = int(top)
+    except (TypeError, ValueError):
+        top = 0
+    return max(best, top)
+
 
 def get_video_height(file_path: Path) -> int:
     """Probes video stream height using ffprobe to ensure resolution is >= 720p."""
@@ -169,8 +258,15 @@ def download_via_apify(
         vid_id = first_item.get("id") or extract_youtube_id(video_url) or "video"
         out_file = output_dir / f"{vid_id}.mp4"
 
+        # SECURITY: only attach the Apify bearer token when the download URL is
+        # actually on Apify's domain. The URL comes from the actor's dataset and
+        # could point anywhere (redirect/SSRF); we must not leak credentials.
+        stream_headers = {}
+        if "apify.com" in direct_url or "apify.dev" in direct_url:
+            stream_headers = {"Authorization": f"Bearer {token}"}
+
         print(f"[*] Streaming high-quality video from Apify storage ({out_file.name})...")
-        with requests.get(direct_url, headers=headers, stream=True, timeout=180) as stream_res:
+        with requests.get(direct_url, headers=stream_headers, stream=True, timeout=180) as stream_res:
             stream_res.raise_for_status()
             with open(out_file, "wb") as f:
                 for chunk in stream_res.iter_content(chunk_size=1024 * 1024):
@@ -188,172 +284,186 @@ def download_via_apify(
         print(f"[-] Apify download encountered an exception: {e}")
         return None
 
-from src.config import DOWNLOADS_DIR, APIFY_API_TOKEN, YOUTUBE_COOKIES, YTDLP_PROXY, RAPIDAPI_KEY
+# Deduplicated format selectors (were copy-pasted across 7 strategies).
+_HD_FORMAT = ('bestvideo[height>=720][height<=1080]+bestaudio/'
+              'bestvideo[height<=1080]+bestaudio/best[height<=1080]')
+_ANY_FORMAT = 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best'
+_FAILSAFE_FORMAT = 'bestvideo+bestaudio/best'
+# Local bgutil POT provider (started as a sidecar in the CI workflow).
+_POT_ARGS = {'youtubepot-bgutilhttp': {'base_url': ['http://127.0.0.1:4416']}}
 
-def download_via_ytdlp(url_or_path: str, target_dir: Path, video_id: Optional[str] = None, transcript: Optional[Any] = None) -> Optional[Dict[str, Any]]:
+
+def _write_cookiefile(cookies: str) -> Optional[Path]:
+    """Write cookies to a private (0600) temp file OUTSIDE the artifact dir.
+
+    The old code wrote cookies into the downloads/ folder, which is uploaded as a
+    CI artifact -- leaking the session. mkstemp + chmod keeps them off the artifact
+    path and unreadable to other users; the caller unlinks it in a finally block.
     """
-    Downloads video using yt-dlp with Node.js challenge solving and optional cookie authentication.
-    Runs 100% free with 0 Apify compute cost.
-    Prioritizes true High-Definition (1080p/720p) streams with bgutil POT provider,
-    with intelligent fallback to lower resolutions if YouTube enforces strict throttling.
+    try:
+        fd, tmp = tempfile.mkstemp(prefix="ytc_", suffix=".txt")
+        os.write(fd, (cookies.strip() + "\n").encode("utf-8"))
+        os.close(fd)
+        try:
+            os.chmod(tmp, 0o600)
+        except OSError:
+            pass  # Windows: best-effort.
+        return Path(tmp)
+    except Exception as e:
+        print(f"[-] Cookie setup warning: {e}")
+        return None
+
+
+def _do_download(
+    url: str,
+    base_opts: Dict[str, Any],
+    extra: Dict[str, Any],
+    fmt: str,
+    probed_info: Optional[Dict[str, Any]],
+    video_id: Optional[str],
+    transcript: Optional[Any],
+    label: str,
+    low_res: bool = False,
+) -> Optional[Dict[str, Any]]:
+    """Perform exactly one real download with a chosen client + format."""
+    opts = {
+        **base_opts,
+        'format': fmt,
+        'postprocessors': [{'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'}],
+        **extra,
+    }
+    try:
+        print(f"[*] Downloading via '{label}'...")
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            path = ydl.prepare_filename(info)
+            if not os.path.exists(path):
+                alt = str(Path(path).with_suffix('.mp4'))
+                path = alt if os.path.exists(alt) else path
+            if not os.path.exists(path):
+                print(f"[-] '{label}' reported success but produced no file.")
+                return None
+        # Probe the real file. h==0 means the probe failed (missing ffprobe /
+        # odd container) -- NOT that the video is low-res; fall back to the
+        # resolution the metadata probe advertised instead of mislabelling HD.
+        h = get_video_height(Path(path))
+        real_h = h if h > 0 else (best_available_height(probed_info) if probed_info else 0)
+        print(f"[+] Downloaded {real_h or '?'}p via '{label}': {Path(path).name}")
+        return {
+            'video_path': Path(path).resolve(),
+            'title': info.get('title', f"YouTube_{video_id or 'podcast'}"),
+            'duration': float(info.get('duration', 0.0) or 0.0),
+            'transcript': transcript,
+            'video_id': video_id or info.get('id'),
+            'height': real_h,
+            'is_low_res': low_res or (0 < real_h < 720),
+            'is_local': False,
+        }
+    except VideoUnavailableError:
+        raise
+    except Exception as e:
+        if classify_ytdlp_error(e) == "permanent":
+            raise VideoUnavailableError(str(e))
+        print(f"[-] Download via '{label}' failed: {e}")
+        return None
+
+
+def download_via_ytdlp(
+    url_or_path: str,
+    target_dir: Path,
+    video_id: Optional[str] = None,
+    transcript: Optional[Any] = None,
+) -> Optional[Dict[str, Any]]:
+    """Probe-first yt-dlp downloader ($0, no Apify compute).
+
+    The previous implementation ran up to SEVEN full downloads of the same
+    2-hour video, probing resolution only AFTER each download -- catastrophic on
+    a timeboxed/metered CI runner (disk blow-up + 90-min timeout).
+
+    This version inverts the loop:
+      1. For each client, run a METADATA-ONLY probe (``download=False`` -- seconds,
+         zero video bytes) and classify failures. A *permanent* failure
+         (private/removed/geo) raises ``VideoUnavailableError`` and aborts; a
+         *transient* block rotates to the next client.
+      2. The first client advertising a >=720p stream is downloaded ONCE.
+      3. If nobody offers HD, the best sub-HD client is downloaded ONCE.
+    Net: one download in the happy path, one in the worst case -- never seven.
     """
-    out_template = str(target_dir / "%(id)s_%(title).50s.%(ext)s")
     base_opts = {
         'js_runtimes': {'deno': {}, 'node': {}},
-        'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
-        'outtmpl': out_template,
+        'outtmpl': str(target_dir / "%(id)s_%(title).50s.%(ext)s"),
         'merge_output_format': 'mp4',
-        'quiet': False,
+        'quiet': True,
         'no_warnings': True,
-        'postprocessors': [{
-            'key': 'FFmpegVideoConvertor',
-            'preferedformat': 'mp4',
-        }]
     }
-
-    # Option 1: Route traffic through proxy if configured (bypasses datacenter blocks)
     if YTDLP_PROXY and YTDLP_PROXY.strip():
-        proxy_str = YTDLP_PROXY.strip()
-        base_opts['proxy'] = proxy_str
-        masked_proxy = proxy_str.split('@')[-1] if '@' in proxy_str else proxy_str[:15] + "..."
-        print(f"[*] Configured proxy routing for yt-dlp: {masked_proxy}")
+        base_opts['proxy'] = YTDLP_PROXY.strip()
+        print("[*] Routing yt-dlp through configured proxy.")
 
-    # Connect to local bgutil POT provider if running (port 4416)
-    pot_args = {'youtubepot-bgutilhttp': {'base_url': ['http://127.0.0.1:4416']}}
+    cookie_path = (
+        _write_cookiefile(YOUTUBE_COOKIES)
+        if (YOUTUBE_COOKIES and YOUTUBE_COOKIES.strip())
+        else None
+    )
 
-    cookie_path = None
-    if YOUTUBE_COOKIES and YOUTUBE_COOKIES.strip():
-        try:
-            cookie_path = target_dir / "yt_cookies.txt"
-            cookie_path.write_text(YOUTUBE_COOKIES.strip() + "\n", encoding="utf-8")
-        except Exception as e:
-            print(f"[-] Cookie setup warning: {e}")
+    def _client(clients: List[str]) -> Dict[str, Any]:
+        return {'extractor_args': {'youtube': {'player_client': clients}, **_POT_ARGS}}
 
-    strategies = []
-
-    # Priority 1: Default & MWeb Client with POT Provider (Most stable client for bgutil)
-    strategies.append(("Default & MWeb with POT Provider (1080p)", {
-        **base_opts,
-        'format': 'bestvideo[height>=720][height<=1080]+bestaudio/bestvideo[height<=1080]+bestaudio/best[height<=1080]',
-        'extractor_args': {'youtube': {'player_client': ['default', 'mweb']}, **pot_args}
-    }))
-
-    # Priority 2: Primary Web Client (Full 1080p60 DASH streams with Deno solver + POT Provider)
-    strategies.append(("Primary Web Client (1080p Deno + POT)", {
-        **base_opts,
-        'format': 'bestvideo[height>=720][height<=1080]+bestaudio/bestvideo[height<=1080]+bestaudio/best[height<=1080]',
-        'extractor_args': {'youtube': {'player_client': ['web']}, **pot_args}
-    }))
-
-    # Priority 3: Mobile VR Client with POT Provider (1080p H.264 & DASH streams)
-    strategies.append(("Mobile VR Client (1080p DASH + POT)", {
-        **base_opts,
-        'format': 'bestvideo[height>=720][height<=1080]+bestaudio/bestvideo[height<=1080]+bestaudio/best[height<=1080]',
-        'extractor_args': {'youtube': {'player_client': ['android_vr']}, **pot_args}
-    }))
-
-    # Priority 4: iOS Mobile Client with POT Provider (1080p)
-    strategies.append(("iOS Mobile Client (1080p + POT)", {
-        **base_opts,
-        'format': 'bestvideo[height>=720][height<=1080]+bestaudio/bestvideo[height<=1080]+bestaudio/best[height<=1080]',
-        'extractor_args': {'youtube': {'player_client': ['ios']}, **pot_args}
-    }))
-
-    # Priority 5: Universal Multi-Client Fallback (web, tv, android_vr + POT)
-    strategies.append(("Universal Multi-Client with POT", {
-        **base_opts,
-        'format': 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best',
-        'extractor_args': {'youtube': {'player_client': ['web', 'tv_embedded', 'android_vr']}, **pot_args}
-    }))
-
-    # Priority 6: Fallback with cookies (if provided)
-    if cookie_path and cookie_path.exists():
-        strategies.append(("Authenticated Session (with cookies)", {
-            **base_opts,
-            'cookiefile': str(cookie_path),
-            'extractor_args': {'youtube': {'player_client': ['web', 'tv']}, **pot_args}
-        }))
-
-    # Priority 7: Fail-safe Unrestricted Mobile Android Client (never fails, 360p/480p fallback)
-    strategies.append(("Fail-Safe Mobile Android Client", {
-        **base_opts,
-        'format': 'bestvideo+bestaudio/best',
-        'extractor_args': {'youtube': {'player_client': ['android']}}
-    }))
-
-    best_candidate_file = None
-    best_candidate_info = None
-    best_candidate_height = 0
+    # (label, extra_opts) in priority order.
+    clients: List[Tuple[str, Dict[str, Any]]] = [
+        ("default+mweb", _client(['default', 'mweb'])),
+        ("web", _client(['web'])),
+        ("android_vr", _client(['android_vr'])),
+        ("ios", _client(['ios'])),
+        ("web+tv+vr", _client(['web', 'tv_embedded', 'android_vr'])),
+    ]
+    if cookie_path:
+        cookie_extra = _client(['web', 'tv'])
+        cookie_extra['cookiefile'] = str(cookie_path)
+        clients.append(("cookies", cookie_extra))
+    # Fail-safe: android client without POT (no HD, but usually ungated).
+    clients.append(("android-failsafe", {'extractor_args': {'youtube': {'player_client': ['android']}}}))
 
     try:
-        for strat_name, current_opts in strategies:
+        best_sub_hd: Optional[Tuple[str, Dict[str, Any], int]] = None
+        for label, extra in clients:
+            probe_opts = {**base_opts, 'skip_download': True, **extra}
             try:
-                print(f"[*] Attempting yt-dlp download: {strat_name}...")
-                with yt_dlp.YoutubeDL(current_opts) as ydl:
-                    info = ydl.extract_info(url_or_path, download=True)
-                    downloaded_file = ydl.prepare_filename(info)
-                    if not os.path.exists(downloaded_file):
-                        candidate = str(Path(downloaded_file).with_suffix('.mp4'))
-                        if os.path.exists(candidate):
-                            downloaded_file = candidate
-
-                    if not os.path.exists(downloaded_file):
-                        continue
-
-                    # Probe downloaded video height
-                    h = get_video_height(Path(downloaded_file))
-                    print(f"[*] Probed stream resolution: {h}p via {strat_name}")
-
-                    # If resolution is 720p or higher, accept immediately as verified HD!
-                    if h >= 720:
-                        print(f"[+] Verified High-Definition stream: {h}p via {strat_name}")
-                        return {
-                            'video_path': Path(downloaded_file).resolve(),
-                            'title': info.get('title', f"YouTube_{video_id or 'podcast'}"),
-                            'duration': float(info.get('duration', 0.0)),
-                            'transcript': transcript,
-                            'video_id': video_id or info.get('id'),
-                            'height': h,
-                            'is_low_res': False,
-                            'is_local': False
-                        }
-                    else:
-                        # Below 720p: Stash as fallback candidate and keep trying remaining HD strategies
-                        if h > best_candidate_height:
-                            if best_candidate_file and os.path.exists(best_candidate_file):
-                                try:
-                                    Path(best_candidate_file).unlink()
-                                except Exception:
-                                    pass
-                            best_candidate_file = downloaded_file
-                            best_candidate_info = info
-                            best_candidate_height = h
-                            print(f"[!] Stream is {h}p (below HD 720p). Retaining as fallback and trying next HD strategy...")
-                        else:
-                            try:
-                                Path(downloaded_file).unlink()
-                            except Exception:
-                                pass
+                print(f"[*] Probing client '{label}' (metadata only)...")
+                with yt_dlp.YoutubeDL(probe_opts) as ydl:
+                    info = ydl.extract_info(url_or_path, download=False)
+            except VideoUnavailableError:
+                raise
             except Exception as e:
-                print(f"[-] Strategy '{strat_name}' encountered error: {e}")
+                kind = classify_ytdlp_error(e)
+                if kind == "permanent":
+                    raise VideoUnavailableError(str(e))
+                print(f"[-] Client '{label}' probe failed ({kind}): {e}")
+                continue
 
-        # If all HD strategies finished and we have a fallback candidate:
-        if best_candidate_file and os.path.exists(best_candidate_file):
-            print(f"[!] Info: Using {best_candidate_height}p stream with aggressive AI Super-Resolution mastering.")
-            return {
-                'video_path': Path(best_candidate_file).resolve(),
-                'title': best_candidate_info.get('title', f"YouTube_{video_id or 'podcast'}"),
-                'duration': float(best_candidate_info.get('duration', 0.0)),
-                'transcript': transcript,
-                'video_id': video_id or best_candidate_info.get('id'),
-                'height': best_candidate_height,
-                'is_low_res': True,
-                'is_local': False
-            }
+            height = best_available_height(info)
+            print(f"[*] Client '{label}' offers up to {height}p.")
+            is_failsafe = label == "android-failsafe"
+            if height >= 720:
+                fmt = _FAILSAFE_FORMAT if is_failsafe else _HD_FORMAT
+                result = _do_download(url_or_path, base_opts, extra, fmt, info,
+                                      video_id, transcript, label)
+                if result:
+                    return result
+                continue  # HD probe but download died -> next client.
+            elif height > 0 and (best_sub_hd is None or height > best_sub_hd[2]):
+                best_sub_hd = (label, extra, height)
+
+        # No HD anywhere: take the tallest sub-HD client with a single download.
+        if best_sub_hd:
+            label, extra, height = best_sub_hd
+            print(f"[!] No HD stream available; downloading best {height}p via '{label}'.")
+            fmt = _FAILSAFE_FORMAT if label == "android-failsafe" else _ANY_FORMAT
+            return _do_download(url_or_path, base_opts, extra, fmt, None,
+                                video_id, transcript, label, low_res=True)
 
         return None
     finally:
-        # Clean up temporary cookies file if created
         if cookie_path and cookie_path.exists():
             try:
                 cookie_path.unlink()
@@ -372,7 +482,8 @@ def download_via_rapidapi(
     Supports key rotation (comma-separated keys) and robust chunked streaming fallback.
     """
     import subprocess
-    keys = [k.strip() for k in (api_key or RAPIDAPI_KEY).split(",") if k.strip()]
+    raw_keys = api_key or RAPIDAPI_KEY or ""
+    keys = [k.strip() for k in raw_keys.split(",") if k.strip()]
     if not keys:
         return None
 
@@ -553,10 +664,16 @@ def download_video(url_or_path: str, output_dir: Optional[Path] = None) -> Dict[
     if video_id:
         transcript = fetch_youtube_transcript(video_id)
 
-    # 1. Tier 1: Direct yt-dlp ($0 cost, uses bgutil PO Token + Proxy if set)
-    ytdlp_result = download_via_ytdlp(url_or_path, target_dir, video_id=video_id, transcript=transcript)
-    if ytdlp_result:
-        return ytdlp_result
+    # 1. Tier 1: Direct yt-dlp ($0 cost, uses bgutil PO Token + Proxy if set).
+    # A VideoUnavailableError means the video is genuinely gone (private/removed);
+    # yt-dlp won't recover it, but a residential-IP tier (Apify) still might for a
+    # geo-block, so we log and fall through rather than crashing the whole run.
+    try:
+        ytdlp_result = download_via_ytdlp(url_or_path, target_dir, video_id=video_id, transcript=transcript)
+        if ytdlp_result:
+            return ytdlp_result
+    except VideoUnavailableError as e:
+        print(f"[-] yt-dlp reports video permanently unavailable: {e}")
 
     # 2. Tier 2: RapidAPI Downloader fallback (Option 2)
     if RAPIDAPI_KEY:
