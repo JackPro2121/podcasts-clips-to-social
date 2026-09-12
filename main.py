@@ -24,7 +24,7 @@ from src.slack_notifier import SlackNotifier
 from src.channel_discovery import record_history
 
 def run_pipeline(
-    url_or_path: str,
+    url_or_path: Union[str, List[str]],
     num_clips: int = 3,
     framing_mode: str = "auto",
     subtitle_style: str = "hormozi",
@@ -50,7 +50,13 @@ def run_pipeline(
     is_youtube_url = any(
         "youtube.com" in c or "youtu.be" in c for c in candidates
     )
-    is_local_file = Path(url_or_path).exists() and Path(url_or_path).is_file()
+    is_local_file = False
+    if isinstance(url_or_path, (str, Path)):
+        try:
+            p = Path(url_or_path)
+            is_local_file = p.exists() and p.is_file()
+        except Exception:
+            is_local_file = False
 
     # =========================================================================
     # SMART TRANSCRIPT-FIRST PIPELINE
@@ -71,18 +77,25 @@ def run_pipeline(
     native_transcript = None
 
     if is_youtube_url and not is_local_file:
-        transcript_data = fetch_transcript_only(active_source_url)
-        if transcript_data:
-            native_transcript = transcript_data["transcript"]
-            video_id = transcript_data.get("video_id", video_id)
-            print(f"[+] Native YouTube transcript fetched ({len(native_transcript)} segments). No video downloaded yet.")
-            segments = get_transcript(
-                video_path=Path("__transcript_only__"),   # placeholder; not used when native_transcript provided
-                native_transcript=native_transcript,
-                video_id=video_id
-            )
-        else:
-            print("[!] No native transcript. Will use full-download fallback pipeline.")
+        for cand in candidates:
+            cand_id = extract_youtube_id(cand)
+            print(f"[*] Checking candidate for native transcript: {cand}")
+            transcript_data = fetch_transcript_only(cand)
+            if transcript_data and transcript_data.get("transcript"):
+                active_source_url = cand
+                video_id = transcript_data.get("video_id", cand_id)
+                video_title = f"YouTube_{video_id or 'podcast'}"
+                native_transcript = transcript_data["transcript"]
+                print(f"[+] Native YouTube transcript fetched ({len(native_transcript)} segments) for '{cand}'. No video downloaded yet.")
+                segments = get_transcript(
+                    video_path=Path("__transcript_only__"),
+                    native_transcript=native_transcript,
+                    video_id=video_id
+                )
+                if segments:
+                    break
+        if not segments:
+            print("[!] No candidate had a native transcript. Will use full-download fallback pipeline.")
 
     # ------ Step 2: AI Viral Moment Detection BEFORE any video download ------
     print("\n--- [2/6] VIRAL MOMENT HUNTING & HOOK SCORING ---")
