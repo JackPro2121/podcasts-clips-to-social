@@ -40,6 +40,7 @@ class SlackNotifier:
             print("[*] SlackNotifier: SLACK_WEBHOOK_URL not configured. Skipping Slack alert.")
             return False
 
+        podcast_link_md = f"<{podcast_url}|{podcast_title}>" if podcast_url.startswith("http") else f"`{podcast_title}`"
         blocks: List[Dict[str, Any]] = [
             {
                 "type": "header",
@@ -54,7 +55,7 @@ class SlackNotifier:
                 "text": {
                     "type": "mrkdwn",
                     "text": (
-                        f"*🎙️ Podcast Episode:* <{podcast_url}|{podcast_title}>\n"
+                        f"*🎙️ Podcast Episode:* {podcast_link_md}\n"
                         f"*🏷️ Niche:* `{niche}`  |  *🎬 Clips Generated:* `{len(clips)}`"
                     )
                 }
@@ -72,7 +73,7 @@ class SlackNotifier:
             due_at = clip.get("due_at", "")
 
             schedule_info = f"`{due_at}`" if due_at else f"`{buffer_status}`"
-            link_md = f"<{mp4_url}|Download MP4>" if mp4_url else "Uploaded to Release"
+            link_md = f"<{mp4_url}|Download MP4>" if (mp4_url and mp4_url.startswith("http")) else "Uploaded to Release"
 
             clip_text = (
                 f"*#{idx} {title}*\n"
@@ -92,7 +93,7 @@ class SlackNotifier:
 
         # Action Buttons / Links
         elements = []
-        if release_url:
+        if release_url and release_url.startswith("http"):
             elements.append({
                 "type": "button",
                 "text": {
@@ -103,16 +104,17 @@ class SlackNotifier:
                 "url": release_url,
                 "action_id": "view_release"
             })
-        elements.append({
-            "type": "button",
-            "text": {
-                "type": "plain_text",
-                "text": "🌐 View Source Episode",
-                "emoji": True
-            },
-            "url": podcast_url,
-            "action_id": "view_youtube"
-        })
+        if podcast_url and podcast_url.startswith("http"):
+            elements.append({
+                "type": "button",
+                "text": {
+                    "type": "plain_text",
+                    "text": "🌐 View Source Episode",
+                    "emoji": True
+                },
+                "url": podcast_url,
+                "action_id": "view_youtube"
+            })
 
         if elements:
             blocks.append({
