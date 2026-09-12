@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any
 from src.config import (
     OUTPUT_WIDTH, OUTPUT_HEIGHT, FPS, VIDEO_CRF, AUDIO_BITRATE,
     TARGET_LUFS, TARGET_TRUE_PEAK, HIGHPASS_FREQ, VOCAL_PRESENCE_FREQ, VOCAL_AIR_FREQ, CLIPS_DIR,
-    ENABLE_PUNCH_ZOOM, ENABLE_BGM, AUDIO_ASSETS_DIR
+    ENABLE_PUNCH_ZOOM, ENABLE_BGM, AUDIO_ASSETS_DIR, ENABLE_FILM_GRAIN
 )
 from src.face_tracker import FramingDecision
 
@@ -47,6 +47,10 @@ def build_video_filtergraph(
         # 3. unsharp=lx=5:ly=5:la=0.75:cx=3:cy=3:ca=0.40 - High-frequency facial & eye clarity
         # 4. eq=contrast=1.07:brightness=0.01:saturation=1.12 - Balanced broadcast color grade
         studio_grade = "hqdn3d=1.5:1.5:3:3,cas=0.45,unsharp=lx=5:ly=5:la=0.75:cx=3:cy=3:ca=0.40,eq=contrast=1.07:brightness=0.01:saturation=1.12"
+
+    # Anti-Fingerprint Organic Micro-Noise (Randomizes per-frame pHash to defeat duplicate detection)
+    if ENABLE_FILM_GRAIN:
+        studio_grade += ",noise=alls=1.2:allf=t"
 
     # Dynamic punch zoom: DISABLED. The previous expression put a time-varying
     # size into FFmpeg's crop filter, but crop evaluates w/h ONCE at init (only

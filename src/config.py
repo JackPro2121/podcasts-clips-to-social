@@ -84,10 +84,13 @@ SLACK_CHANNEL = os.getenv("SLACK_CHANNEL", "podcast-clip")
 MIN_VIDEO_HEIGHT = 720
 MAX_VIDEO_HEIGHT = 1080
 
-# Visual Retention & Audio Features
+# Visual Retention & Anti-Fingerprint Features
 ENABLE_PUNCH_ZOOM = os.getenv("ENABLE_PUNCH_ZOOM", "true").lower() in ("true", "1", "yes")
 ENABLE_TOP_HOOK_BADGE = os.getenv("ENABLE_TOP_HOOK_BADGE", "true").lower() in ("true", "1", "yes")
-ENABLE_BGM = os.getenv("ENABLE_BGM", "false").lower() in ("true", "1", "yes")
+HOOK_BADGE_DURATION = float(os.getenv("HOOK_BADGE_DURATION", "4.0"))  # 4-second initial hook retention badge
+HOOK_BADGE_MARGIN_V = int(os.getenv("HOOK_BADGE_MARGIN_V", "250"))    # Safe zone (below YT search UI, above speaker face)
+ENABLE_BGM = os.getenv("ENABLE_BGM", "true").lower() in ("true", "1", "yes")  # Breaks audio fingerprinting
+ENABLE_FILM_GRAIN = os.getenv("ENABLE_FILM_GRAIN", "true").lower() in ("true", "1", "yes")  # Breaks visual pHash
 
 # Video & Format Defaults (Ultra HD 60FPS Broadcast Studio)
 OUTPUT_WIDTH = 1080

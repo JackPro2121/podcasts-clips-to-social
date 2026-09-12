@@ -165,6 +165,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertIn("hqdn3d=1.5:1.5:3:3", fg)
         self.assertIn("unsharp=lx=5:ly=5:la=0.75", fg)
         self.assertIn("eq=contrast=1.07", fg)
+        self.assertIn("noise=alls=1.2", fg)
 
     def test_super_resolution_filtergraph_on_low_res(self):
         decision = FramingDecision(
@@ -367,6 +368,36 @@ class TestPodcastClipperPipeline(unittest.TestCase):
             if result:
                 self.assertEqual(result["segment_start"], 0.0)
                 self.assertEqual(result["height"], 1080)
+
+    def test_top_hook_badge_generation(self):
+        """Top hook retention capsule badge must be generated in safe-zone without emojis."""
+        from src.config import HOOK_BADGE_MARGIN_V
+        words = [
+            WordTimestamp(word="I", start=0.0, end=0.2),
+            WordTimestamp(word="Lost", start=0.2, end=0.5),
+            WordTimestamp(word="Millions", start=0.5, end=1.0),
+        ]
+        seg = TranscriptSegment(start=0.0, end=2.0, text="I Lost Millions", words=words)
+        out_ass = Path("subtitles/test_hook_badge.ass")
+        created = create_styled_ass_subtitles(
+            segments=[seg],
+            clip_start=0.0,
+            clip_end=2.0,
+            output_ass_path=out_ass,
+            theme_key="hormozi",
+            header_title="🔥 HOW HE LOST $10,000,000 IN 10 DAYS!"
+        )
+        self.assertTrue(created.exists())
+        content = created.read_text(encoding="utf-8")
+        # Header style with safe-zone MarginV
+        self.assertIn(f"TopHeader,Montserrat Black,44,&H00FFFFFF,&H000000FF,&H20101010,&H00000000,-1,0,0,0,100,100,1.2,0,3,14,0,8,100,100,{HOOK_BADGE_MARGIN_V},1", content)
+        # Event with clean title (no emoji), 2-line split, fade
+        self.assertIn("TopHeader", content)
+        self.assertIn(r"{\fad(150,350)}", content)
+        self.assertIn("HOW HE", content)
+        self.assertNotIn("🔥", content)  # Emoji stripped for ASS safety
+        if created.exists():
+            created.unlink()
 
 if __name__ == "__main__":
     unittest.main()

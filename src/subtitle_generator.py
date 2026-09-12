@@ -2,7 +2,10 @@ import math
 import re
 from pathlib import Path
 from typing import List, Optional, Any, Dict, Tuple
-from src.config import SUBTITLE_THEMES, SUBTITLES_DIR, OUTPUT_WIDTH, OUTPUT_HEIGHT, CHANNEL_WATERMARK
+from src.config import (
+    SUBTITLE_THEMES, SUBTITLES_DIR, OUTPUT_WIDTH, OUTPUT_HEIGHT, CHANNEL_WATERMARK,
+    ENABLE_TOP_HOOK_BADGE, HOOK_BADGE_DURATION, HOOK_BADGE_MARGIN_V
+)
 from src.transcriber import TranscriptSegment, WordTimestamp
 
 # Default lower-third safe-zone margins per layout (must match generate_ass_header).
@@ -74,7 +77,7 @@ PlayResY: {OUTPUT_HEIGHT}
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,{font_name},{font_size},{primary_col},&H000000FF,{outline_col},{shadow_col},-1,0,0,0,100,100,1.5,0,1,{outline_w},{shadow_d},{alignment},100,100,{margin_v},1
-Style: TopHeader,Montserrat Black,46,&H00FFFFFF,&H000000FF,&H00B86B62,&H00000000,-1,0,0,0,100,100,1.2,0,3,18,0,8,120,120,210,1
+Style: TopHeader,Montserrat Black,44,&H00FFFFFF,&H000000FF,&H20101010,&H00000000,-1,0,0,0,100,100,1.2,0,3,14,0,8,100,100,{HOOK_BADGE_MARGIN_V},1
 Style: Watermark,Arial,28,&H99FFFFFF,&H000000FF,&H99000000,&H00000000,-1,0,0,0,100,100,1.2,0,1,1.5,0.0,8,60,60,335,1
 
 [Events]
@@ -182,8 +185,8 @@ def create_styled_ass_subtitles(
     if active_watermark:
         lines.insert(0, f"Dialogue: 2,0:00:00.00,{dur_str},Watermark,,0,0,0,,{active_watermark.strip()}")
 
-    # Hook title capsule badge: first 3.5 seconds, clean fade out, 0 emojis
-    if header_title:
+    # Hook title capsule badge: initial hook retention, smooth fade out, clean typography
+    if header_title and ENABLE_TOP_HOOK_BADGE:
         clean_title = header_title.strip().upper()
         clean_title = re.sub(r'[^\w\s\-\'\,\.\?]', '', clean_title).strip()
         clean_title = re.sub(r'\s+', ' ', clean_title)
@@ -193,8 +196,8 @@ def create_styled_ass_subtitles(
             mid = (len(words) + 1) // 2
             clean_title = " ".join(words[:mid]) + "\\N" + " ".join(words[mid:])
         
-        hook_dur = format_ass_timestamp(min(3.5, clip_end - clip_start))
-        lines.insert(0, f"Dialogue: 1,0:00:00.00,{hook_dur},TopHeader,,0,0,0,,{{\\fad(200,400)}}{clean_title}")
+        hook_dur = format_ass_timestamp(min(HOOK_BADGE_DURATION, clip_end - clip_start))
+        lines.insert(0, f"Dialogue: 1,0:00:00.00,{hook_dur},TopHeader,,0,0,0,,{{\\fad(150,350)}}{clean_title}")
 
     full_content = header + "\n".join(lines) + "\n"
 
