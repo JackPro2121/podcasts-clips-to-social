@@ -390,7 +390,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertTrue(created.exists())
         content = created.read_text(encoding="utf-8")
         # Header style with safe-zone MarginV
-        self.assertIn(f"TopHeader,Montserrat Black,44,&H00FFFFFF,&H000000FF,&H20101010,&H00000000,-1,0,0,0,100,100,1.2,0,3,14,0,8,100,100,{HOOK_BADGE_MARGIN_V},1", content)
+        self.assertIn(f"TopHeader,Montserrat Black,46,&H00FFFFFF,&H000000FF,&H00B86B62,&H00000000,-1,0,0,0,100,100,1.2,0,3,18,0,8,120,120,{HOOK_BADGE_MARGIN_V},1", content)
         # Event with clean title (no emoji), 2-line split, fade
         self.assertIn("TopHeader", content)
         self.assertIn(r"{\fad(150,350)}", content)
