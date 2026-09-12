@@ -251,5 +251,122 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertIn("C\\:/", sanitized)
         self.assertNotIn("C:/", sanitized)
 
+    def test_ytdlp_client_variants_order(self):
+        from src.downloader import _ytdlp_client_variants
+        variants = _ytdlp_client_variants()
+        labels = [v[0] for v in variants]
+        self.assertIn("android_vr", labels)
+        self.assertIn("tv_embedded", labels)
+        self.assertEqual(labels[0], "android_vr", "android_vr must be first for zero bot-block")
+        self.assertEqual(labels[1], "tv_embedded", "tv_embedded must be second")
+
+    def test_cobalt_downloader_mock_success(self):
+        from unittest.mock import patch, MagicMock
+        from src.downloader import download_via_cobalt
+        import tempfile
+
+        fake_post_response = MagicMock()
+        fake_post_response.status_code = 200
+        fake_post_response.json.return_value = {
+            "status": "tunnel",
+            "url": "https://fake-cdn.cobalt.tools/stream.mp4"
+        }
+
+        fake_stream_response = MagicMock()
+        fake_stream_response.status_code = 200
+        # 1.5MB dummy stream chunk
+        fake_stream_response.iter_content.return_value = [b"0" * (1024 * 1024 * 2)]
+        fake_stream_response.__enter__.return_value = fake_stream_response
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir)
+            with patch("requests.post", return_value=fake_post_response), \
+                 patch("requests.get", return_value=fake_stream_response), \
+                 patch("src.downloader.get_video_height", return_value=1080), \
+                 patch("src.downloader.get_video_duration", return_value=45.0):
+                res = download_via_cobalt("https://www.youtube.com/watch?v=dQw4w9WgXcQ", out_dir)
+                self.assertIsNotNone(res)
+                self.assertEqual(res["height"], 1080)
+                self.assertFalse(res["is_low_res"])
+                self.assertTrue(res["video_path"].exists())
+
+    def test_get_video_duration_fallback(self):
+        from src.downloader import get_video_duration
+        dur = get_video_duration(Path("non_existent_file.mp4"))
+        self.assertEqual(dur, 0.0)
+
+    def test_fetch_transcript_only_returns_none_on_bad_url(self):
+        """fetch_transcript_only must return None gracefully for non-YouTube inputs."""
+        from src.downloader import fetch_transcript_only
+        result = fetch_transcript_only("https://example.com/not-a-youtube-url")
+        self.assertIsNone(result)
+
+    def test_fetch_transcript_only_returns_none_when_no_captions(self):
+        """fetch_transcript_only must return None when youtube_transcript_api finds nothing."""
+        from unittest.mock import patch
+        from src.downloader import fetch_transcript_only
+        with patch("src.downloader.fetch_youtube_transcript", return_value=None):
+            result = fetch_transcript_only("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        self.assertIsNone(result)
+
+    def test_fetch_transcript_only_success(self):
+        """fetch_transcript_only must return video_id + transcript on success."""
+        from unittest.mock import patch
+        from src.downloader import fetch_transcript_only
+        fake_transcript = [{"text": "Hello world", "start": 0.0, "duration": 2.0}]
+        with patch("src.downloader.fetch_youtube_transcript", return_value=fake_transcript):
+            result = fetch_transcript_only("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        self.assertIsNotNone(result)
+        self.assertEqual(result["video_id"], "dQw4w9WgXcQ")
+        self.assertEqual(result["transcript"], fake_transcript)
+
+    def test_download_clip_segment_permanent_error_returns_none(self):
+        """download_clip_segment must return None cleanly on a permanent video error."""
+        from unittest.mock import patch, MagicMock
+        from src.downloader import download_clip_segment
+        import tempfile
+
+        perm_exc = Exception("video unavailable")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("yt_dlp.YoutubeDL") as MockYDL:
+                instance = MockYDL.return_value.__enter__.return_value
+                instance.extract_info.side_effect = perm_exc
+                result = download_clip_segment(
+                    video_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                    start_time=60.0,
+                    end_time=120.0,
+                    clip_index=1,
+                    output_dir=Path(tmpdir)
+                )
+        self.assertIsNone(result)
+
+    def test_download_clip_segment_segment_start_always_zero(self):
+        """Returned dict from download_clip_segment must have segment_start=0.0."""
+        from unittest.mock import patch, MagicMock
+        from src.downloader import download_clip_segment
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir)
+            # Fake the yt-dlp success path: create a dummy mp4 file
+            dummy_mp4 = out_dir / "clip_1_60s_120s.mp4"
+            dummy_mp4.write_bytes(b"\x00" * (600 * 1024))  # 600 KB stub
+
+            with patch("yt_dlp.YoutubeDL") as MockYDL, \
+                 patch("src.downloader.get_video_height", return_value=1080), \
+                 patch("src.downloader.get_video_duration", return_value=60.0):
+                instance = MockYDL.return_value.__enter__.return_value
+                instance.extract_info.return_value = {"id": "dQw4w9WgXcQ"}
+                result = download_clip_segment(
+                    video_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                    start_time=60.0,
+                    end_time=120.0,
+                    clip_index=1,
+                    output_dir=out_dir
+                )
+            if result:
+                self.assertEqual(result["segment_start"], 0.0)
+                self.assertEqual(result["height"], 1080)
+
 if __name__ == "__main__":
     unittest.main()

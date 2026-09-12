@@ -69,9 +69,20 @@ RAPIDAPI_KEY = (
     os.getenv("rapidapi_key") or
     ""
 )
+COBALT_API_URL = os.getenv("COBALT_API_URL", "https://api.cobalt.tools")
+COBALT_INSTANCES = [
+    url.strip() for url in (
+        os.getenv("COBALT_INSTANCES") or
+        "https://api.cobalt.tools,https://cobalt-api.kwiatekm.tokyo,https://cobaltapi.pukeko.cyou,https://co.wuk.sh"
+    ).split(",") if url.strip()
+]
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
 SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN", "")
 SLACK_CHANNEL = os.getenv("SLACK_CHANNEL", "podcast-clip")
+
+# Video Ingestion Standards (Strict Quality Gate)
+MIN_VIDEO_HEIGHT = 720
+MAX_VIDEO_HEIGHT = 1080
 
 # Visual Retention & Audio Features
 ENABLE_PUNCH_ZOOM = os.getenv("ENABLE_PUNCH_ZOOM", "true").lower() in ("true", "1", "yes")

@@ -10,6 +10,7 @@ import requests
 from youtube_transcript_api import YouTubeTranscriptApi
 from src.config import (
     DOWNLOADS_DIR, APIFY_API_TOKEN, YOUTUBE_COOKIES, YTDLP_PROXY, RAPIDAPI_KEY,
+    COBALT_API_URL, COBALT_INSTANCES, MIN_VIDEO_HEIGHT, MAX_VIDEO_HEIGHT,
 )
 
 # ---------------------------------------------------------------------------
@@ -117,6 +118,21 @@ def get_video_height(file_path: Path) -> int:
         return 0
     except Exception:
         return 0
+
+def get_video_duration(file_path: Path) -> float:
+    """Probes video duration in seconds using ffprobe."""
+    try:
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "csv=p=0",
+            str(file_path)
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        val = res.stdout.strip()
+        return float(val) if val else 0.0
+    except Exception:
+        return 0.0
 
 def extract_youtube_id(url: str) -> Optional[str]:
     """Extract YouTube video ID from various URL formats."""
@@ -293,6 +309,28 @@ _FAILSAFE_FORMAT = 'bestvideo+bestaudio/best'
 _POT_ARGS = {'youtubepot-bgutilhttp': {'base_url': ['http://127.0.0.1:4416']}}
 
 
+def _ytdlp_client_variants(cookie_path: Optional[Path] = None) -> List[Tuple[str, Dict[str, Any]]]:
+    """Generates ordered yt-dlp client extraction options prioritizing bot-bypassing clients."""
+    def _client(clients: List[str]) -> Dict[str, Any]:
+        return {'extractor_args': {'youtube': {'player_client': clients}, **_POT_ARGS}}
+
+    variants: List[Tuple[str, Dict[str, Any]]] = [
+        ("android_vr", {'extractor_args': {'youtube': {'player_client': ['android_vr']}}}),
+        ("tv_embedded", {'extractor_args': {'youtube': {'player_client': ['tv_embedded', 'tv']}}}),
+        ("web-pot", _client(['web'])),
+        ("default+mweb", _client(['default', 'mweb'])),
+        ("ios", {'extractor_args': {'youtube': {'player_client': ['ios']}}}),
+        ("universal", _client(['android_vr', 'web', 'tv_embedded'])),
+    ]
+    if cookie_path:
+        cookie_extra = _client(['web', 'tv'])
+        cookie_extra['cookiefile'] = str(cookie_path)
+        variants.append(("cookies", cookie_extra))
+    # Fail-safe: android client without POT (no HD guarantee, but usually ungated).
+    variants.append(("android-failsafe", {'extractor_args': {'youtube': {'player_client': ['android']}}}))
+    return variants
+
+
 def _write_cookiefile(cookies: str) -> Optional[Path]:
     """Write cookies to a private (0600) temp file OUTSIDE the artifact dir.
 
@@ -406,23 +444,7 @@ def download_via_ytdlp(
         else None
     )
 
-    def _client(clients: List[str]) -> Dict[str, Any]:
-        return {'extractor_args': {'youtube': {'player_client': clients}, **_POT_ARGS}}
-
-    # (label, extra_opts) in priority order.
-    clients: List[Tuple[str, Dict[str, Any]]] = [
-        ("default+mweb", _client(['default', 'mweb'])),
-        ("web", _client(['web'])),
-        ("android_vr", _client(['android_vr'])),
-        ("ios", _client(['ios'])),
-        ("web+tv+vr", _client(['web', 'tv_embedded', 'android_vr'])),
-    ]
-    if cookie_path:
-        cookie_extra = _client(['web', 'tv'])
-        cookie_extra['cookiefile'] = str(cookie_path)
-        clients.append(("cookies", cookie_extra))
-    # Fail-safe: android client without POT (no HD, but usually ungated).
-    clients.append(("android-failsafe", {'extractor_args': {'youtube': {'player_client': ['android']}}}))
+    clients = _ytdlp_client_variants(cookie_path)
 
     try:
         best_sub_hd: Optional[Tuple[str, Dict[str, Any], int]] = None
@@ -469,6 +491,108 @@ def download_via_ytdlp(
                 cookie_path.unlink()
             except Exception:
                 pass
+
+def download_via_cobalt(
+    video_url: str,
+    output_dir: Path,
+    quality: str = "1080",
+    instances: Optional[List[str]] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Tier 2 ($0, No Cookies): Downloads YouTube video via Cobalt Engine API.
+    Cobalt is an open-source media ingestion service designed specifically to bypass
+    YouTube's BotGuard, SABR, and PoToken constraints without requiring user cookies.
+    Supports multi-instance fallback, tunnel/redirect streams, and chunked streaming.
+    """
+    candidate_instances = instances or COBALT_INSTANCES or [COBALT_API_URL]
+    vid_id = extract_youtube_id(video_url) or "video"
+    out_file = output_dir / f"YouTube_{vid_id}.mp4"
+
+    ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": ua
+    }
+    payload = {
+        "url": video_url,
+        "videoQuality": str(quality),
+        "youtubeVideoCodec": "h264",
+        "downloadMode": "auto"
+    }
+
+    for inst_idx, base_url in enumerate(candidate_instances):
+        inst_url = base_url.rstrip("/")
+        target_endpoint = inst_url if inst_url.endswith("/api") else f"{inst_url}/"
+        print(f"[*] Attempting 1080p download via Cobalt instance {inst_idx + 1}/{len(candidate_instances)} ({inst_url})...")
+        try:
+            res = requests.post(target_endpoint, headers=headers, json=payload, timeout=25)
+            if res.status_code not in (200, 201):
+                print(f"[-] Cobalt instance {inst_url} returned status {res.status_code}: {res.text[:120]}")
+                continue
+
+            data = res.json()
+            status = data.get("status")
+            stream_url = data.get("url")
+
+            # Direct stream, tunnel, or redirect URL
+            if status in ("tunnel", "redirect", "stream") and stream_url:
+                print(f"[*] Cobalt returned '{status}' stream. Downloading to disk ({out_file.name})...")
+                with requests.get(stream_url, headers={"User-Agent": ua}, stream=True, timeout=180) as stream_res:
+                    stream_res.raise_for_status()
+                    with open(out_file, "wb") as f:
+                        for chunk in stream_res.iter_content(chunk_size=2 * 1024 * 1024):
+                            if chunk:
+                                f.write(chunk)
+
+                if out_file.exists() and out_file.stat().st_size > 1024 * 1024:
+                    h = get_video_height(out_file)
+                    dur = get_video_duration(out_file)
+                    print(f"[+] Cobalt download complete: {out_file.name} ({h}p, {out_file.stat().st_size / (1024*1024):.2f} MB)")
+                    return {
+                        "video_path": out_file.resolve(),
+                        "title": f"YouTube_{vid_id}",
+                        "duration": dur,
+                        "height": h,
+                        "is_low_res": (0 < h < MIN_VIDEO_HEIGHT),
+                        "is_local": False
+                    }
+                else:
+                    print(f"[-] Cobalt stream produced empty or truncated file.")
+            elif status == "picker":
+                picker_items = data.get("picker", [])
+                best_url = None
+                for item in picker_items:
+                    if item.get("type") in ("video", None) and item.get("url"):
+                        best_url = item["url"]
+                        break
+                if best_url:
+                    print(f"[*] Cobalt returned picker items. Downloading stream to disk...")
+                    with requests.get(best_url, headers={"User-Agent": ua}, stream=True, timeout=180) as stream_res:
+                        stream_res.raise_for_status()
+                        with open(out_file, "wb") as f:
+                            for chunk in stream_res.iter_content(chunk_size=2 * 1024 * 1024):
+                                if chunk:
+                                    f.write(chunk)
+                    if out_file.exists() and out_file.stat().st_size > 1024 * 1024:
+                        h = get_video_height(out_file)
+                        dur = get_video_duration(out_file)
+                        return {
+                            "video_path": out_file.resolve(),
+                            "title": f"YouTube_{vid_id}",
+                            "duration": dur,
+                            "height": h,
+                            "is_low_res": (0 < h < MIN_VIDEO_HEIGHT),
+                            "is_local": False
+                        }
+            else:
+                err_info = data.get("error", {})
+                err_code = err_info.get("code") if isinstance(err_info, dict) else str(err_info)
+                print(f"[-] Cobalt instance {inst_url} error ({status}): {err_code}")
+        except Exception as e:
+            print(f"[-] Cobalt instance {inst_url} exception: {e}")
+
+    return None
 
 def download_via_rapidapi(
     video_url: str,
@@ -637,11 +761,12 @@ def download_via_rapidapi(
 
 def download_video(url_or_path: str, output_dir: Optional[Path] = None) -> Dict[str, Any]:
     """
-    Smart multi-tier downloader:
+    Multi-tier resilient downloader with strict 720p - 1080p Quality Gate:
     1. Local file check.
-    2. Zero-cost yt-dlp (bgutil PO token provider + optional Webshare proxy / cookies).
-    3. RapidAPI YouTube Downloader fallback (Option 2).
-    4. Apify Actor proxy fallback (Option 3).
+    2. Tier 1: Zero-cost yt-dlp (Cloudflare WARP + android_vr / tv_embedded / bgutil POT).
+    3. Tier 2: Cobalt Engine Ingestion ($0, no cookies, bypasses BotGuard & PoTokens).
+    4. Tier 3: RapidAPI 1080p Muxer fallback (Key rotation).
+    5. Tier 4: Apify Actor residential proxy fallback.
     """
     target_dir = output_dir or DOWNLOADS_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -649,12 +774,16 @@ def download_video(url_or_path: str, output_dir: Optional[Path] = None) -> Dict[
     # Check if local file
     local_path = Path(url_or_path)
     if local_path.exists() and local_path.is_file():
+        h = get_video_height(local_path)
+        dur = get_video_duration(local_path)
         return {
             'video_path': local_path.resolve(),
             'title': local_path.stem,
-            'duration': 0.0,
+            'duration': dur,
             'transcript': None,
             'video_id': extract_youtube_id(local_path.stem),
+            'height': h,
+            'is_low_res': (0 < h < MIN_VIDEO_HEIGHT),
             'is_local': True
         }
 
@@ -664,33 +793,177 @@ def download_video(url_or_path: str, output_dir: Optional[Path] = None) -> Dict[
     if video_id:
         transcript = fetch_youtube_transcript(video_id)
 
-    # 1. Tier 1: Direct yt-dlp ($0 cost, uses bgutil PO Token + Proxy if set).
-    # A VideoUnavailableError means the video is genuinely gone (private/removed);
-    # yt-dlp won't recover it, but a residential-IP tier (Apify) still might for a
-    # geo-block, so we log and fall through rather than crashing the whole run.
+    fallback_candidate: Optional[Dict[str, Any]] = None
+
+    # Tier 1: Direct yt-dlp ($0 cost, uses bgutil PO Token + android_vr + Proxy if set).
     try:
         ytdlp_result = download_via_ytdlp(url_or_path, target_dir, video_id=video_id, transcript=transcript)
         if ytdlp_result:
-            return ytdlp_result
+            h = ytdlp_result.get('height', 0)
+            if h >= MIN_VIDEO_HEIGHT:
+                print(f"[+] Tier 1 (yt-dlp) succeeded with verified HD quality ({h}p).")
+                return ytdlp_result
+            else:
+                print(f"[!] Tier 1 result is {h}p (below {MIN_VIDEO_HEIGHT}p). Retaining as fallback and trying Tier 2 (Cobalt)...")
+                fallback_candidate = ytdlp_result
     except VideoUnavailableError as e:
         print(f"[-] yt-dlp reports video permanently unavailable: {e}")
+    except Exception as e:
+        print(f"[-] Tier 1 (yt-dlp) failed: {e}")
 
-    # 2. Tier 2: RapidAPI Downloader fallback (Option 2)
+    # Tier 2: Cobalt Engine API ($0, Zero Cookies, Bot-Bypass)
+    print("[*] Engaging Tier 2: Cobalt Engine API ($0, bot-bypass)...")
+    try:
+        cobalt_result = download_via_cobalt(url_or_path, target_dir, quality="1080")
+        if cobalt_result:
+            cobalt_result['transcript'] = transcript
+            cobalt_result['video_id'] = video_id
+            h = cobalt_result.get('height', 0)
+            if h >= MIN_VIDEO_HEIGHT:
+                print(f"[+] Tier 2 (Cobalt) succeeded with verified HD quality ({h}p).")
+                return cobalt_result
+            elif not fallback_candidate or h > fallback_candidate.get('height', 0):
+                fallback_candidate = cobalt_result
+    except Exception as e:
+        print(f"[-] Tier 2 (Cobalt) failed: {e}")
+
+    # Tier 3: RapidAPI Downloader fallback (Option 2)
     if RAPIDAPI_KEY:
-        print("[!] Direct yt-dlp failed. Engaging RapidAPI downloader fallback...")
-        rapidapi_result = download_via_rapidapi(url_or_path, target_dir)
-        if rapidapi_result:
-            rapidapi_result['transcript'] = transcript
-            rapidapi_result['video_id'] = video_id
-            return rapidapi_result
+        print("[!] Engaging Tier 3: RapidAPI 1080p Downloader fallback...")
+        try:
+            rapidapi_result = download_via_rapidapi(url_or_path, target_dir)
+            if rapidapi_result:
+                rapidapi_result['transcript'] = transcript
+                rapidapi_result['video_id'] = video_id
+                h = rapidapi_result.get('height', 0)
+                if h >= MIN_VIDEO_HEIGHT:
+                    print(f"[+] Tier 3 (RapidAPI) succeeded with verified HD quality ({h}p).")
+                    return rapidapi_result
+                elif not fallback_candidate or h > fallback_candidate.get('height', 0):
+                    fallback_candidate = rapidapi_result
+        except Exception as e:
+            print(f"[-] Tier 3 (RapidAPI) failed: {e}")
 
-    # 3. Tier 3: Apify Actor proxy fallback
+    # Tier 4: Apify Actor proxy fallback
     if APIFY_API_TOKEN and ("youtube.com" in url_or_path or "youtu.be" in url_or_path):
-        print("[!] Engaging Apify proxy downloader...")
-        apify_result = download_via_apify(url_or_path, target_dir, quality="1080")
-        if apify_result:
-            apify_result['transcript'] = transcript
-            apify_result['video_id'] = video_id
-            return apify_result
+        print("[!] Engaging Tier 4: Apify Actor proxy downloader...")
+        try:
+            apify_result = download_via_apify(url_or_path, target_dir, quality="1080")
+            if apify_result:
+                apify_result['transcript'] = transcript
+                apify_result['video_id'] = video_id
+                return apify_result
+        except Exception as e:
+            print(f"[-] Tier 4 (Apify) failed: {e}")
 
-    raise RuntimeError(f"Failed to download video from {url_or_path} using yt-dlp, RapidAPI, and Apify.")
+    # If HD wasn't achieved but sub-HD candidate exists:
+    if fallback_candidate:
+        print(f"[!] Warning: All HD tiers exhausted. Using fallback candidate ({fallback_candidate.get('height', '?')}p).")
+        return fallback_candidate
+
+    raise RuntimeError(f"Failed to download video from {url_or_path} across all tiers (yt-dlp, Cobalt, RapidAPI, Apify).")
+
+
+def fetch_transcript_only(url: str) -> Optional[Dict]:
+    """
+    Step 0 of the Smart Pipeline: Fetches ONLY the transcript (text) from a
+    YouTube video — ZERO video bytes downloaded. Returns transcript + video_id.
+    This is the trigger for Gemini to identify viral moments BEFORE any download.
+    """
+    video_id = extract_youtube_id(url)
+    if not video_id:
+        return None
+    transcript = fetch_youtube_transcript(video_id)
+    if not transcript:
+        print("[!] No native transcript found. Targeted clip download unavailable; will fall back to full download.")
+        return None
+    return {"video_id": video_id, "transcript": transcript}
+
+
+def download_clip_segment(
+    video_url: str,
+    start_time: float,
+    end_time: float,
+    clip_index: int,
+    output_dir: Path,
+) -> Optional[Dict[str, Any]]:
+    """
+    Targeted Range Downloader: Downloads ONLY the seconds [start_time, end_time]
+    of a YouTube video using yt-dlp's --download-sections flag.
+
+    Instead of downloading a full 2GB podcast, this grabs ONLY the 15-25 MB
+    clip window identified by Gemini — saving bandwidth, time, and avoiding
+    YouTube's rate-limiter that triggers on long continuous streams.
+
+    The downloaded clip starts at t=0s, so render_viral_clip must be called
+    with start_time=0.0 and end_time=(end_time - start_time).
+
+    Returns a dict compatible with download_video() results.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    clip_duration = end_time - start_time
+    out_file = output_dir / f"clip_{clip_index}_{int(start_time)}s_{int(end_time)}s.mp4"
+
+    # yt-dlp --download-sections takes "*START-END" notation (seconds)
+    section_spec = f"*{start_time:.2f}-{end_time:.2f}"
+    print(f"[*] Targeted clip download: segment {section_spec} (~{clip_duration:.0f}s) → {out_file.name}")
+
+    base_opts = {
+        'js_runtimes': {'deno': {}, 'node': {}},
+        'outtmpl': str(output_dir / f"clip_{clip_index}_{int(start_time)}s_{int(end_time)}s.%(ext)s"),
+        'merge_output_format': 'mp4',
+        'download_ranges': yt_dlp.utils.download_range_func(None, [(start_time, end_time)]),
+        'force_keyframes_at_cuts': True,
+        'quiet': True,
+        'no_warnings': True,
+    }
+    if YTDLP_PROXY and YTDLP_PROXY.strip():
+        base_opts['proxy'] = YTDLP_PROXY.strip()
+
+    # Try each client variant in priority order (android_vr first = no BotGuard)
+    clients = _ytdlp_client_variants(cookie_path=None)
+    for label, extra in clients:
+        opts = {
+            **base_opts,
+            'format': _HD_FORMAT,
+            'postprocessors': [{'key': 'FFmpegVideoConvertor', 'preferedformat': 'mp4'}],
+            **extra,
+        }
+        try:
+            print(f"  [*] Segment download via client '{label}'...")
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                ydl.extract_info(video_url, download=True)
+
+            # yt-dlp may produce the file with .mp4 directly or via post-processor
+            produced = out_file
+            if not produced.exists():
+                # Search for any file matching our clip prefix
+                candidates = sorted(output_dir.glob(f"clip_{clip_index}_{int(start_time)}s_{int(end_time)}s.*"))
+                if candidates:
+                    produced = candidates[0]
+
+            if produced.exists() and produced.stat().st_size > 500_000:
+                h = get_video_height(produced)
+                dur = get_video_duration(produced)
+                print(f"  [+] Segment downloaded ({h or '?'}p, {produced.stat().st_size / (1024*1024):.1f} MB) via '{label}'")
+                return {
+                    'video_path': produced.resolve(),
+                    'title': f"clip_{clip_index}",
+                    'duration': dur or clip_duration,
+                    'height': h,
+                    'is_low_res': (0 < h < MIN_VIDEO_HEIGHT),
+                    'segment_start': 0.0,            # clip starts at t=0 in the file
+                    'segment_duration': clip_duration,
+                    'is_local': False,
+                }
+            else:
+                print(f"  [-] Client '{label}' produced no usable file. Trying next...")
+        except Exception as e:
+            kind = classify_ytdlp_error(e)
+            if kind == "permanent":
+                print(f"  [-] Permanent error on segment download: {e}")
+                return None
+            print(f"  [-] Client '{label}' segment download failed ({kind}): {e}")
+
+    print(f"[-] All yt-dlp clients failed for segment {section_spec}.")
+    return None

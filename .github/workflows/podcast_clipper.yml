@@ -144,6 +144,7 @@ jobs:
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
           YTDLP_PROXY: ${{ secrets.YTDLP_PROXY }}
           RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+          COBALT_API_URL: ${{ secrets.COBALT_API_URL || 'https://api.cobalt.tools' }}
           APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

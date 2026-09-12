@@ -1,7 +1,7 @@
 import sys
 import argparse
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 # Ensure UTF-8 output encoding across Windows terminals
 if hasattr(sys.stdout, "reconfigure"):
@@ -9,9 +9,11 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-from src.config import CLIPS_DIR, SUBTITLES_DIR
-from src.downloader import download_video
-from src.transcriber import get_transcript
+from src.config import CLIPS_DIR, SUBTITLES_DIR, DOWNLOADS_DIR
+from src.downloader import (
+    download_video, fetch_transcript_only, download_clip_segment, extract_youtube_id
+)
+from src.transcriber import get_transcript, TranscriptSegment
 from src.viral_detector import detect_viral_moments
 from src.face_tracker import analyze_faces_in_clip, FramingDecision
 from src.subtitle_generator import create_styled_ass_subtitles
@@ -43,108 +45,235 @@ def run_pipeline(
     print(f"[*] Dry Run: {dry_run}")
     print("=" * 70)
 
-    # Step 1: Download video & extract native captions if available
-    print("\n--- [1/6] INGESTION & DOWNLOAD ---")
     candidates = [url_or_path] if isinstance(url_or_path, str) else list(url_or_path)
-    download_info = None
     active_source_url = candidates[0]
-    for cand_url in candidates:
-        try:
-            print(f"[*] Ingesting video candidate: {cand_url}")
-            download_info = download_video(cand_url)
-            if download_info:
-                active_source_url = cand_url
-                break
-        except Exception as e:
-            print(f"[-] Candidate '{cand_url}' download failed: {e}. Trying next candidate...")
+    is_youtube_url = any(
+        "youtube.com" in c or "youtu.be" in c for c in candidates
+    )
+    is_local_file = Path(url_or_path).exists() and Path(url_or_path).is_file()
 
-    if not download_info:
-        print("[-] Fatal: All candidate downloads failed. Exiting.")
-        sys.exit(1)
+    # =========================================================================
+    # SMART TRANSCRIPT-FIRST PIPELINE
+    # Strategy: Fetch transcript text ONLY (zero video bytes) → send to Gemini
+    # → identify N viral clip timestamps → download ONLY those N short segments.
+    # This avoids downloading 2–3 GB full podcasts entirely.
+    #
+    # FALLBACK: If no native transcript exists (e.g. no captions, local file,
+    # or non-YouTube URL), we fall back to the full-download legacy pipeline.
+    # =========================================================================
 
-    video_path = download_info['video_path']
-    video_title = download_info['title']
-    native_transcript = download_info.get('transcript')
-    print(f"[+] Active video file: {video_path}")
+    # ------ Step 1: Fetch Transcript (Text Only — ZERO Video Downloaded) ------
+    print("\n--- [1/6] TRANSCRIPT FETCH (ZERO VIDEO DOWNLOAD) ---")
 
-    # Step 2: Extract or transcribe word-level transcript
-    print("\n--- [2/6] SPEECH-TO-TEXT / TRANSCRIPT EXTRACTION ---")
-    segments = get_transcript(video_path, native_transcript, video_id=download_info.get('video_id'))
-    if not segments:
-        print("[-] Error: Could not obtain transcript for video. Exiting.")
-        sys.exit(1)
+    segments: Optional[List[TranscriptSegment]] = None
+    video_id: Optional[str] = extract_youtube_id(active_source_url)
+    video_title = f"YouTube_{video_id or 'podcast'}"
+    native_transcript = None
 
-    # Step 3: AI Viral Moment Detection (Google Gemini Flash)
-    print("\n--- [3/6] VIRAL MOMENT HUNTING & HOOK SCORING ---")
-    viral_moments = detect_viral_moments(segments, num_clips=num_clips)
-    if not viral_moments:
-        print("[-] No viral moments detected. Exiting.")
-        sys.exit(1)
+    if is_youtube_url and not is_local_file:
+        transcript_data = fetch_transcript_only(active_source_url)
+        if transcript_data:
+            native_transcript = transcript_data["transcript"]
+            video_id = transcript_data.get("video_id", video_id)
+            print(f"[+] Native YouTube transcript fetched ({len(native_transcript)} segments). No video downloaded yet.")
+            segments = get_transcript(
+                video_path=Path("__transcript_only__"),   # placeholder; not used when native_transcript provided
+                native_transcript=native_transcript,
+                video_id=video_id
+            )
+        else:
+            print("[!] No native transcript. Will use full-download fallback pipeline.")
 
-    print(f"\n[+] Top {len(viral_moments)} Viral Moments Identified:")
-    for idx, m in enumerate(viral_moments, 1):
-        print(f"   #{idx}: [{m.start_time:.1f}s - {m.end_time:.1f}s] (Virality: {m.viral_score}/100) '{m.title}'")
+    # ------ Step 2: AI Viral Moment Detection BEFORE any video download ------
+    print("\n--- [2/6] VIRAL MOMENT HUNTING & HOOK SCORING ---")
+
+    viral_moments = None
+    if segments:
+        viral_moments = detect_viral_moments(segments, num_clips=num_clips)
+        if viral_moments:
+            print(f"\n[+] Gemini identified {len(viral_moments)} viral clips:")
+            for idx, m in enumerate(viral_moments, 1):
+                print(f"   #{idx}: [{m.start_time:.1f}s → {m.end_time:.1f}s] ({m.duration:.0f}s) | Score: {m.viral_score}/100 | '{m.title}'")
+        else:
+            print("[!] Gemini found no viral moments from transcript. Falling back to full-download pipeline.")
+            viral_moments = None
 
     if dry_run:
-        print("\n[!] Dry run enabled: Skipping video rendering and Buffer upload.")
+        print("\n[!] Dry run enabled. Skipping video download, rendering and Buffer upload.")
         return
 
-    # Step 4 & 5: Video Enhancement, Framing & Subtitle Generation
-    print("\n--- [4/6 & 5/6] EDITING, FACE TRACKING, AUDIO MASTERING & RENDERING ---")
+    # =========================================================================
+    # DECISION BRANCH:
+    #   A) Smart path → viral moments identified from transcript first →
+    #      download ONLY N targeted clip segments (each ~15-25 MB)
+    #   B) Fallback path → no transcript / local file → full video download
+    #      then trimming (legacy behaviour)
+    # =========================================================================
+
     rendered_clips = []
 
-    for idx, moment in enumerate(viral_moments, 1):
-        print(f"\n>>> Processing Clip #{idx}: {moment.title} ({moment.duration:.1f}s)")
-        
-        # Determine Framing:
-        if framing_mode == "auto":
-            print("[*] Running AI Face Detection & Speaker Tracking...")
-            framing = analyze_faces_in_clip(video_path, moment.start_time, moment.end_time)
-            print(f"[+] Framing decision: '{framing.mode}' (Detected faces: {framing.face_count})")
-        elif framing_mode == "split":
-            # Force split screen
-            framing = FramingDecision(mode="split_screen", face_count=2, speaker1_box=(100,0,900,1080), speaker2_box=(920,0,900,1080))
-        elif framing_mode == "crop":
-            framing = FramingDecision(mode="single_smooth", face_count=1, smoothed_center_x=960)
-        else:
-            framing = FramingDecision(mode="blur_stack", face_count=0)
+    # ------ BRANCH A: Targeted Clip Segment Downloads ------
+    if viral_moments and is_youtube_url and not is_local_file:
+        print("\n--- [3/6] TARGETED CLIP SEGMENT DOWNLOADS (Not Full Video!) ---")
+        print(f"[*] Downloading only {len(viral_moments)} clip segments (~15-25 MB each) instead of full podcast.")
 
-        # Subtitle Generation:
-        burn_subtitles = subtitles_mode in ("auto", "burn")
-        ass_path = None
-        if burn_subtitles:
-            ass_path = SUBTITLES_DIR / f"clip_{idx}_{subtitle_style}.ass"
-            create_styled_ass_subtitles(
-                segments=segments,
-                clip_start=moment.start_time,
-                clip_end=moment.end_time,
-                output_ass_path=ass_path,
-                theme_key=subtitle_style,
-                layout_mode=framing.mode,
-                header_title=moment.title,
-                watermark=watermark,
-                shots=framing.shots
+        DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
+
+        for idx, moment in enumerate(viral_moments, 1):
+            print(f"\n>>> Clip #{idx}: '{moment.title}' [{moment.start_time:.1f}s → {moment.end_time:.1f}s]")
+
+            clip_info = download_clip_segment(
+                video_url=active_source_url,
+                start_time=moment.start_time,
+                end_time=moment.end_time,
+                clip_index=idx,
+                output_dir=DOWNLOADS_DIR,
             )
 
-        # Video Render
-        safe_title = "".join(c for c in moment.title if c.isalnum() or c in (" ", "_", "-")).rstrip()
-        safe_title = safe_title.replace(" ", "_")[:30]
-        out_clip_path = CLIPS_DIR / f"clip_{idx}_{safe_title}.mp4"
+            if not clip_info:
+                print(f"[-] Segment download failed for clip #{idx}. Skipping.")
+                continue
 
-        rendered_path = render_viral_clip(
-            source_video_path=video_path,
-            start_time=moment.start_time,
-            end_time=moment.end_time,
-            output_clip_path=out_clip_path,
-            framing=framing,
-            ass_subtitle_path=ass_path,
-            burn_subtitles=burn_subtitles
-        )
+            clip_path = clip_info['video_path']
+            clip_duration = moment.end_time - moment.start_time
 
-        rendered_clips.append({
-            "path": rendered_path,
-            "moment": moment
-        })
+            # Because download_clip_segment trims to [start, end], the file
+            # starts at t=0. So we always pass start=0, end=duration to renderer.
+            render_start = 0.0
+            render_end = clip_duration
+
+            # Face tracking on the short clip file
+            if framing_mode == "auto":
+                print("[*] Running AI Face Detection & Speaker Tracking on segment...")
+                framing = analyze_faces_in_clip(clip_path, render_start, render_end)
+                print(f"[+] Framing decision: '{framing.mode}' (Detected faces: {framing.face_count})")
+            elif framing_mode == "split":
+                framing = FramingDecision(mode="split_screen", face_count=2,
+                    speaker1_box=(100,0,900,1080), speaker2_box=(920,0,900,1080))
+            elif framing_mode == "crop":
+                framing = FramingDecision(mode="single_smooth", face_count=1, smoothed_center_x=960)
+            else:
+                framing = FramingDecision(mode="blur_stack", face_count=0)
+
+            # Subtitle Generation
+            burn_subtitles = subtitles_mode in ("auto", "burn")
+            ass_path = None
+            if burn_subtitles and segments:
+                ass_path = SUBTITLES_DIR / f"clip_{idx}_{subtitle_style}.ass"
+                create_styled_ass_subtitles(
+                    segments=segments,
+                    clip_start=moment.start_time,    # original timestamps for subtitle lookup
+                    clip_end=moment.end_time,
+                    output_ass_path=ass_path,
+                    theme_key=subtitle_style,
+                    layout_mode=framing.mode,
+                    header_title=moment.title,
+                    watermark=watermark,
+                    shots=framing.shots
+                )
+
+            # Render clip
+            safe_title = "".join(c for c in moment.title if c.isalnum() or c in (" ", "_", "-")).rstrip()
+            safe_title = safe_title.replace(" ", "_")[:30]
+            out_clip_path = CLIPS_DIR / f"clip_{idx}_{safe_title}.mp4"
+
+            rendered_path = render_viral_clip(
+                source_video_path=clip_path,
+                start_time=render_start,
+                end_time=render_end,
+                output_clip_path=out_clip_path,
+                framing=framing,
+                ass_subtitle_path=ass_path,
+                burn_subtitles=burn_subtitles
+            )
+            rendered_clips.append({"path": rendered_path, "moment": moment})
+
+    # ------ BRANCH B: Fallback Full-Download Pipeline ------
+    else:
+        print("\n--- [3/6] FULL VIDEO DOWNLOAD (Fallback: no transcript / local file) ---")
+
+        download_info = None
+        for cand_url in candidates:
+            try:
+                print(f"[*] Ingesting video candidate: {cand_url}")
+                download_info = download_video(cand_url)
+                if download_info:
+                    active_source_url = cand_url
+                    break
+            except Exception as e:
+                print(f"[-] Candidate '{cand_url}' download failed: {e}. Trying next candidate...")
+
+        if not download_info:
+            print("[-] Fatal: All candidate downloads failed. Exiting.")
+            sys.exit(1)
+
+        video_path = download_info['video_path']
+        video_title = download_info['title']
+        native_transcript_fb = download_info.get('transcript')
+        print(f"[+] Active video file: {video_path}")
+
+        print("\n--- [2b/6] SPEECH-TO-TEXT / TRANSCRIPT EXTRACTION ---")
+        segments = get_transcript(video_path, native_transcript_fb, video_id=download_info.get('video_id'))
+        if not segments:
+            print("[-] Error: Could not obtain transcript for video. Exiting.")
+            sys.exit(1)
+
+        print("\n--- [3b/6] VIRAL MOMENT HUNTING & HOOK SCORING (Fallback) ---")
+        viral_moments = detect_viral_moments(segments, num_clips=num_clips)
+        if not viral_moments:
+            print("[-] No viral moments detected. Exiting.")
+            sys.exit(1)
+
+        print(f"\n[+] Top {len(viral_moments)} Viral Moments Identified:")
+        for idx, m in enumerate(viral_moments, 1):
+            print(f"   #{idx}: [{m.start_time:.1f}s - {m.end_time:.1f}s] (Virality: {m.viral_score}/100) '{m.title}'")
+
+        print("\n--- [4/6 & 5/6] EDITING, FACE TRACKING, AUDIO MASTERING & RENDERING ---")
+        for idx, moment in enumerate(viral_moments, 1):
+            print(f"\n>>> Processing Clip #{idx}: {moment.title} ({moment.duration:.1f}s)")
+
+            if framing_mode == "auto":
+                print("[*] Running AI Face Detection & Speaker Tracking...")
+                framing = analyze_faces_in_clip(video_path, moment.start_time, moment.end_time)
+                print(f"[+] Framing decision: '{framing.mode}' (Detected faces: {framing.face_count})")
+            elif framing_mode == "split":
+                framing = FramingDecision(mode="split_screen", face_count=2,
+                    speaker1_box=(100,0,900,1080), speaker2_box=(920,0,900,1080))
+            elif framing_mode == "crop":
+                framing = FramingDecision(mode="single_smooth", face_count=1, smoothed_center_x=960)
+            else:
+                framing = FramingDecision(mode="blur_stack", face_count=0)
+
+            burn_subtitles = subtitles_mode in ("auto", "burn")
+            ass_path = None
+            if burn_subtitles:
+                ass_path = SUBTITLES_DIR / f"clip_{idx}_{subtitle_style}.ass"
+                create_styled_ass_subtitles(
+                    segments=segments,
+                    clip_start=moment.start_time,
+                    clip_end=moment.end_time,
+                    output_ass_path=ass_path,
+                    theme_key=subtitle_style,
+                    layout_mode=framing.mode,
+                    header_title=moment.title,
+                    watermark=watermark,
+                    shots=framing.shots
+                )
+
+            safe_title = "".join(c for c in moment.title if c.isalnum() or c in (" ", "_", "-")).rstrip()
+            safe_title = safe_title.replace(" ", "_")[:30]
+            out_clip_path = CLIPS_DIR / f"clip_{idx}_{safe_title}.mp4"
+
+            rendered_path = render_viral_clip(
+                source_video_path=video_path,
+                start_time=moment.start_time,
+                end_time=moment.end_time,
+                output_clip_path=out_clip_path,
+                framing=framing,
+                ass_subtitle_path=ass_path,
+                burn_subtitles=burn_subtitles
+            )
+            rendered_clips.append({"path": rendered_path, "moment": moment})
 
     # Step 6: Permanent Hosting & Buffer Social Distribution
     print("\n--- [6/6] PERMANENT HOSTING & BUFFER SOCIAL PUBLISHING ---")
