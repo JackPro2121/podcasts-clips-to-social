@@ -1,7 +1,7 @@
 import sys
 import argparse
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Union, Dict, Any
 
 # Ensure UTF-8 output encoding across Windows terminals
 if hasattr(sys.stdout, "reconfigure"):
