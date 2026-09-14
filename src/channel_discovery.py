@@ -19,6 +19,13 @@ HIGH_CPM_NICHES = {
         "title": "💰 Personal Finance, Investing & Wealth",
         "estimated_cpm": "$30 - $65+ CPM / RPM",
         "rationale": "Financial institutions, stock brokers, crypto platforms, and credit card companies bid the highest advertising dollars on social media.",
+        "channel_urls": [
+            "https://www.youtube.com/@TheRamseyShow/videos",
+            "https://www.youtube.com/@MyFirstMillionPod/videos",
+            "https://www.youtube.com/@TheIcedCoffeeHour/videos",
+            "https://www.youtube.com/@TheMoneyGuyShow/videos",
+            "https://www.youtube.com/@GrahamStephan/videos"
+        ],
         "search_queries": [
             "The Ramsey Show podcast episode",
             "My First Million podcast full episode",
@@ -31,6 +38,12 @@ HIGH_CPM_NICHES = {
         "title": "📈 Business, Startups & Entrepreneurship",
         "estimated_cpm": "$25 - $50+ CPM / RPM",
         "rationale": "High-value B2B SaaS, CRM tools (HubSpot/Salesforce), enterprise software, and payment processors advertise heavily here.",
+        "channel_urls": [
+            "https://www.youtube.com/@TheDiaryOfACEO/videos",
+            "https://www.youtube.com/@AlexHormozi/videos",
+            "https://www.youtube.com/@FoundersPodcast/videos",
+            "https://www.youtube.com/@Valuetainment/videos"
+        ],
         "search_queries": [
             "The Diary Of A CEO podcast full episode",
             "How I Built This with Guy Raz",
@@ -43,6 +56,12 @@ HIGH_CPM_NICHES = {
         "title": "🤖 Artificial Intelligence & Tech Trends",
         "estimated_cpm": "$25 - $45+ CPM / RPM",
         "rationale": "AI tool creators, developer tools, cloud providers (AWS/GCP), and venture capital firms target tech audiences.",
+        "channel_urls": [
+            "https://www.youtube.com/@lexfridman/videos",
+            "https://www.youtube.com/@allin/videos",
+            "https://www.youtube.com/@DwarkeshPatel/videos",
+            "https://www.youtube.com/@YCombinator/videos"
+        ],
         "search_queries": [
             "Lex Fridman Podcast full episode AI",
             "All-In Podcast with Chamath and Jason",
@@ -54,6 +73,12 @@ HIGH_CPM_NICHES = {
         "title": "🧬 Health, Longevity & Biohacking",
         "estimated_cpm": "$20 - $40+ CPM / RPM",
         "rationale": "Supplements, health tech wearables (WHOOP/Oura), biohacking products, and fitness gear invest massive sponsorship budgets.",
+        "channel_urls": [
+            "https://www.youtube.com/@hubermanlab/videos",
+            "https://www.youtube.com/@PeterAttiaMD/videos",
+            "https://www.youtube.com/@FoundMyFitness/videos",
+            "https://www.youtube.com/@TheModelHealthShow/videos"
+        ],
         "search_queries": [
             "Huberman Lab podcast full episode",
             "The Peter Attia Drive podcast",
@@ -65,6 +90,11 @@ HIGH_CPM_NICHES = {
         "title": "🏢 Real Estate Investing & Wealth",
         "estimated_cpm": "$30 - $60+ CPM / RPM",
         "rationale": "Mortgage lenders, prop-tech firms, title companies, and real estate masterminds have enormous customer acquisition budgets.",
+        "channel_urls": [
+            "https://www.youtube.com/@BiggerPockets/videos",
+            "https://www.youtube.com/@MeetKevin/videos",
+            "https://www.youtube.com/@PaceMorby/videos"
+        ],
         "search_queries": [
             "BiggerPockets Real Estate Podcast full episode",
             "Meet Kevin podcast investing",
@@ -272,12 +302,37 @@ def filter_fresh_candidates(
     queries: List[str],
     processed_ids: set,
     per_query: int = 6,
+    channel_urls: Optional[List[str]] = None,
 ) -> List[tuple]:
-    """Run a flat yt-dlp search across queries and return de-duplicated fresh
-    candidates as (url, title, canon_id), confirmed-long episodes ranked first."""
+    """Run extraction across official channel /videos tabs first (guaranteed newest uploads)
+    and then fallback to queries, returning de-duplicated fresh candidates."""
     import yt_dlp
     seen: set = set()
     scored: List[tuple] = []  # (rank, url, title, id)
+
+    # 1. Official channel /videos endpoints (Top priority: fresh trending episodes)
+    if channel_urls:
+        ch_opts = dict(ydl_opts)
+        ch_opts["playlistend"] = 3
+        with yt_dlp.YoutubeDL(ch_opts) as ydl:
+            for ch_url in channel_urls:
+                try:
+                    res = ydl.extract_info(ch_url, download=False)
+                    for entry in (res.get("entries") or []):
+                        picked = classify_candidate_entry(entry, processed_ids)
+                        if not picked:
+                            continue
+                        vurl, title, cid, is_long = picked
+                        if cid in seen:
+                            continue
+                        seen.add(cid)
+                        # Rank 0: Latest official release from top channel
+                        scored.append((0, vurl, title, cid))
+                except Exception as e:
+                    print(f"[-] Channel extraction error for '{ch_url}': {e}")
+                    continue
+
+    # 2. General search queries fallback
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         for q in queries:
             try:
@@ -293,7 +348,8 @@ def filter_fresh_candidates(
                 if cid in seen:
                     continue
                 seen.add(cid)
-                scored.append((0 if is_long else 1, vurl, title, cid))
+                scored.append((1 if is_long else 2, vurl, title, cid))
+
     scored.sort(key=lambda c: c[0])
     return [(v, t, i) for _, v, t, i in scored]
 
@@ -326,11 +382,15 @@ def get_daily_discovery_candidates(
             pass
 
     selected_niche = resolve_daily_niche(niche)
+    niche_data = HIGH_CPM_NICHES[selected_niche]
 
-    queries = HIGH_CPM_NICHES[selected_niche]["search_queries"].copy()
+    queries = niche_data["search_queries"].copy()
     random.shuffle(queries)
 
-    print(f"[*] Auto-Discovering latest episodes in niche: {HIGH_CPM_NICHES[selected_niche]['title']} (Day rotation: {selected_niche})")
+    channel_urls = niche_data.get("channel_urls", []).copy()
+    random.shuffle(channel_urls)
+
+    print(f"[*] Auto-Discovering latest episodes in niche: {niche_data['title']} (Day rotation: {selected_niche})")
     print(f"[*] Known processed videos count: {len(processed_ids)}")
 
     ydl_opts = {
@@ -338,7 +398,12 @@ def get_daily_discovery_candidates(
         "extract_flat": True,
     }
 
-    candidates = filter_fresh_candidates(ydl_opts, queries, processed_ids)
+    candidates = filter_fresh_candidates(
+        ydl_opts=ydl_opts,
+        queries=queries,
+        processed_ids=processed_ids,
+        channel_urls=channel_urls
+    )
 
     if candidates:
         print(f"[+] Found {len(candidates)} fresh high-CPM podcast candidates:")
