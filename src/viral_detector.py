@@ -36,7 +36,7 @@ class ViralClipCandidate(BaseModel):
 class ViralDetectionResponse(BaseModel):
     clips: List[ViralClipCandidate]
 
-def format_transcript_with_timestamps(segments: List[TranscriptSegment], max_chars: int = 80000) -> str:
+def format_transcript_with_timestamps(segments: List[TranscriptSegment], max_chars: int = 40000) -> str:
     """Formats transcript segments with start and end timestamps for LLM analysis."""
     lines = []
     total_len = 0
@@ -52,11 +52,10 @@ def format_transcript_with_timestamps(segments: List[TranscriptSegment], max_cha
 def query_gemini_models(prompt: str, key: str) -> Optional[str]:
     """Queries Google Gemini Flash free tier with exponential retry backoff."""
     models_to_try = [
+        "gemini-2.5-flash",
+        "gemini-1.5-flash",
+        "gemini-2.5-flash-lite",
         "gemini-2.0-flash",
-        "gemini-2.0-flash-lite",
-        "gemini-1.5-flash-latest",
-        "gemini-1.5-flash-8b",
-        "gemini-2.5-flash"
     ]
     for model_name in models_to_try:
         print(f"[*] Trying Gemini Flash ({model_name})...")
@@ -109,7 +108,7 @@ def query_gemini_models(prompt: str, key: str) -> Optional[str]:
 def query_groq_free_models(prompt: str, key: str) -> Optional[str]:
     """Queries Groq free tier models (ultra-fast inference, $0 budget)."""
     # Verified Groq-hosted model IDs (free tier). Update if Groq changes its catalog.
-    models = ["llama-3.3-70b-versatile", "openai/gpt-oss-20b", "llama-3.1-8b-instant"]
+    models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b", "groq/compound"]
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     for m in models:
         print(f"[*] Trying Groq Free Model ({m})...")
@@ -134,8 +133,7 @@ def query_groq_free_models(prompt: str, key: str) -> Optional[str]:
 
 def query_openrouter_free_models(prompt: str, key: str) -> Optional[str]:
     """Queries OpenRouter verified 100% free models (:free tier)."""
-    # Verified OpenRouter ":free" model IDs. Update if OpenRouter changes its catalog.
-    models = ["meta-llama/llama-3.3-70b-instruct:free", "deepseek/deepseek-chat-v3-0324:free", "google/gemini-2.0-flash-exp:free"]
+    models = ["nvidia/nemotron-3.5-lightning:free", "liquid/lfm-2.5-2.6b:free", "nex-agi/nex-n2.5-pro:free"]
     headers = {
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",

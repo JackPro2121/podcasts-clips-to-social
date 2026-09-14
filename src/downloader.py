@@ -944,8 +944,11 @@ def download_clip_segment(
 
             if produced.exists() and produced.stat().st_size > 500_000:
                 h = get_video_height(produced)
+                if not h or h <= 0:
+                    print(f"  [-] Client '{label}' produced audio-only or non-video stream. Trying next client...")
+                    continue
                 dur = get_video_duration(produced)
-                print(f"  [+] Segment downloaded ({h or '?'}p, {produced.stat().st_size / (1024*1024):.1f} MB) via '{label}'")
+                print(f"  [+] Segment downloaded ({h}p, {produced.stat().st_size / (1024*1024):.1f} MB) via '{label}'")
                 return {
                     'video_path': produced.resolve(),
                     'title': f"clip_{clip_index}",
