@@ -256,12 +256,12 @@ You are the world's top viral short-form video editor and content strategist (sp
 Your goal is to analyze the following podcast transcript and extract the top {num_clips} most VIRAL standalone moments.
 
 ### VIRALITY CRITERIA:
-1. **Immediate Hook (0-5s)**: Must start with a bold statement, intriguing question, shock value, or strong emotion that prevents scrolling.
+1. **Immediate Hook (0-3s)**: The clip MUST start directly on an impactful sentence. Never start on pauses, host chitchat, or filler words ('um', 'uh', 'so', 'you know', 'yeah'). The first 3 seconds decide viral retention on TikTok, YouTube Shorts, and Reels. Start at the exact second the punchline or core story begins.
 2. **High Emotional Intensity or Insight**: Debates, counter-intuitive advice, mind-blowing facts, deep vulnerability, or high humor.
 3. **Standalone Cohesion**: The clip must make complete sense on its own without needing the rest of the 2-hour podcast.
 4. **Optimal Duration**: Each clip MUST be strictly between 30 and 60 seconds (target: 35-50s).
 5. **Exact Timestamps**: Use the provided transcript timestamps to specify precise start_time and end_time.
-6. **Punchy Viral Title**: Give each clip an engaging, click-worthy hook title in ALL CAPS (e.g., "THE SECRET TO BETTER SLEEP", "HOW CORTISOL PEAKS", "DO THIS EVERY MORNING"). Max 5-7 words. Strictly DO NOT include any emojis or special symbols.
+6. **Punchy Curiosity-Gap Title**: Give each clip an engaging, high-CTR hook title in ALL CAPS (e.g., "THE SECRET TO WEALTH IN 2026", "WHY CORTISOL RUINS SLEEP", "DO THIS EVERY SINGLE MORNING"). Max 5-7 words. Never include filler words ("um", "uh", "yeah"), and strictly DO NOT include emojis or special symbols.
 7. **STRICTLY NO EMOJIS**: Under NO circumstances use emojis anywhere in titles, social captions, or hashtags. Maintain an elite, clean broadcast aesthetic.
 
 ### PODCAST TRANSCRIPT:
@@ -340,12 +340,11 @@ def fallback_rule_based_detector(segments: List[TranscriptSegment], num_clips: i
             if s.end >= start_t and s.start <= end_t:
                 chunk_words.extend(s.text.split())
         
-        # Derive a punchy 4-7 word title from the opening statement
-        clean_words = [re.sub(r'[^\w\s]', '', w) for w in chunk_words[:12] if len(w) > 1]
-        if clean_words:
-            # Pick first 4-6 words as capitalized headline
-            title_words = clean_words[:5]
-            derived_title = " ".join(title_words).upper()
+        # Derive a punchy 4-7 word title from the opening statement, ignoring filler words
+        filler_words = {"um", "uh", "like", "so", "you", "know", "mean", "for", "me", "but", "and", "yeah", "well", "actually", "basically", "right", "okay", "just", "the", "a", "an", "to", "in", "it"}
+        content_words = [re.sub(r'[^\w\s]', '', w) for w in chunk_words[:25] if len(w) > 2 and w.lower() not in filler_words]
+        if len(content_words) >= 3:
+            derived_title = " ".join(content_words[:5]).upper()
         else:
             derived_title = f"POWERFUL PODCAST INSIGHT #{i+1}"
         

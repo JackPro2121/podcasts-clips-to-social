@@ -176,6 +176,16 @@ class BufferClient:
                 if "#reels" not in channel_text.lower():
                     channel_text = f"{channel_text}\n\n#reels #viral #podcastclips #mindset #motivation"
 
+            elif service == "tiktok":
+                metadata = {
+                    "tiktok": {
+                        "title": clean_title[:90],
+                        "isAiGenerated": False
+                    }
+                }
+                if "#fyp" not in channel_text.lower() and "#tiktok" not in channel_text.lower():
+                    channel_text = f"{channel_text}\n\n#fyp #podcast #podcastclips #viral #mindset #trending"
+
             elif service == "pinterest":
                 boards = self.get_pinterest_boards(channel_id)
                 if not boards:
