@@ -26,6 +26,7 @@ on:
           - 'ai_tech'
           - 'health_longevity'
           - 'real_estate'
+          - 'mindset'
       num_clips:
         description: 'Number of viral clips to extract (1 to 5)'
         required: true

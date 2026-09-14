@@ -14,24 +14,40 @@ if hasattr(sys.stdout, "reconfigure"):
 from src.config import APIFY_API_TOKEN
 
 # Curated High CPM & RPM Podcast Niches with proven advertiser demand
+# Channels verified via DuckDuckGo + web research (US, UK, AU, CA top podcasters)
 HIGH_CPM_NICHES = {
     "finance": {
         "title": "💰 Personal Finance, Investing & Wealth",
         "estimated_cpm": "$30 - $65+ CPM / RPM",
         "rationale": "Financial institutions, stock brokers, crypto platforms, and credit card companies bid the highest advertising dollars on social media.",
         "channel_urls": [
+            # === US Top Finance Podcasters ===
             "https://www.youtube.com/@TheRamseyShow/videos",
             "https://www.youtube.com/@MyFirstMillionPod/videos",
             "https://www.youtube.com/@TheIcedCoffeeHour/videos",
             "https://www.youtube.com/@TheMoneyGuyShow/videos",
-            "https://www.youtube.com/@GrahamStephan/videos"
+            "https://www.youtube.com/@GrahamStephan/videos",
+            "https://www.youtube.com/@InvestorsPodcast/videos",
+            "https://www.youtube.com/@YahooFinance/videos",
+            "https://www.youtube.com/@PBDPodcast/videos",
+            # === UK Finance Podcasters ===
+            "https://www.youtube.com/@DamienTalksMoney/videos",
+            "https://www.youtube.com/@Pensioncraft/videos",
+            "https://www.youtube.com/@marktilbury/videos",
+            # === Canada Finance Podcasters ===
+            "https://www.youtube.com/@ThePlainBagel/videos",
+            "https://www.youtube.com/@BenFelixCSI/videos",
+            # === Australia Finance Podcasters ===
+            "https://www.youtube.com/@RaskAustralia/videos",
         ],
         "search_queries": [
             "The Ramsey Show podcast episode",
             "My First Million podcast full episode",
             "The Iced Coffee Hour podcast episode",
             "The Money Guy Show full podcast",
-            "BiggerPockets Money Podcast"
+            "BiggerPockets Money Podcast",
+            "We Study Billionaires investor podcast",
+            "Patrick Bet-David PBD podcast episode",
         ]
     },
     "business": {
@@ -39,17 +55,24 @@ HIGH_CPM_NICHES = {
         "estimated_cpm": "$25 - $50+ CPM / RPM",
         "rationale": "High-value B2B SaaS, CRM tools (HubSpot/Salesforce), enterprise software, and payment processors advertise heavily here.",
         "channel_urls": [
+            # === US/Global Business Podcasters ===
             "https://www.youtube.com/@TheDiaryOfACEO/videos",
             "https://www.youtube.com/@AlexHormozi/videos",
-            "https://www.youtube.com/@FoundersPodcast/videos",
-            "https://www.youtube.com/@Valuetainment/videos"
+            "https://www.youtube.com/@VALUETAINMENT/videos",
+            "https://www.youtube.com/@TimFerriss/videos",
+            "https://www.youtube.com/@MastersofScale/videos",
+            "https://www.youtube.com/@joerogan/videos",
+            "https://www.youtube.com/@colinandsamir/videos",
+            # === UK Business Podcasters ===
+            "https://www.youtube.com/@SimonSquibb/videos",
         ],
         "search_queries": [
             "The Diary Of A CEO podcast full episode",
-            "How I Built This with Guy Raz",
             "The Tim Ferriss Show podcast full",
             "The Game with Alex Hormozi podcast",
-            "Founders podcast David Senra"
+            "Masters of Scale podcast episode",
+            "Joe Rogan podcast business entrepreneur",
+            "Valuetainment Patrick Bet-David podcast",
         ]
     },
     "ai_tech": {
@@ -57,16 +80,20 @@ HIGH_CPM_NICHES = {
         "estimated_cpm": "$25 - $45+ CPM / RPM",
         "rationale": "AI tool creators, developer tools, cloud providers (AWS/GCP), and venture capital firms target tech audiences.",
         "channel_urls": [
+            # === US/Global AI & Tech Podcasters ===
             "https://www.youtube.com/@lexfridman/videos",
             "https://www.youtube.com/@allin/videos",
             "https://www.youtube.com/@DwarkeshPatel/videos",
-            "https://www.youtube.com/@YCombinator/videos"
+            "https://www.youtube.com/@YCombinator/videos",
+            "https://www.youtube.com/@a16z/videos",
+            "https://www.youtube.com/@OpenAI/videos",
         ],
         "search_queries": [
             "Lex Fridman Podcast full episode AI",
             "All-In Podcast with Chamath and Jason",
             "Dwarkesh Podcast full episode",
-            "Latent Space AI podcast episode"
+            "a16z podcast AI technology episode",
+            "Y Combinator startup founder podcast",
         ]
     },
     "health_longevity": {
@@ -74,16 +101,24 @@ HIGH_CPM_NICHES = {
         "estimated_cpm": "$20 - $40+ CPM / RPM",
         "rationale": "Supplements, health tech wearables (WHOOP/Oura), biohacking products, and fitness gear invest massive sponsorship budgets.",
         "channel_urls": [
+            # === US Health & Longevity Podcasters ===
             "https://www.youtube.com/@hubermanlab/videos",
             "https://www.youtube.com/@PeterAttiaMD/videos",
             "https://www.youtube.com/@FoundMyFitness/videos",
-            "https://www.youtube.com/@TheModelHealthShow/videos"
+            "https://www.youtube.com/@TheModelHealthShow/videos",
+            "https://www.youtube.com/@ThomasDeLauerOfficial/videos",
+            "https://www.youtube.com/@MarkHymanMD/videos",
+            "https://www.youtube.com/@drmikedoesnews/videos",
+            "https://www.youtube.com/@DrBergKetoCourse/videos",
+            # === UK Health Podcasters ===
+            "https://www.youtube.com/@ZoeOfficial/videos",
         ],
         "search_queries": [
             "Huberman Lab podcast full episode",
             "The Peter Attia Drive podcast",
-            "The Model Health Show Shawn Stevenson",
-            "FoundMyFitness Dr Rhonda Patrick"
+            "Mark Hyman MD podcast full episode",
+            "FoundMyFitness Dr Rhonda Patrick",
+            "Dr Mike health science podcast episode",
         ]
     },
     "real_estate": {
@@ -91,14 +126,48 @@ HIGH_CPM_NICHES = {
         "estimated_cpm": "$30 - $60+ CPM / RPM",
         "rationale": "Mortgage lenders, prop-tech firms, title companies, and real estate masterminds have enormous customer acquisition budgets.",
         "channel_urls": [
+            # === US Real Estate Podcasters ===
             "https://www.youtube.com/@BiggerPockets/videos",
             "https://www.youtube.com/@MeetKevin/videos",
-            "https://www.youtube.com/@PaceMorby/videos"
+            "https://www.youtube.com/@PaceMorby/videos",
+            "https://www.youtube.com/@GrahamStephan/videos",
+            # === UK Real Estate Podcasters ===
+            "https://www.youtube.com/@PropertyHub/videos",
+            "https://www.youtube.com/@SamuelLeeds/videos",
+            # === Australia Real Estate Podcasters ===
+            "https://www.youtube.com/@PizzaAndProperty/videos",
         ],
         "search_queries": [
             "BiggerPockets Real Estate Podcast full episode",
-            "Meet Kevin podcast investing",
-            "Pace Morby real estate podcast"
+            "Meet Kevin podcast investing real estate",
+            "Pace Morby real estate podcast episode",
+            "Property Hub UK podcast episode",
+            "Australian property investing podcast",
+        ]
+    },
+    "mindset": {
+        "title": "Mindset, Motivation & Self-Improvement",
+        "estimated_cpm": "$20 - $45+ CPM / RPM",
+        "rationale": "Personal development apps, coaching platforms, and premium wellness brands target growth-mindset audiences with huge budgets.",
+        "channel_urls": [
+            # === US Mindset & Motivation Podcasters ===
+            "https://www.youtube.com/@EdMylettShow/videos",
+            "https://www.youtube.com/@TomBilyeu/videos",
+            "https://www.youtube.com/@JayShettyPodcast/videos",
+            "https://www.youtube.com/@mindsetmentorpodcast/videos",
+            "https://www.youtube.com/@LewisHowes/videos",
+            "https://www.youtube.com/@GaryVee/videos",
+            "https://www.youtube.com/@melrobbins/videos",
+            "https://www.youtube.com/@TonyRobbins/videos",
+            # === UK/AU Mindset Podcasters ===
+            "https://www.youtube.com/@AddictedToSuccess/videos",
+        ],
+        "search_queries": [
+            "Ed Mylett Show podcast full episode",
+            "Tom Bilyeu Impact Theory podcast episode",
+            "Jay Shetty On Purpose podcast episode",
+            "Lewis Howes School of Greatness podcast",
+            "Mel Robbins podcast motivation episode",
         ]
     }
 }
@@ -248,15 +317,14 @@ def record_history(video_url: str, title: str, niche: str, history_file_path: Op
 
 # Day-of-Week Smart Auto-Rotation for maximum CPM & audience engagement:
 # Monday: Finance & Wealth | Tuesday: AI & Tech | Wednesday: Health & Longevity
-# Thursday: Business & Startups | Friday: Real Estate Investing & Wealth
-# Saturday: AI & Tech | Sunday: Health & Neuroscience
+# Thursday: Business & Startups | Friday: Real Estate | Saturday: Mindset | Sunday: Health
 DAY_OF_WEEK_NICHES = [
     "finance",           # Monday
     "ai_tech",           # Tuesday
     "health_longevity",  # Wednesday
     "business",          # Thursday
     "real_estate",       # Friday
-    "ai_tech",           # Saturday
+    "mindset",           # Saturday
     "health_longevity"   # Sunday
 ]
 
