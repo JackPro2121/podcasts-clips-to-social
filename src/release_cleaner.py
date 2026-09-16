@@ -14,16 +14,24 @@ def clean_old_releases(
     days: int = 5,
     repo: Optional[str] = None,
     token: Optional[str] = None,
-    dry_run: bool = False
+    dry_run: bool = False,
+    buffer_client: Any = None
 ) -> Dict[str, Any]:
     """
-    Deletes GitHub Releases and assets that are older than `days` (default: 5 days).
-    Prevents storage hoarding and keeps GitHub repository 100% within free limits.
+    Deletes GitHub Releases and assets that are older than `days` (default: 5 days),
+    UNLESS they are still linked to a scheduled post in Buffer.
     """
     auth_token = token or GITHUB_TOKEN or os.getenv("GITHUB_ACCESS_TOKEN")
     # No hardcoded repo fallback: a broadly-scoped token must never delete
     # releases in someone else's repo just because GITHUB_REPOSITORY is unset.
     target_repo = repo or GITHUB_REPOSITORY
+
+    # Pre-fetch active Buffer URLs if client is provided
+    active_buffer_urls = {}
+    if buffer_client:
+        print("[*] Querying Buffer for active video URLs to prevent premature deletion...")
+        active_buffer_urls = buffer_client.get_active_video_urls()
+        print(f"[+] Found {len(active_buffer_urls)} active posts in Buffer queue.")
 
     if not auth_token or not target_repo:
         print("[-] GITHUB_TOKEN or GITHUB_REPOSITORY is missing. Cannot perform release cleanup.")
@@ -90,7 +98,21 @@ def clean_old_releases(
             assets = rel.get("assets", [])
             asset_size = sum(a.get("size", 0) for a in assets)
 
+            # CHECK: Is this release older than threshold?
             if age_days >= days:
+                # BUFFER CHECK: Is any asset in this release still active in Buffer?
+                is_active_in_buffer = False
+                for asset in assets:
+                    asset_url = asset.get("browser_download_url")
+                    if asset_url and asset_url in active_buffer_urls:
+                        is_active_in_buffer = True
+                        break
+                
+                if is_active_in_buffer:
+                    print(f"[+] Preserving release '{tag_name}' (Age: {age_days:.1f} days >= {days} days) - STILL ACTIVE IN BUFFER.")
+                    preserved_count += 1
+                    continue
+
                 print(f"[!] Release '{tag_name}' (ID: {rel_id}) is {age_days:.1f} days old (>= {days} days).")
                 print(f"    - Assets: {[a.get('name') for a in assets]} ({asset_size / (1024*1024):.2f} MB)")
 

@@ -69,6 +69,62 @@ class BufferClient:
             print(f"[-] Error fetching Buffer channels: {e}")
             return []
 
+    def get_active_video_urls(self) -> Dict[str, str]:
+        """
+        Fetches all posts from all connected channels and returns a mapping 
+        of video_url -> status for posts that are not yet 'sent'.
+        """
+        if not self.token:
+            return {}
+
+        connected = self.get_channels()
+        active_urls = {}
+
+        # We need to iterate through channels to get posts
+        # Since listPosts is per channel in Buffer's GraphQL typically, or can be filtered
+        for ch in connected:
+            channel_id = ch["id"]
+            query = """
+            query ListPosts($channelId: ID!) {
+              posts(input: { channelId: $channelId }) {
+                edges {
+                  node {
+                    status
+                    assets {
+                      video {
+                        url
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            """
+            try:
+                res = requests.post(
+                    BUFFER_GRAPHQL_ENDPOINT,
+                    headers=self.headers,
+                    json={"query": query, "variables": {"channelId": channel_id}},
+                    timeout=20
+                )
+                if res.status_code == 200:
+                    data = res.json().get("data", {}).get("posts", {}).get("edges", [])
+                    for edge in data:
+                        node = edge.get("node", {})
+                        status = node.get("status")
+                        assets = node.get("assets", [])
+                        
+                        # Only care about posts that aren't sent yet
+                        if status != "sent":
+                            for asset in assets:
+                                video = asset.get("video")
+                                if video and video.get("url"):
+                                    active_urls[video["url"]] = status
+            except Exception as e:
+                print(f"[-] Error fetching posts for channel {channel_id}: {e}")
+
+        return active_urls
+
     def get_pinterest_boards(self, channel_id: str) -> List[Dict[str, Any]]:
         """Queries boards for a specific Pinterest channel."""
         q = f"""query {{

@@ -326,7 +326,8 @@ def run_pipeline(
     print("\n--- [7/7] STORAGE HYGIENE: AUTO-CLEANUP RELEASES > 5 DAYS ---")
     try:
         from src.release_cleaner import clean_old_releases
-        clean_old_releases(days=5)
+        # Pass the buffer_client to avoid deleting assets still in the queue
+        clean_old_releases(days=5, buffer_client=buffer_client)
     except Exception as e:
         print(f"[-] Auto-cleanup warning: {e}")
 
