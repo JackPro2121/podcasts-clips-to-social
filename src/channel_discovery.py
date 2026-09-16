@@ -11,7 +11,8 @@ import requests
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from src.config import APIFY_API_TOKEN
+from src.config import APIFY_API_TOKEN, YOUTUBE_COOKIES
+from src.downloader import _write_cookiefile
 
 # Curated High CPM & RPM Podcast Niches with proven advertiser demand
 # Channels verified via DuckDuckGo + web research (US, UK, AU, CA top podcasters)
@@ -371,6 +372,7 @@ def filter_fresh_candidates(
     processed_ids: set,
     per_query: int = 6,
     channel_urls: Optional[List[str]] = None,
+    cookie_path: Optional[Path] = None,
 ) -> List[tuple]:
     """Run extraction across official channel /videos tabs first (guaranteed newest uploads)
     and then fallback to queries, returning de-duplicated fresh candidates."""
@@ -378,8 +380,13 @@ def filter_fresh_candidates(
     seen: set = set()
     scored: List[tuple] = []  # (rank, url, title, id)
 
+    # Apply cookies to a copy of opts if provided
+    current_opts = dict(ydl_opts)
+    if cookie_path:
+        current_opts['cookiefile'] = str(cookie_path)
+
     # 1. General search queries fallback (Top priority: bypasses bot-detected /videos tabs)
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    with yt_dlp.YoutubeDL(current_opts) as ydl:
         for q in queries:
             try:
                 res = ydl.extract_info(f"ytsearch{per_query}:{q}", download=False)
@@ -398,7 +405,7 @@ def filter_fresh_candidates(
 
     # 2. Official channel /videos endpoints (Secondary: high quality but prone to 404s)
     if channel_urls:
-        ch_opts = dict(ydl_opts)
+        ch_opts = dict(current_opts)
         ch_opts["playlistend"] = 3
         with yt_dlp.YoutubeDL(ch_opts) as ydl:
             for ch_url in channel_urls:
@@ -466,12 +473,24 @@ def get_daily_discovery_candidates(
         "extract_flat": True,
     }
 
-    candidates = filter_fresh_candidates(
-        ydl_opts=ydl_opts,
-        queries=queries,
-        processed_ids=processed_ids,
-        channel_urls=channel_urls
-    )
+    cookie_path = None
+    try:
+        if YOUTUBE_COOKIES and YOUTUBE_COOKIES.strip():
+            cookie_path = _write_cookiefile(YOUTUBE_COOKIES)
+
+        candidates = filter_fresh_candidates(
+            ydl_opts=ydl_opts,
+            queries=queries,
+            processed_ids=processed_ids,
+            channel_urls=channel_urls,
+            cookie_path=cookie_path
+        )
+    finally:
+        if cookie_path and cookie_path.exists():
+            try:
+                cookie_path.unlink()
+            except Exception:
+                pass
 
     if candidates:
         print(f"[+] Found {len(candidates)} fresh high-CPM podcast candidates:")
