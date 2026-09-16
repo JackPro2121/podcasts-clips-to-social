@@ -302,10 +302,11 @@ def download_via_apify(
         return None
 
 # Deduplicated format selectors (were copy-pasted across 7 strategies).
-_HD_FORMAT = ('bestvideo[vcodec^=avc1][height>=720][height<=1080]+bestaudio/'
-              'bestvideo[vcodec^=avc1][height<=1080]+bestaudio/best[ext=mp4][height<=1080]')
-_ANY_FORMAT = 'bestvideo[vcodec^=avc1][height<=1080]+bestaudio/best[ext=mp4][height<=1080]/best'
-_FAILSAFE_FORMAT = 'bestvideo+bestaudio/best'
+# Strictly prefer avc1 (H.264) to avoid AV1 decoding loops on GitHub Actions runners.
+_HD_FORMAT = ('bestvideo[vcodec^=avc1][height>=720][height<=1080]+bestaudio/best'
+              'video[vcodec^=avc1][height<=1080]+bestaudio/best[ext=mp4][height<=1080]')
+_ANY_FORMAT = 'bestvideo[vcodec^=avc1][height<=1080]+bestaudio/best[ext=mp4][height<=1080]/best[vcodec^=avc1]'
+_FAILSAFE_FORMAT = 'bestvideo[vcodec^=avc1]+bestaudio/best'
 # Local bgutil POT provider (started as a sidecar in the CI workflow).
 _POT_ARGS = {'youtubepot-bgutilhttp': {'base_url': ['http://127.0.0.1:4416']}}
 
@@ -316,11 +317,11 @@ def _ytdlp_client_variants(cookie_path: Optional[Path] = None) -> List[Tuple[str
         return {'extractor_args': {'youtube': {'player_client': clients}, **_POT_ARGS}}
 
     variants: List[Tuple[str, Dict[str, Any]]] = [
-        ("android_vr", {'extractor_args': {'youtube': {'player_client': ['android_vr']}}}),
-        ("tv_embedded", {'extractor_args': {'youtube': {'player_client': ['tv_embedded', 'tv']}}}),
+        ("android_vr", _client(['android_vr'])),
+        ("tv_embedded", _client(['tv_embedded', 'tv'])),
         ("web-pot", _client(['web'])),
         ("default+mweb", _client(['default', 'mweb'])),
-        ("ios", {'extractor_args': {'youtube': {'player_client': ['ios']}}}),
+        ("ios", _client(['ios'])),
         ("universal", _client(['android_vr', 'web', 'tv_embedded'])),
     ]
     if cookie_path:

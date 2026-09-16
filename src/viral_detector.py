@@ -3,7 +3,7 @@ import re
 import time
 import requests
 import warnings
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Tuple
 from pydantic import BaseModel, Field
 
 # Support both google.genai (new official SDK) and google.generativeai
@@ -32,6 +32,10 @@ class ViralClipCandidate(BaseModel):
     hook_reason: str = Field(description="Why this moment grabs immediate viewer attention")
     social_caption: str = Field(description="Ready-to-post engaging caption for TikTok/Reels/Shorts")
     hashtags: List[str] = Field(description="High-traffic relevant hashtags (e.g. ['#podcast', '#viral', '#mindset'])")
+    peak_intensity_segments: List[Tuple[float, float]] = Field(
+        default_factory=list, 
+        description="Segments within the clip (relative to start_time) where emotional intensity peaks, for automatic 1.2x zoom. Format: [[start, end], ...]"
+    )
 
 class ViralDetectionResponse(BaseModel):
     clips: List[ViralClipCandidate]
@@ -230,7 +234,8 @@ def parse_clips_json(raw_text: str, segments: List[TranscriptSegment], num_clips
             viral_score=_safe_int(c.get("viral_score", 85), default=85),
             hook_reason=strip_emojis(str(c.get("hook_reason", "High engagement segment"))),
             social_caption=clean_caption,
-            hashtags=clean_hashtags or ["#podcast", "#viral", "#shorts"]
+            hashtags=clean_hashtags or ["#podcast", "#viral", "#shorts"],
+            peak_intensity_segments=c.get("peak_intensity_segments", [])
         )
         candidates.append(candidate)
 
@@ -263,6 +268,7 @@ Your goal is to analyze the following podcast transcript and extract the top {nu
 5. **Exact Timestamps**: Use the provided transcript timestamps to specify precise start_time and end_time.
 6. **Punchy Curiosity-Gap Title**: Give each clip an engaging, high-CTR hook title in ALL CAPS (e.g., "THE SECRET TO WEALTH IN 2026", "WHY CORTISOL RUINS SLEEP", "DO THIS EVERY SINGLE MORNING"). Max 5-7 words. Never include filler words ("um", "uh", "yeah"), and strictly DO NOT include emojis or special symbols.
 7. **STRICTLY NO EMOJIS**: Under NO circumstances use emojis anywhere in titles, social captions, or hashtags. Maintain an elite, clean broadcast aesthetic.
+8. **Visual Hook Mapping**: For each clip, identify 1-3 "Peak Intensity" segments. These are the absolute high-points of the dialogue (shocking revelations, emotional peaks, punchlines). Provide these as relative timestamps (seconds from the clip's start_time). These will trigger a subtle 1.2x zoom.
 
 ### PODCAST TRANSCRIPT:
 {transcript_text}
@@ -279,7 +285,8 @@ Output MUST be valid JSON only matching this schema:
       "viral_score": 95,
       "hook_reason": "Opens with a shocking contrarian statement about wealth.",
       "social_caption": "This perspective changes everything. Drop your thoughts below.",
-      "hashtags": ["#mindset", "#podcast", "#success", "#reels"]
+      "hashtags": ["#mindset", "#podcast", "#success", "#reels"],
+      "peak_intensity_segments": [[5.0, 12.0], [30.5, 38.0]]
     }}
   ]
 }}
