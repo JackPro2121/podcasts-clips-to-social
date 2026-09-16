@@ -378,7 +378,25 @@ def filter_fresh_candidates(
     seen: set = set()
     scored: List[tuple] = []  # (rank, url, title, id)
 
-    # 1. Official channel /videos endpoints (Top priority: fresh trending episodes)
+    # 1. General search queries fallback (Top priority: bypasses bot-detected /videos tabs)
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        for q in queries:
+            try:
+                res = ydl.extract_info(f"ytsearch{per_query}:{q}", download=False)
+            except Exception as e:
+                print(f"[-] Search query error for '{q}': {e}")
+                continue
+            for entry in (res.get("entries") or []):
+                picked = classify_candidate_entry(entry, processed_ids)
+                if not picked:
+                    continue
+                vurl, title, cid, is_long = picked
+                if cid in seen:
+                    continue
+                seen.add(cid)
+                scored.append((1 if is_long else 2, vurl, title, cid))
+
+    # 2. Official channel /videos endpoints (Secondary: high quality but prone to 404s)
     if channel_urls:
         ch_opts = dict(ydl_opts)
         ch_opts["playlistend"] = 3
@@ -399,24 +417,6 @@ def filter_fresh_candidates(
                 except Exception as e:
                     print(f"[-] Channel extraction error for '{ch_url}': {e}")
                     continue
-
-    # 2. General search queries fallback
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        for q in queries:
-            try:
-                res = ydl.extract_info(f"ytsearch{per_query}:{q}", download=False)
-            except Exception as e:
-                print(f"[-] Search query error for '{q}': {e}")
-                continue
-            for entry in (res.get("entries") or []):
-                picked = classify_candidate_entry(entry, processed_ids)
-                if not picked:
-                    continue
-                vurl, title, cid, is_long = picked
-                if cid in seen:
-                    continue
-                seen.add(cid)
-                scored.append((1 if is_long else 2, vurl, title, cid))
 
     scored.sort(key=lambda c: c[0])
     return [(v, t, i) for _, v, t, i in scored]

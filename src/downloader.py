@@ -44,6 +44,7 @@ _PERMANENT_MARKERS = (
     "premieres in",
     "video is not available",
     "content is not available",
+    "drm protected",
 )
 
 # Phrases that mean "this specific client got blocked/throttled, rotate".
@@ -301,9 +302,9 @@ def download_via_apify(
         return None
 
 # Deduplicated format selectors (were copy-pasted across 7 strategies).
-_HD_FORMAT = ('bestvideo[height>=720][height<=1080]+bestaudio/'
-              'bestvideo[height<=1080]+bestaudio/best[height<=1080]')
-_ANY_FORMAT = 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best'
+_HD_FORMAT = ('bestvideo[vcodec^=avc1][height>=720][height<=1080]+bestaudio/'
+              'bestvideo[vcodec^=avc1][height<=1080]+bestaudio/best[ext=mp4][height<=1080]')
+_ANY_FORMAT = 'bestvideo[vcodec^=avc1][height<=1080]+bestaudio/best[ext=mp4][height<=1080]/best'
 _FAILSAFE_FORMAT = 'bestvideo+bestaudio/best'
 # Local bgutil POT provider (started as a sidecar in the CI workflow).
 _POT_ARGS = {'youtubepot-bgutilhttp': {'base_url': ['http://127.0.0.1:4416']}}
