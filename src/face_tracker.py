@@ -250,7 +250,7 @@ def analyze_faces_in_clip(
                 avg_cy = int(np.median([f.center_y for f in single_faces]))
                 crop_x = max(0, min(avg_cx - target_crop_w // 2, width - target_crop_w))
                 
-                timeline = [(s[0], f[1].center_x) for s, f in timed_single_faces] if timed_single_faces else []
+                timeline = [(s, f[1].center_x) for s, f in timed_single_faces] if timed_single_faces else []
                 
                 shot_plans.append(ShotPlan(
                     start=rel_s,

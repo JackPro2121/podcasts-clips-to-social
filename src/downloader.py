@@ -923,7 +923,12 @@ def download_clip_segment(
         base_opts['proxy'] = YTDLP_PROXY.strip()
 
     # Try each client variant in priority order (android_vr first = no BotGuard)
-    clients = _ytdlp_client_variants(cookie_path=None)
+    cookie_path = (
+        _write_cookiefile(os.environ.get("YOUTUBE_COOKIES", ""))
+        if (os.environ.get("YOUTUBE_COOKIES") and os.environ.get("YOUTUBE_COOKIES").strip())
+        else None
+    )
+    clients = _ytdlp_client_variants(cookie_path=cookie_path)
     for label, extra in clients:
         opts = {
             **base_opts,
