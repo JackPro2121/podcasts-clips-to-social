@@ -237,9 +237,8 @@ def analyze_faces_in_clip(
                     sub_cy_median = int(np.median([f[1].center_y for f in sub_faces]))
                     sub_crop_x = max(0, min(sub_cx_median - target_crop_w // 2, width - target_crop_w))
                     
-            # Record timeline for LERP panning
-            timeline = [(f[0], f[1].center_x) for f in sub_faces if isinstance(f, tuple) and hasattr(f[1], 'center_x')]
-
+                    # Record timeline for LERP panning
+                    timeline = [(f[0], f[1].center_x) for f in sub_faces if isinstance(f, tuple) and hasattr(f[1], 'center_x')]
                     
                     shot_plans.append(ShotPlan(
                         start=sub_s,
