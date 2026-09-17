@@ -443,7 +443,7 @@ def download_via_ytdlp(
       3. If nobody offers HD, the best sub-HD client is downloaded ONCE.
     Net: one download in the happy path, one in the worst case -- never seven.
     """
-        base_opts = {
+    base_opts = {
             'js_runtimes': {'node': {}},
             'outtmpl': str(target_dir / "%(id)s_%(title).50s.%(ext)s"),
             'merge_output_format': 'mp4',
