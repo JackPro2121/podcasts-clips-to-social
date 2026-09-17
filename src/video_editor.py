@@ -70,9 +70,9 @@ def build_video_filtergraph(
             if shot.mode == "presentation_slide":
                 shot_f = (
                     f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,split=2[s{i}_fg_in][s{i}_bg_in];"
-                    f"[s{i}_bg_in]scale=270:480,boxblur=8:2,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}[s{i}_bg];"
+                    f"[s{i}_bg_in]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},boxblur=30:5,eq=brightness=-0.16:contrast=1.12[s{i}_bg];"
                     f"[s{i}_fg_in]scale={OUTPUT_WIDTH}:{fg_height}:flags=lanczos+accurate_rnd,{studio_grade}[s{i}_fg];"
-                    f"[s{i}_bg][s{i}_fg]overlay=0:{fg_y},scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[{label}]"
+                    f"[s{i}_bg][s{i}_fg]overlay=0:{fg_y},setsar=1:1,fps={FPS}[{label}]"
                 )
             elif shot.mode == "split_screen" and shot.speaker1_box and shot.speaker2_box:
                 s1_x, s1_y, s1_w, s1_h = shot.speaker1_box
@@ -155,7 +155,7 @@ def build_video_filtergraph(
             f"[top_pane][bottom_pane]vstack=inputs=2,fps={FPS}[base]"
         )
     else:
-        fg_height = int(OUTPUT_WIDTH * (9 / 16))
+        fg_height = int(round(OUTPUT_WIDTH * (9 / 16)))
         fg_y = (OUTPUT_HEIGHT - fg_height) // 2
         v_filter = (
             f"[0:v]split=2[bg_in][fg_in];"

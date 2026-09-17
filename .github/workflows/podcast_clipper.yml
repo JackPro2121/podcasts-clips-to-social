@@ -107,11 +107,6 @@ jobs:
           echo "[*] Cloudflare Trace:"
           curl -s https://cloudflare.com/cdn-cgi/trace | grep -E "warp|ip|loc" || true
 
-      - name: Set up Deno (Native yt-dlp JS Challenge Solver)
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-
       - name: Start POT Provider Service (bgutil)
         run: |
           docker run --name bgutil-provider -d --net=host --init brainicism/bgutil-ytdlp-pot-provider
