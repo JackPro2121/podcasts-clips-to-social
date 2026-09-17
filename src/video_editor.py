@@ -104,7 +104,7 @@ def build_video_filtergraph(
                     
                     target_crop_w = int(framing.video_height * (9 / 16))
                     cx_expr = f"{x_start} + ({x_end}-{x_start})*(t-{t_start})/{duration}"
-                    crop_x_expr = f"max(0,min({cx_expr}-{target_crop_w/2},{framing.video_width}-{target_crop_w}))"
+                    crop_x_expr = f"max(0,min({cx_expr}-{target_crop_w//2},{framing.video_width}-{target_crop_w}))"
                     
                     shot_f = (
                         f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,"
