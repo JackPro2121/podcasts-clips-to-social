@@ -6,16 +6,16 @@ from typing import Optional, Dict, Any, List, Tuple
 from src.config import (
     OUTPUT_WIDTH, OUTPUT_HEIGHT, FPS, VIDEO_CRF, AUDIO_BITRATE,
     TARGET_LUFS, TARGET_TRUE_PEAK, HIGHPASS_FREQ, VOCAL_PRESENCE_FREQ, VOCAL_AIR_FREQ, CLIPS_DIR,
-    ENABLE_PUNCH_ZOOM, ENABLE_BGM, AUDIO_ASSETS_DIR, ENABLE_FILM_GRAIN
+    ENABLE_PUNCH_ZOOM, ENABLE_BGM, AUDIO_ASSETS_DIR, ENABLE_FILM_GRAIN, IS_CI
 )
 from src.face_tracker import FramingDecision, ShotPlan
 
 def sanitize_ffmpeg_path(path: Path) -> str:
     """Escapes path for FFmpeg filter arguments across Windows and Unix."""
     p_str = str(path.resolve()).replace("\\", "/")
-    # For the subtitles filter on Linux, we must escape the path specifically.
-    # FFmpeg's subtitles filter requires escaping ':' and '\'' 
-    # by prefixing with a backslash, and the whole path wrapped in single quotes.
+    # On Linux/Unix, the subtitles filter is extremely picky.
+    # The most reliable way is to escape colons and single quotes.
+    # But we also need to be careful about the overall wrapping.
     p_str = p_str.replace("'", r"\'").replace(":", r"\:")
     return p_str
 
@@ -119,7 +119,7 @@ def build_video_filtergraph(
                         f"crop={target_crop_w}:{framing.video_height}:{crop_x}:0,"
                         f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[{label}]"
                     )
-                shot_filters.append(shot_f)
+            shot_filters.append(shot_f)
 
         concat_inputs = "".join(shot_labels)
         concat_f = f"{concat_inputs}concat=n={len(shot_labels)}:v=1:a=0,{studio_grade}[base]"
@@ -199,13 +199,18 @@ def build_video_filtergraph(
 
     return ";".join(filters)
 
-def build_audio_filtergraph() -> str:
+def build_audio_processing_filters() -> str:
     return (
-        f"highpass=f={HIGHPASS_FREQ},"
+        f"aresample=48000,highpass=f={HIGHPASS_FREQ},"
         f"equalizer=f={VOCAL_PRESENCE_FREQ}:width_type=h:width=1000:g=2.5,"
-        f"equalizer=f={VOCAL_AIR_FREQ}:width_type=h:width=2500:g=1.8,"
-        f"loudnorm=I={TARGET_LUFS}:TP={TARGET_TRUE_PEAK}:LRA=11"
+        f"equalizer=f={VOCAL_AIR_FREQ}:width_type=h:width=2500:g=1.8"
     )
+
+def build_audio_mastering_filters() -> str:
+    return f"loudnorm=I={TARGET_LUFS}:TP={TARGET_TRUE_PEAK}:LRA=11"
+
+def build_audio_filtergraph() -> str:
+    return f"{build_audio_processing_filters()},{build_audio_mastering_filters()}"
 
 def render_viral_clip(
     source_video_path: Path,
