@@ -74,10 +74,26 @@ def build_video_filtergraph(
             elif shot.mode == "split_screen" and shot.speaker1_box and shot.speaker2_box:
                 s1_x, s1_y, s1_w, s1_h = shot.speaker1_box
                 s2_x, s2_y, s2_w, s2_h = shot.speaker2_box
+                
+                # SCALE-FIRST APPROACH: Scale source to a fixed known width to eliminate coordinate errors
+                # We scale to 1280w (common 720p baseline) then crop.
+                baseline_w = 1280
+                scale_f = f"scale={baseline_w}:-1:flags=lanczos+accurate_rnd"
+                
+                # Calculate relative crop coordinates based on the baseline width
+                # Original crop / Original width * baseline_w
+                rel_s1_x = int(s1_x * baseline_w / framing.video_width)
+                rel_s1_w = int(s1_w * baseline_w / framing.video_width)
+                rel_s1_h = int(s1_h * (baseline_w / framing.video_width)) # simplified aspect ratio maintain
+                
+                rel_s2_x = int(s2_x * baseline_w / framing.video_width)
+                rel_s2_w = int(s2_w * baseline_w / framing.video_width)
+                rel_s2_h = int(s2_h * (baseline_w / framing.video_width))
+
                 shot_f = (
-                    f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,split=2[s{i}_p1][s{i}_p2];"
-                    f"[s{i}_p1]crop={s1_w}:{s1_h}:{s1_x}:0,scale={OUTPUT_WIDTH}:{half_h}:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd,crop={OUTPUT_WIDTH}:{half_h}[s{i}_top];"
-                    f"[s{i}_p2]crop={s2_w}:{s2_h}:{s2_x}:0,scale={OUTPUT_WIDTH}:{half_h}:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd,crop={OUTPUT_WIDTH}:{half_h}[s{i}_bot];"
+                    f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,{scale_f},split=2[s{i}_p1][s{i}_p2];"
+                    f"[s{i}_p1]crop={rel_s1_w}:{rel_s1_h}:{rel_s1_x}:0,scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd[s{i}_top];"
+                    f"[s{i}_p2]crop={rel_s2_w}:{rel_s2_h}:{rel_s2_x}:0,scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd[s{i}_bot];"
                     f"[s{i}_top][s{i}_bot]vstack=inputs=2,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[{label}]"
                 )
             else:
@@ -133,11 +149,24 @@ def build_video_filtergraph(
     elif framing.mode == "split_screen" and framing.speaker1_box and framing.speaker2_box:
         s1_x, s1_y, s1_w, s1_h = framing.speaker1_box
         s2_x, s2_y, s2_w, s2_h = framing.speaker2_box
+        
+        # SCALE-FIRST APPROACH: Scale source to a fixed known width to eliminate coordinate errors
+        baseline_w = 1280
+        scale_f = f"scale={baseline_w}:-1:flags=lanczos+accurate_rnd"
+        
+        rel_s1_x = int(s1_x * baseline_w / framing.video_width)
+        rel_s1_w = int(s1_w * baseline_w / framing.video_width)
+        rel_s1_h = int(s1_h * (baseline_w / framing.video_width))
+        
+        rel_s2_x = int(s2_x * baseline_w / framing.video_width)
+        rel_s2_w = int(s2_w * baseline_w / framing.video_width)
+        rel_s2_h = int(s2_h * (baseline_w / framing.video_width))
+        
         half_h = OUTPUT_HEIGHT // 2
         v_filter = (
-            f"[0:v]split=2[s1_in][s2_in];"
-            f"[s1_in]crop={s1_w}:{s1_h}:{s1_x}:0,scale={OUTPUT_WIDTH}:{half_h}:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd,crop={OUTPUT_WIDTH}:{half_h},{studio_grade}[top_pane];"
-            f"[s2_in]crop={s2_w}:{s2_h}:{s2_x}:0,scale={OUTPUT_WIDTH}:{half_h}:force_original_aspect_ratio=increase:flags=lanczos+accurate_rnd,crop={OUTPUT_WIDTH}:{half_h},{studio_grade}[bottom_pane];"
+            f"[0:v]{scale_f},split=2[s1_in][s2_in];"
+            f"[s1_in]crop={rel_s1_w}:{rel_s1_h}:{rel_s1_x}:0,scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd,{studio_grade}[top_pane];"
+            f"[s2_in]crop={rel_s2_w}:{rel_s2_h}:{rel_s2_x}:0,scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd,{studio_grade}[bottom_pane];"
             f"[top_pane][bottom_pane]vstack=inputs=2,fps={FPS}[base]"
         )
     else:

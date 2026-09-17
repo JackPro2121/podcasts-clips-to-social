@@ -50,8 +50,13 @@ def get_face_detector():
     except Exception as e:
         print(f"[-] MediaPipe Solutions failed: {e}. Trying OpenCV fallback...")
         try:
-            # Use the specific Haar Cascade file path to ensure it's not empty
-            cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+            # Prioritize local project root for the cascade file to avoid site-packages issues
+            local_cascade = 'haarcascade_frontalface_default.xml'
+            if os.path.exists(local_cascade):
+                cascade_path = local_cascade
+            else:
+                cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+            
             if not os.path.exists(cascade_path):
                 raise FileNotFoundError(f"Haar cascade file not found at {cascade_path}")
             return cv2.CascadeClassifier(cascade_path)
@@ -245,12 +250,18 @@ def analyze_faces_in_clip(
                         margin_v=220
                     ))
             else:
-                single_faces = [f[1] for f in timed_single_faces] if timed_single_faces else [min(faces, key=lambda f: abs(f.center_y - eye_level_y)) for faces in valid_face_samples]
-                avg_cx = int(np.median([f.center_x for f in single_faces]))
-                avg_cy = int(np.median([f.center_y for f in single_faces]))
-                crop_x = max(0, min(avg_cx - target_crop_w // 2, width - target_crop_w))
+                single_faces = [f[1] for f in timed_single_faces] if timed_single_faces else []
+                if not single_faces and valid_face_samples:
+                    single_faces = [min(faces, key=lambda f: abs(f.center_y - eye_level_y)) for faces in valid_face_samples]
                 
-                timeline = [(s, f[1].center_x) for s, f in timed_single_faces] if timed_single_faces else []
+                if not single_faces:
+                    avg_cx, avg_cy = width // 2, height // 3
+                else:
+                    avg_cx = int(np.median([f.center_x for f in single_faces]))
+                    avg_cy = int(np.median([f.center_y for f in single_faces]))
+                
+                crop_x = max(0, min(avg_cx - target_crop_w // 2, width - target_crop_w))
+                timeline = [(s, f.center_x) for s, f in timed_single_faces] if timed_single_faces else []
                 
                 shot_plans.append(ShotPlan(
                     start=rel_s,

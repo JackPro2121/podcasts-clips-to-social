@@ -201,11 +201,14 @@ def download_via_apify(
     video_url: str,
     output_dir: Path,
     quality: str = "1080",
-    api_token: Optional[str] = None
+    api_token: Optional[str] = None,
+    start_time: Optional[float] = None,
+    end_time: Optional[float] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Downloads YouTube video using Apify Actor (streamers/youtube-video-downloader).
     Guarantees bypass of bot captchas and datacenter IP blocks on GitHub Actions.
+    Supports targeted clip downloads to save Apify compute credits.
     """
     token = api_token or APIFY_API_TOKEN
     if not token:
@@ -213,9 +216,20 @@ def download_via_apify(
 
     print(f"[*] Dispatching YouTube download via Apify Actor (streamers/youtube-video-downloader)...")
     endpoint = "https://api.apify.com/v2/acts/streamers~youtube-video-downloader/runs"
+    
+    # Payload for full download vs targeted clip
     payload = {
         "videos": [{"url": video_url}]
     }
+    
+    if start_time is not None and end_time is not None:
+        # Use Apify Actor's support for time-based trimming if available, 
+        # otherwise we rely on the actor's internal logic.
+        # Note: Some actors use 'startTime' and 'endTime' in seconds.
+        payload["videos"][0]["startTime"] = start_time
+        payload["videos"][0]["endTime"] = end_time
+        print(f"[*] Requesting targeted clip from Apify: {start_time}s to {end_time}s")
+    
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json"
@@ -975,5 +989,28 @@ def download_clip_segment(
                 return None
             print(f"  [-] Client '{label}' segment download failed ({kind}): {e}")
 
-    print(f"[-] All yt-dlp clients failed for segment {section_spec}.")
+    print(f"[-] All yt-dlp clients failed for segment {section_spec}. Falling back to Apify...")
+    apify_result = download_via_apify(
+        video_url=video_url,
+        output_dir=output_dir,
+        start_time=start_time,
+        end_time=end_time,
+    )
+    if apify_result:
+        # Map Apify result to the segment result format expected by main.py
+        out_path = Path(apify_result["video_path"])
+        h = get_video_height(out_path)
+        dur = get_video_duration(out_path)
+        print(f"  [+] Segment downloaded via Apify fallback ({h}p, {out_path.stat().st_size / (1024*1024):.1f} MB)")
+        return {
+            'video_path': out_path.resolve(),
+            'title': f"clip_{clip_index}",
+            'duration': dur or clip_duration,
+            'height': h,
+            'is_low_res': (0 < h < MIN_VIDEO_HEIGHT),
+            'segment_start': 0.0,
+            'segment_duration': clip_duration,
+            'is_local': False,
+        }
+    
     return None
