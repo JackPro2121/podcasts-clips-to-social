@@ -75,16 +75,12 @@ def build_video_filtergraph(
                 s1_x, s1_y, s1_w, s1_h = shot.speaker1_box
                 s2_x, s2_y, s2_w, s2_h = shot.speaker2_box
                 
-                # SCALE-FIRST APPROACH: Scale source to a fixed known width to eliminate coordinate errors
-                # We scale to 1280w (common 720p baseline) then crop.
                 baseline_w = 1280
                 scale_f = f"scale={baseline_w}:-1:flags=lanczos+accurate_rnd"
                 
-                # Calculate relative crop coordinates based on the baseline width
-                # Original crop / Original width * baseline_w
                 rel_s1_x = int(s1_x * baseline_w / framing.video_width)
                 rel_s1_w = int(s1_w * baseline_w / framing.video_width)
-                rel_s1_h = int(s1_h * (baseline_w / framing.video_width)) # simplified aspect ratio maintain
+                rel_s1_h = int(s1_h * (baseline_w / framing.video_width))
                 
                 rel_s2_x = int(s2_x * baseline_w / framing.video_width)
                 rel_s2_w = int(s2_w * baseline_w / framing.video_width)
@@ -97,27 +93,12 @@ def build_video_filtergraph(
                     f"[s{i}_top][s{i}_bot]vstack=inputs=2,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[{label}]"
                 )
             else:
-                # Portrait Face with LERP Panning
-                # If we have a timeline, we use an expression for crop_x to glide
                 if shot.face_centers_timeline:
-                    # Simple LERP: we create a sequence of 'if' statements for the center_x
-                    # FFmpeg crop filter doesn't support complex arrays easily, so we use a
-                    # simplified linear interpolation or a series of steps.
-                    # For high-grade, we'd use zoompan, but here we implement a smooth-ish glide
-                    # by using a time-based expression for crop_x.
                     points = shot.face_centers_timeline
-                    # We'll use a piecewise linear function for crop_x
-                    # x(t) = x0 + (x1-x0)*(t-t0)/(t1-t0)
-                    # To keep it simple for FFmpeg's crop, we use the median crop_x and add a 
-                    # subtle oscillation or we generate a complex 'if' chain.
-                    # Let's use a simplified glide between the start and end center if it's a short shot.
                     t_start, x_start = points[0]
                     t_end, x_end = points[-1]
                     duration = t_end - t_start if t_end > t_start else 1.0
                     
-                    # FFmpeg expression for crop_x centered on x(t)
-                    # crop_x = center_x - target_crop_w // 2
-                    # center_x(t) = x_start + (x_end - x_start) * (t - t_start) / duration
                     target_crop_w = int(framing.video_height * (9 / 16))
                     cx_expr = f"{x_start} + ({x_end}-{x_start})*(t-{t_start})/{duration}"
                     crop_x_expr = f"max(0,min({cx_expr}-{target_crop_w/2},{framing.video_width}-{target_crop_w}))"
@@ -128,6 +109,7 @@ def build_video_filtergraph(
                         f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[{label}]"
                     )
                 else:
+                    target_crop_w = int(framing.video_height * (9 / 16))
                     crop_x = max(0, min(shot.crop_x, framing.video_width - target_crop_w))
                     shot_f = (
                         f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,"
