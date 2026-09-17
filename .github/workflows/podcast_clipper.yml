@@ -127,7 +127,7 @@ jobs:
       - name: Install System Dependencies (FFmpeg & MediaPipe)
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg libgl1-mesa-glx libglib2.0-0
+          sudo apt-get install -y ffmpeg libgl1 libglib2.0-0
 
       - name: Install Python Dependencies
         run: |
