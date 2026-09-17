@@ -61,15 +61,11 @@ def run_pipeline(
 
     # =========================================================================
     # SMART TRANSCRIPT-FIRST PIPELINE
-    # Strategy: Fetch transcript text ONLY (zero video bytes) → send to Gemini
-    # → identify N viral clip timestamps → download ONLY those N short segments.
-    # This avoids downloading 2–3 GB full podcasts entirely.
-    #
-    # FALLBACK: If no native transcript exists (e.g. no captions, local file,
-    # or non-YouTube URL), we fall back to the full-download legacy pipeline.
+    # Strategy: Fetch transcript text ONLY (zero video bytes) -> send to Gemini
+    # -> identify N viral clip timestamps -> download ONLY those N short segments.
     # =========================================================================
 
-    # ------ Step 1: Fetch Transcript (Text Only — ZERO Video Downloaded) ------
+    # ------ Step 1: Fetch Transcript (Text Only - ZERO Video Downloaded) ------
     print("\n--- [1/6] TRANSCRIPT FETCH (ZERO VIDEO DOWNLOAD) ---")
 
     segments: Optional[List[TranscriptSegment]] = None
@@ -107,7 +103,7 @@ def run_pipeline(
         if viral_moments:
             print(f"\n[+] Gemini identified {len(viral_moments)} viral clips:")
             for idx, m in enumerate(viral_moments, 1):
-                print(f"   #{idx}: [{m.start_time:.1f}s → {m.end_time:.1f}s] ({m.duration:.0f}s) | Score: {m.viral_score}/100 | '{m.title}'")
+                print(f"   #{idx}: [{m.start_time:.1f}s -> {m.end_time:.1f}s] ({m.duration:.0f}s) | Score: {m.viral_score}/100 | '{m.title}'")
         else:
             print("[!] Gemini found no viral moments from transcript. Falling back to full-download pipeline.")
             viral_moments = None
@@ -115,14 +111,6 @@ def run_pipeline(
     if dry_run:
         print("\n[!] Dry run enabled. Skipping video download, rendering and Buffer upload.")
         return
-
-    # =========================================================================
-    # DECISION BRANCH:
-    #   A) Smart path → viral moments identified from transcript first →
-    #      download ONLY N targeted clip segments (each ~15-25 MB)
-    #   B) Fallback path → no transcript / local file → full video download
-    #      then trimming (legacy behaviour)
-    # =========================================================================
 
     rendered_clips = []
 
@@ -134,7 +122,7 @@ def run_pipeline(
         DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
         for idx, moment in enumerate(viral_moments, 1):
-            print(f"\n>>> Clip #{idx}: '{moment.title}' [{moment.start_time:.1f}s → {moment.end_time:.1f}s]")
+            print(f"\n>>> Clip #{idx}: '{moment.title}' [{moment.start_time:.1f}s -> {moment.end_time:.1f}s]")
 
             clip_info = download_clip_segment(
                 video_url=active_source_url,
@@ -151,12 +139,9 @@ def run_pipeline(
             clip_path = clip_info['video_path']
             clip_duration = moment.end_time - moment.start_time
 
-            # Because download_clip_segment trims to [start, end], the file
-            # starts at t=0. So we always pass start=0, end=duration to renderer.
             render_start = 0.0
             render_end = clip_duration
 
-            # Face tracking on the short clip file
             if framing_mode == "auto":
                 print("[*] Running AI Face Detection & Speaker Tracking on segment...")
                 framing = analyze_faces_in_clip(clip_path, render_start, render_end)
@@ -169,14 +154,13 @@ def run_pipeline(
             else:
                 framing = FramingDecision(mode="blur_stack", face_count=0)
 
-            # Subtitle Generation
             burn_subtitles = subtitles_mode in ("auto", "burn")
             ass_path = None
             if burn_subtitles and segments:
                 ass_path = SUBTITLES_DIR / f"clip_{idx}_{subtitle_style}.ass"
                 create_styled_ass_subtitles(
                     segments=segments,
-                    clip_start=moment.start_time,    # original timestamps for subtitle lookup
+                    clip_start=moment.start_time,
                     clip_end=moment.end_time,
                     output_ass_path=ass_path,
                     theme_key=subtitle_style,
@@ -186,7 +170,6 @@ def run_pipeline(
                     shots=framing.shots
                 )
 
-            # Render clip
             safe_title = "".join(c for c in moment.title if c.isalnum() or c in (" ", "_", "-")).rstrip()
             safe_title = safe_title.replace(" ", "_")[:30]
             out_clip_path = CLIPS_DIR / f"clip_{idx}_{safe_title}.mp4"
@@ -297,10 +280,8 @@ def run_pipeline(
         clip_path = item["path"]
         moment = item["moment"]
 
-        # Upload to GitHub Release for $0 permanent high-speed direct video URL
         direct_url = upload_clip_to_github_release(clip_path)
 
-        # If Buffer posting requested and public URL exists:
         buffer_status = "Local Only"
         if post_to_buffer and direct_url:
             caption_text = f"{moment.title}\n\n{moment.social_caption}\n\n{' '.join(moment.hashtags)}"
@@ -327,7 +308,6 @@ def run_pipeline(
     print("\n--- [7/7] STORAGE HYGIENE: AUTO-CLEANUP RELEASES > 5 DAYS ---")
     try:
         from src.release_cleaner import clean_old_releases
-        # Pass the buffer_client to avoid deleting assets still in the queue
         clean_old_releases(days=5, buffer_client=buffer_client)
     except Exception as e:
         print(f"[-] Auto-cleanup warning: {e}")
@@ -363,7 +343,7 @@ def main():
         "--url", "-u",
         required=False,
         default=None,
-        help="YouTube video URL, podcast link, or path to local video file. If omitted, automatically discovers top trending high-CPM podcast."
+        help="YouTube video URL, podcast link, or path to local video file."
     )
     parser.add_argument(
         "--niche",
@@ -409,7 +389,7 @@ def main():
         "--watermark", "-w",
         type=str,
         default=None,
-        help="Channel watermark handle to burn at 50%% opacity (default: @allinonepodcastsss)."
+        help="Channel watermark handle to burn at 50%% opacity."
     )
 
     args = parser.parse_args()
@@ -425,20 +405,6 @@ def main():
         from src.channel_discovery import resolve_daily_niche
         resolved_niche = resolve_daily_niche()
 
-import traceback
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Autonomous AI Podcast Viral Clipper & Buffer Social Media Publisher ($0 Budget)"
-    )
-    # ... (keep existing arguments)
-    
-    # [Existing parser.add_argument calls here]
-    
-    args = parser.parse_args()
-    
-    # [Existing logic to resolve target_url and resolved_niche]
-    
     try:
         run_pipeline(
             url_or_path=target_url,
@@ -461,4 +427,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
