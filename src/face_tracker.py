@@ -113,9 +113,9 @@ def analyze_faces_in_clip(
 
             # MediaPipe Detection
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            detector = get_face_detector() # Localize to handle different detector types
             
             if detector is None:
+                current_frame += 1
                 continue
 
             if hasattr(detector, 'process'):
