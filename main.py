@@ -347,7 +347,7 @@ def main():
     )
     parser.add_argument(
         "--niche",
-        choices=["finance", "business", "ai_tech", "health_longevity", "real_estate", "auto"],
+        choices=["finance", "business", "ai_tech", "health_longevity", "real_estate", "mindset", "auto"],
         default="auto",
         help="Target high-CPM niche for automatic podcast discovery (default: auto)."
     )

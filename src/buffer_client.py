@@ -1,4 +1,5 @@
 import requests
+import time
 from typing import List, Dict, Any, Optional
 from src.config import BUFFER_ACCESS_TOKEN, BUFFER_CHANNEL_IDS
 
@@ -286,32 +287,50 @@ class BufferClient:
                 }
             }
 
-            try:
-                print(f"[*] Dispatching video to Buffer channel: {channel_id} ({service})...")
-                res = requests.post(
-                    BUFFER_GRAPHQL_ENDPOINT,
-                    headers=self.headers,
-                    json=payload,
-                    timeout=20
-                )
-                res_data = res.json()
-                results.append({
-                    "channel_id": channel_id,
-                    "status_code": res.status_code,
-                    "response": res_data
-                })
-
-                post_data = res_data.get("data", {}).get("createPost", {})
-                if "post" in post_data:
-                    post_info = post_data["post"]
-                    print(f"[+] Successfully queued post on Buffer channel {channel_id}! Post ID: {post_info.get('id')} (Status: {post_info.get('status')})")
-                else:
-                    error_msg = post_data.get("message", res.text)
-                    print(f"[-] Buffer rejected post on {channel_id}: {error_msg}")
-
-            except Exception as e:
-                print(f"[-] Request error posting to Buffer channel {channel_id}: {e}")
-                results.append({"channel_id": channel_id, "error": str(e)})
+            # Retry logic for CDN propagation delay
+            max_retries = 3
+            retry_delays = [5, 15, 30]
+            attempt = 0
+            
+            while attempt <= max_retries:
+                try:
+                    if attempt > 0:
+                        print(f"[*] Retrying Buffer dispatch for {channel_id} (Attempt {attempt}/{max_retries}) after {retry_delays[attempt-1]}s...")
+                        time.sleep(retry_delays[attempt-1])
+                    
+                    print(f"[*] Dispatching video to Buffer channel: {channel_id} ({service})...")
+                    res = requests.post(
+                        BUFFER_GRAPHQL_ENDPOINT,
+                        headers=self.headers,
+                        json=payload,
+                        timeout=20
+                    )
+                    res_data = res.json()
+                    
+                    post_data = res_data.get("data", {}).get("createPost", {})
+                    if "post" in post_data:
+                        post_info = post_data["post"]
+                        print(f"[+] Successfully queued post on Buffer channel {channel_id}! Post ID: {post_info.get('id')} (Status: {post_info.get('status')})")
+                        results.append({"channel_id": channel_id, "status_code": res.status_code, "response": res_data})
+                        break
+                    else:
+                        error_msg = post_data.get("message", res.text)
+                        # Case-insensitive match for CDN propagation delay
+                        if "video could not be read" in error_msg.lower() and attempt < max_retries:
+                            print(f"[-] Buffer cannot read URL yet: {error_msg}. Retrying...")
+                            attempt += 1
+                            continue
+                        else:
+                            print(f"[-] Buffer rejected post on {channel_id}: {error_msg}")
+                            results.append({"channel_id": channel_id, "status_code": res.status_code, "response": res_data})
+                            break
+                except Exception as e:
+                    print(f"[-] Request error posting to Buffer channel {channel_id}: {e}")
+                    if attempt < max_retries:
+                        attempt += 1
+                        continue
+                    results.append({"channel_id": channel_id, "error": str(e)})
+                    break
 
         return results
 

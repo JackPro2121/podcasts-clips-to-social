@@ -35,9 +35,9 @@ def build_video_filtergraph(
     filters = []
 
     if framing.video_height and framing.video_height < 720:
-        studio_grade = "hqdn3d=2.0:2.0:4.0:4.0,cas=0.60,unsharp=lx=7:ly=7:la=1.1:cx=5:cy=5:ca=0.50,eq=contrast=1.09:brightness=0.01:saturation=1.15"
+        studio_grade = "hqdn3d=2.0:2.0:4.0:4.0,unsharp=lx=7:ly=7:la=1.1:cx=5:cy=5:ca=0.50,eq=contrast=1.09:brightness=0.01:saturation=1.15"
     else:
-        studio_grade = "hqdn3d=1.5:1.5:3:3,cas=0.45,unsharp=lx=5:ly=5:la=0.75:cx=3:cy=3:ca=0.40,eq=contrast=1.07:brightness=0.01:saturation=1.12"
+        studio_grade = "hqdn3d=1.5:1.5:3:3,unsharp=lx=5:ly=5:la=0.75:cx=3:cy=3:ca=0.40,eq=contrast=1.07:brightness=0.01:saturation=1.12"
 
     if ENABLE_FILM_GRAIN:
         studio_grade += ",noise=alls=1.2:allf=t"
@@ -71,8 +71,8 @@ def build_video_filtergraph(
                 shot_f = (
                     f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,split=2[s{i}_fg_in][s{i}_bg_in];"
                     f"[s{i}_bg_in]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},boxblur=30:5,eq=brightness=-0.16:contrast=1.12[s{i}_bg];"
-                    f"[s{i}_fg_in]scale={OUTPUT_WIDTH}:{fg_height}:flags=lanczos+accurate_rnd,{studio_grade}[s{i}_fg];"
-                    f"[s{i}_bg][s{i}_fg]overlay=0:{fg_y},setsar=1:1,fps={FPS}[{label}]"
+                    f"[s{i}_fg_in]scale={OUTPUT_WIDTH}:-1:force_original_aspect_ratio=decrease,{studio_grade}[s{i}_fg];"
+                    f"[s{i}_bg][s{i}_fg]overlay=(W-w)/2:(H-h)/2,setsar=1:1,fps={FPS}[{label}]"
                 )
             elif shot.mode == "split_screen" and shot.speaker1_box and shot.speaker2_box:
                 s1_x, s1_y, s1_w, s1_h = shot.speaker1_box
@@ -161,8 +161,8 @@ def build_video_filtergraph(
             f"[0:v]split=2[bg_in][fg_in];"
             f"[bg_in]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
             f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},boxblur=30:5,eq=brightness=-0.16:contrast=1.12[bg];"
-            f"[fg_in]scale={OUTPUT_WIDTH}:{fg_height}:flags=lanczos+accurate_rnd,{studio_grade}[fg];"
-            f"[bg][fg]overlay=0:{fg_y},fps={FPS}[base]"
+            f"[fg_in]scale={OUTPUT_WIDTH}:-1:force_original_aspect_ratio=decrease,{studio_grade}[fg];"
+            f"[bg][fg]overlay=(W-w)/2:(H-h)/2,fps={FPS}[base]"
         )
 
     filters.append(v_filter)
@@ -178,12 +178,8 @@ def build_video_filtergraph(
         # This is a simplified version that achieves the 1.2x effect.
         segments_logic = " || ".join([f"between(it,{s[0]},{s[1]})" for s in peak_intensity_segments])
         # z=zoom factor, x and y are centers. We keep center since base is already cropped.
-        zoom_f = f"[base]zoompan=z='if({segments_logic},1.2,1.0)':d=1:s={OUTPUT_WIDTH}x{OUTPUT_HEIGHT},fps={FPS}[zoomed]"
+        zoom_f = f"[base_in]zoompan=z='if({segments_logic},1.2,1.0)':d=1:s={OUTPUT_WIDTH}x{OUTPUT_HEIGHT},fps={FPS}[zoomed]"
         filters[-1] = filters[-1].replace("[base]", "[base_in]") 
-        # We need to adjust the flow: [base] -> [zoomed] -> [outv]
-        # But filters[-1] is the whole v_filter string. Let's wrap the result.
-        # To avoid breaking the complex string, we'll append the zoompan after the base.
-        # The v_filter ends in [base].
         filters[-1] = filters[-1] + f";{zoom_f}"
         base_label = "[zoomed]"
     else:
