@@ -288,8 +288,8 @@ class BufferClient:
             }
 
             # Retry logic for CDN propagation delay
-            max_retries = 3
-            retry_delays = [5, 15, 30]
+            max_retries = 5
+            retry_delays = [10, 30, 60, 120, 300]
             attempt = 0
             
             while attempt <= max_retries:
@@ -314,9 +314,14 @@ class BufferClient:
                         results.append({"channel_id": channel_id, "status_code": res.status_code, "response": res_data})
                         break
                     else:
-                        error_msg = post_data.get("message", res.text)
-                        # Case-insensitive match for CDN propagation delay
-                        if "video could not be read" in error_msg.lower() and attempt < max_retries:
+                        # Try to extract the error message from several possible locations
+                        error_msg = post_data.get("message") or res_data.get("errors", [{}])[0].get("message") or res.text
+                        
+                        # Broaden match for CDN propagation delay
+                        propagation_keywords = ["video could not be read", "unable to read video", "invalid video url", "video not accessible"]
+                        is_propagation_issue = any(kw in error_msg.lower() for kw in propagation_keywords)
+                        
+                        if is_propagation_issue and attempt < max_retries:
                             print(f"[-] Buffer cannot read URL yet: {error_msg}. Retrying...")
                             attempt += 1
                             continue

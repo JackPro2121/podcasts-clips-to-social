@@ -45,8 +45,14 @@ class FramingDecision:
 def get_face_detector():
     """Initializes Face Detection with robust fallbacks."""
     try:
-        import mediapipe.solutions.face_detection as mp_fd
-        return mp_fd.FaceDetection(model_selection=1, min_detection_confidence=0.6)
+        import mediapipe as mp
+        # Force a check for solutions module
+        if not hasattr(mp, 'solutions'):
+            # Try importing specifically
+            import mediapipe.solutions
+            if not hasattr(mp, 'solutions'):
+                raise ImportError("mediapipe.solutions could not be loaded")
+        return mp.solutions.face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.6)
     except Exception as e:
         print(f"[-] MediaPipe Solutions failed: {e}. Trying OpenCV fallback...")
         try:

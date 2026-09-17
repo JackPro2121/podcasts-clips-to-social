@@ -443,13 +443,13 @@ def download_via_ytdlp(
       3. If nobody offers HD, the best sub-HD client is downloaded ONCE.
     Net: one download in the happy path, one in the worst case -- never seven.
     """
-    base_opts = {
-        'js_runtimes': {'deno': {}, 'node': {}},
-        'outtmpl': str(target_dir / "%(id)s_%(title).50s.%(ext)s"),
-        'merge_output_format': 'mp4',
-        'quiet': True,
-        'no_warnings': True,
-    }
+        base_opts = {
+            'js_runtimes': {'node': {}},
+            'outtmpl': str(target_dir / "%(id)s_%(title).50s.%(ext)s"),
+            'merge_output_format': 'mp4',
+            'quiet': True,
+            'no_warnings': True,
+        }
     if YTDLP_PROXY and YTDLP_PROXY.strip():
         base_opts['proxy'] = YTDLP_PROXY.strip()
         print("[*] Routing yt-dlp through configured proxy.")
@@ -925,7 +925,7 @@ def download_clip_segment(
     print(f"[*] Targeted clip download: segment {section_spec} (~{clip_duration:.0f}s) → {out_file.name}")
 
     base_opts = {
-        'js_runtimes': {'deno': {}, 'node': {}},
+        'js_runtimes': {'node': {}},
         'outtmpl': str(output_dir / f"clip_{clip_index}_{int(start_time)}s_{int(end_time)}s.%(ext)s"),
         'merge_output_format': 'mp4',
         'download_ranges': yt_dlp.utils.download_range_func(None, [(start_time, end_time)]),

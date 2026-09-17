@@ -336,6 +336,10 @@ def run_pipeline(
     print("=" * 70)
 
 def main():
+    # Debug: print arguments received by the script
+    import sys
+    print(f"[*] CLI Arguments received: {sys.argv[1:]}")
+    
     parser = argparse.ArgumentParser(
         description="Autonomous AI Podcast Viral Clipper & Buffer Social Media Publisher ($0 Budget)"
     )
