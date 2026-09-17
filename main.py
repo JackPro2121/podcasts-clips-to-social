@@ -1,5 +1,6 @@
 import sys
 import argparse
+import traceback
 from pathlib import Path
 from typing import Optional, List, Union, Dict, Any
 
@@ -424,17 +425,39 @@ def main():
         from src.channel_discovery import resolve_daily_niche
         resolved_niche = resolve_daily_niche()
 
-    run_pipeline(
-        url_or_path=target_url,
-        num_clips=args.num_clips,
-        framing_mode=args.framing,
-        subtitle_style=args.subtitle_style,
-        subtitles_mode=args.subtitles,
-        post_to_buffer=args.post_to_buffer,
-        dry_run=args.dry_run,
-        watermark=args.watermark,
-        niche=resolved_niche
+import traceback
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Autonomous AI Podcast Viral Clipper & Buffer Social Media Publisher ($0 Budget)"
     )
+    # ... (keep existing arguments)
+    
+    # [Existing parser.add_argument calls here]
+    
+    args = parser.parse_args()
+    
+    # [Existing logic to resolve target_url and resolved_niche]
+    
+    try:
+        run_pipeline(
+            url_or_path=target_url,
+            num_clips=args.num_clips,
+            framing_mode=args.framing,
+            subtitle_style=args.subtitle_style,
+            subtitles_mode=args.subtitles,
+            post_to_buffer=args.post_to_buffer,
+            dry_run=args.dry_run,
+            watermark=args.watermark,
+            niche=resolved_niche
+        )
+    except Exception as e:
+        print("\n" + "!" * 70)
+        print("💥 FATAL PIPELINE CRASH DETECTED")
+        print("!" * 70)
+        traceback.print_exc()
+        print("\n" + "!" * 70)
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

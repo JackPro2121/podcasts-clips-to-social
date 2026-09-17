@@ -93,11 +93,22 @@ ENABLE_BGM = os.getenv("ENABLE_BGM", "true").lower() in ("true", "1", "yes")  # 
 ENABLE_FILM_GRAIN = os.getenv("ENABLE_FILM_GRAIN", "true").lower() in ("true", "1", "yes")  # Breaks visual pHash
 
 # Video & Format Defaults (Ultra HD 60FPS Broadcast Studio)
-OUTPUT_WIDTH = 1080
-OUTPUT_HEIGHT = 1920
-FPS = 60
-VIDEO_CRF = 16  # Ultra high visual fidelity (near-lossless)
-AUDIO_BITRATE = "256k"
+IS_CI = os.getenv("GITHUB_ACTIONS", "false").lower() == "true"
+
+if IS_CI:
+    # Optimized for GitHub Actions: Lower CPU/RAM/Disk usage to prevent OOM/Crash
+    OUTPUT_WIDTH = 1080
+    OUTPUT_HEIGHT = 1920
+    FPS = 30
+    VIDEO_CRF = 23  # Standard quality (saves massive disk space vs 16)
+    AUDIO_BITRATE = "128k"
+else:
+    OUTPUT_WIDTH = 1080
+    OUTPUT_HEIGHT = 1920
+    FPS = 60
+    VIDEO_CRF = 16  # Ultra high visual fidelity
+    AUDIO_BITRATE = "256k"
+
 
 # Social Media UI Safe Zone Margins (TikTok, Reels, Shorts)
 SAFE_ZONE_TOP = 240       # Reserved for header/search

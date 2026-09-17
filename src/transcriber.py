@@ -78,7 +78,7 @@ def parse_native_transcript(raw_transcript: List[Dict[str, Any]]) -> List[Transc
 
 def transcribe_audio_whisper(
     video_or_audio_path: Path,
-    model_size: str = "base.en",
+    model_size: Optional[str] = None,
     device: str = "cpu",
     compute_type: str = "int8"
 ) -> List[TranscriptSegment]:
@@ -87,6 +87,11 @@ def transcribe_audio_whisper(
     Runs free on GitHub Actions using int8 quantization.
     Provides word-level timestamps.
     """
+    from src.config import IS_CI
+    if model_size is None:
+        # Force the smallest model on CI to prevent OOM crashes
+        model_size = "tiny.en" if IS_CI else "base.en"
+
     try:
         from faster_whisper import WhisperModel
     except ImportError:

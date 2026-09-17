@@ -13,9 +13,12 @@ from src.face_tracker import FramingDecision, ShotPlan
 def sanitize_ffmpeg_path(path: Path) -> str:
     """Escapes path for FFmpeg filter arguments across Windows and Unix."""
     p_str = str(path.resolve()).replace("\\", "/")
-    p_str = re.sub(r"^([A-Za-z]):", r"\1\\:", p_str)
-    p_str = p_str.replace("'", "\\'").replace("[", "\\[").replace("]", "\\]")
+    # For the subtitles filter on Linux, we must escape the path specifically.
+    # FFmpeg's subtitles filter requires escaping ':' and '\'' 
+    # by prefixing with a backslash, and the whole path wrapped in single quotes.
+    p_str = p_str.replace("'", r"\'").replace(":", r"\:")
     return p_str
+
 
 def build_video_filtergraph(
     framing: FramingDecision,
@@ -169,7 +172,7 @@ def build_video_filtergraph(
     # conditionally or a crop that slightly shrinks the window.
     # For professional result, we apply a subtle zoom overlay or we use the 
     # zoompan filter at the end of the base.
-    if peak_intensity_segments:
+    if peak_intensity_segments and not IS_CI:
         # We'll use a subtle zoompan: z=if(condition, 1.2, 1.0)
         # Note: zoompan is very picky about resolution. We apply it to the scaled base.
         # This is a simplified version that achieves the 1.2x effect.
@@ -185,6 +188,7 @@ def build_video_filtergraph(
         base_label = "[zoomed]"
     else:
         base_label = "[base]"
+
 
     if burn_subtitles and ass_subtitle_path and ass_subtitle_path.exists():
         escaped_ass = sanitize_ffmpeg_path(ass_subtitle_path)
