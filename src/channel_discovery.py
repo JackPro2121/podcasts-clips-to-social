@@ -12,7 +12,7 @@ import requests
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from src.config import YOUTUBE_COOKIES
+from src.config import YOUTUBE_COOKIES, MAX_DISCOVERY_CANDIDATES
 from src.downloader import _write_cookiefile
 
 # Curated High CPM & RPM Podcast Niches
@@ -124,7 +124,6 @@ HIGH_CPM_NICHES = {
             "https://www.youtube.com/@GrahamStephan/videos",
             "https://www.youtube.com/@PropertyHub/videos",
             "https://www.youtube.com/@SamuelLeeds/videos",
-            "https://www.youtube.com/@PizzaAndProperty/videos",
         ],
         "search_queries": [
             "BiggerPockets Real Estate Podcast full episode",
@@ -271,6 +270,11 @@ def classify_candidate_entry(entry: Dict[str, Any], processed_ids: set) -> Optio
     vurl = entry.get("url") or (f"https://www.youtube.com/watch?v={vid}" if vid else None)
     if not vurl:
         return None
+    # Discovery is for long-form source episodes, never already-short content.
+    # Flat yt-dlp search entries often omit duration, so URL shape is the only
+    # reliable early signal for rejecting Shorts without an expensive probe.
+    if "/shorts/" in vurl.lower():
+        return None
     canon_id = extract_youtube_id(vurl or vid or "")
     if not canon_id or canon_id in processed_ids:
         return None
@@ -313,7 +317,7 @@ def filter_fresh_candidates(
                             vurl, title, cid, is_long = picked
                             if cid not in seen:
                                 seen.add(cid)
-                                scored.append((0, vurl, title, cid))
+                                scored.append((0 if is_long else 2, vurl, title, cid))
 
     # 2. Search queries fallback
     with yt_dlp.YoutubeDL(current_opts) as ydl:
@@ -329,7 +333,7 @@ def filter_fresh_candidates(
                 vurl, title, cid, is_long = picked
                 if cid in seen: continue
                 seen.add(cid)
-                scored.append((1 if is_long else 2, vurl, title, cid))
+                scored.append((0 if is_long else 3, vurl, title, cid))
 
     # 3. Direct /videos tab fallback (Low priority)
     if channel_urls:
@@ -346,7 +350,7 @@ def filter_fresh_candidates(
                             vurl, title, cid, is_long = picked
                             if cid not in seen:
                                 seen.add(cid)
-                                scored.append((0, vurl, title, cid))
+                                scored.append((1 if is_long else 4, vurl, title, cid))
                 except Exception as e:
                     continue
 
@@ -393,7 +397,7 @@ def get_daily_discovery_candidates(niche: Optional[str] = None, history_file: st
         print(f"[+] Found {len(candidates)} fresh high-CPM podcast candidates:")
         for idx, (vurl, vtitle, _) in enumerate(candidates[:3], 1):
             print(f"    #{idx}: '{vtitle}' ({vurl})")
-        return [c[0] for c in candidates]
+        return [c[0] for c in candidates[:MAX_DISCOVERY_CANDIDATES]]
 
     fallback = "https://www.youtube.com/watch?v=UF8uR6Z6KLc"
     print(f"[*] Defaulting to verified episode: {fallback}")

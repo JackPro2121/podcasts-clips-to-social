@@ -10,7 +10,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-from src.config import CLIPS_DIR, SUBTITLES_DIR, DOWNLOADS_DIR
+from src.config import CLIPS_DIR, SUBTITLES_DIR, DOWNLOADS_DIR, CLIP_ONLY_MODE
 from src.downloader import (
     download_video, fetch_transcript_only, download_clip_segment, extract_youtube_id
 )
@@ -187,6 +187,11 @@ def run_pipeline(
 
     # ------ BRANCH B: Fallback Full-Download Pipeline ------
     else:
+        if CLIP_ONLY_MODE and is_youtube_url and not is_local_file:
+            raise RuntimeError(
+                "Native captions or viable viral ranges were unavailable. "
+                "Clip-only mode stopped before downloading a full source video."
+            )
         print("\n--- [3/6] FULL VIDEO DOWNLOAD (Fallback: no transcript / local file) ---")
 
         download_info = None

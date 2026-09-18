@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
 import subprocess
+from urllib.parse import quote
 import yt_dlp
 import requests
 from youtube_transcript_api import YouTubeTranscriptApi
@@ -12,6 +13,7 @@ from src.config import (
     DOWNLOADS_DIR, APIFY_API_TOKEN, YOUTUBE_COOKIES, YTDLP_PROXY, RAPIDAPI_KEY,
     COBALT_API_URL, COBALT_INSTANCES, MIN_VIDEO_HEIGHT, MAX_VIDEO_HEIGHT,
     YTDLP_POT_PROVIDER_URL,
+    APIFY_FULL_DOWNLOAD_ACTOR_ID, APIFY_SEGMENT_ACTOR_ID,
 )
 
 # ---------------------------------------------------------------------------
@@ -207,29 +209,34 @@ def download_via_apify(
     end_time: Optional[float] = None,
 ) -> Optional[Dict[str, Any]]:
     """
-    Downloads YouTube video using Apify Actor (streamers/youtube-video-downloader).
-    Guarantees bypass of bot captchas and datacenter IP blocks on GitHub Actions.
-    Supports targeted clip downloads to save Apify compute credits.
+    Downloads a source video using the configured full-download actor. Targeted
+    ranges are delegated to the segment actor because the full-download actor's
+    published schema does not include startTime/endTime.
     """
     token = api_token or APIFY_API_TOKEN
     if not token:
         return None
 
-    print(f"[*] Dispatching YouTube download via Apify Actor (streamers/youtube-video-downloader)...")
-    endpoint = "https://api.apify.com/v2/acts/streamers~youtube-video-downloader/runs"
+    if start_time is not None and end_time is not None:
+        return download_segment_via_apify(
+            video_url=video_url,
+            output_dir=output_dir,
+            start_time=start_time,
+            end_time=end_time,
+            quality=quality,
+            api_token=token,
+        )
+
+    actor_path = quote(APIFY_FULL_DOWNLOAD_ACTOR_ID.replace("/", "~"), safe="~")
+    print(f"[*] Dispatching full YouTube download via Apify Actor ({APIFY_FULL_DOWNLOAD_ACTOR_ID})...")
+    endpoint = f"https://api.apify.com/v2/acts/{actor_path}/runs"
     
     # Payload for full download vs targeted clip
     payload = {
-        "videos": [{"url": video_url}]
+        "videos": [{"url": video_url}],
+        "preferredQuality": f"{quality}p",
+        "storeInKVStore": True,
     }
-    
-    if start_time is not None and end_time is not None:
-        # Use Apify Actor's support for time-based trimming if available, 
-        # otherwise we rely on the actor's internal logic.
-        # Note: Some actors use 'startTime' and 'endTime' in seconds.
-        payload["videos"][0]["startTime"] = start_time
-        payload["videos"][0]["endTime"] = end_time
-        print(f"[*] Requesting targeted clip from Apify: {start_time}s to {end_time}s")
     
     headers = {
         "Authorization": f"Bearer {token}",
@@ -314,6 +321,89 @@ def download_via_apify(
         }
     except Exception as e:
         print(f"[-] Apify download encountered an exception: {e}")
+        return None
+
+
+def download_segment_via_apify(
+    video_url: str,
+    output_dir: Path,
+    start_time: float,
+    end_time: float,
+    quality: str = "1080",
+    api_token: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Download only one selected time range through a segment-capable Actor."""
+    token = api_token or APIFY_API_TOKEN
+    if not token or end_time <= start_time:
+        return None
+
+    actor_path = quote(APIFY_SEGMENT_ACTOR_ID.replace("/", "~"), safe="~")
+    endpoint = f"https://api.apify.com/v2/acts/{actor_path}/run-sync-get-dataset-items"
+    payload = {
+        "url": video_url,
+        "format": str(quality),
+        "startTime": round(start_time, 2),
+        "endTime": round(end_time, 2),
+    }
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    print(f"[*] Requesting Apify source segment {start_time:.2f}s-{end_time:.2f}s via {APIFY_SEGMENT_ACTOR_ID}.")
+
+    try:
+        started = requests.post(endpoint, headers=headers, json=payload, timeout=60)
+        if started.status_code not in (200, 201):
+            print(f"[-] Apify segment actor rejected the clip request: {started.status_code} - {started.text[:300]}")
+            return None
+        items = started.json()
+        first_item = items[0] if isinstance(items, list) and items else items
+        if not isinstance(first_item, dict):
+            print("[-] Apify segment actor returned no job data.")
+            return None
+        job = first_item.get("output") if isinstance(first_item.get("output"), dict) else first_item
+        poll_url = job.get("pollUrl")
+        if not poll_url:
+            print("[-] Apify segment actor response did not include pollUrl.")
+            return None
+
+        completed = None
+        for attempt in range(100):
+            time.sleep(3)
+            poll = requests.get(poll_url, timeout=20)
+            poll.raise_for_status()
+            completed = poll.json()
+            status = str(completed.get("status", "")).upper()
+            if status == "COMPLETED":
+                break
+            if status in ("FAILED", "ERROR", "CANCELLED"):
+                print(f"[-] Apify segment download ended with {status}.")
+                return None
+        if not completed or str(completed.get("status", "")).upper() != "COMPLETED":
+            print("[-] Apify segment download timed out before completion.")
+            return None
+
+        direct_url = completed.get("downloadUrl")
+        if not direct_url:
+            print("[-] Apify segment download completed without a video URL.")
+            return None
+        vid_id = extract_youtube_id(video_url) or "video"
+        out_file = output_dir / f"clip_{vid_id}_{int(start_time)}s_{int(end_time)}s.mp4"
+        print(f"[*] Streaming requested Apify segment to {out_file.name}...")
+        with requests.get(direct_url, stream=True, timeout=180) as stream_res:
+            stream_res.raise_for_status()
+            with open(out_file, "wb") as f:
+                for chunk in stream_res.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        f.write(chunk)
+        height = get_video_height(out_file)
+        return {
+            "video_path": out_file.resolve(),
+            "title": job.get("title", f"YouTube_{vid_id}"),
+            "duration": get_video_duration(out_file) or (end_time - start_time),
+            "height": height,
+            "is_low_res": 0 < height < MIN_VIDEO_HEIGHT,
+            "is_local": False,
+        }
+    except requests.RequestException as e:
+        print(f"[-] Apify segment request failed: {e}")
         return None
 
 # Deduplicated format selectors (were copy-pasted across 7 strategies).

@@ -10,6 +10,8 @@ Covers the pure logic behind the highest-impact fixes:
 import shutil
 import subprocess
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from src.downloader import (
     classify_ytdlp_error,
@@ -57,6 +59,20 @@ class TestDownloaderClassification(unittest.TestCase):
     def test_unavailable_exception_type(self):
         self.assertTrue(issubclass(VideoUnavailableError, Exception))
 
+    def test_targeted_apify_download_uses_segment_actor(self):
+        from src.downloader import download_via_apify
+        expected = {"video_path": Path("clip.mp4"), "duration": 30.0}
+        with patch("src.downloader.download_segment_via_apify", return_value=expected) as segment:
+            result = download_via_apify(
+                "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                Path("downloads"),
+                start_time=60.0,
+                end_time=90.0,
+                api_token="test-token",
+            )
+        self.assertEqual(result, expected)
+        segment.assert_called_once()
+
 
 class TestDiscoveryFilter(unittest.TestCase):
     def test_unknown_duration_is_kept(self):
@@ -67,6 +83,11 @@ class TestDiscoveryFilter(unittest.TestCase):
 
     def test_confirmed_short_rejected(self):
         self.assertIsNone(classify_candidate_entry({"id": "abcdefghij2", "duration": 120}, set()))
+
+    def test_youtube_short_url_rejected_without_duration(self):
+        self.assertIsNone(classify_candidate_entry(
+            {"url": "https://www.youtube.com/shorts/jG-3AB56zLg", "title": "Already short"}, set()
+        ))
 
     def test_confirmed_long_flagged(self):
         got = classify_candidate_entry({"id": "abcdefghij3", "duration": 3600, "title": "Pod"}, set())
