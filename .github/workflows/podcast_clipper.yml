@@ -181,8 +181,10 @@ jobs:
           COBALT_API_URL: ${{ secrets.COBALT_API_URL || 'https://api.cobalt.tools' }}
           APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
           APIFY_SEGMENT_ACTOR_ID: ${{ vars.APIFY_SEGMENT_ACTOR_ID || 'vidkraken/youtube-video-audio-downloader-reliable' }}
+          APIFY_TRANSCRIPT_ACTOR_ID: ${{ vars.APIFY_TRANSCRIPT_ACTOR_ID || 'om_kh/video-transcript-api' }}
           CLIP_ONLY_MODE: 'true'
           MAX_DISCOVERY_CANDIDATES: '12'
+          MAX_TRANSCRIPT_FALLBACKS: '3'
           YTDLP_POT_PROVIDER_URL: ${{ env.YTDLP_POT_PROVIDER_URL }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

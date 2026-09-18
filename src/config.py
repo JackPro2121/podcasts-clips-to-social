@@ -52,8 +52,12 @@ APIFY_FULL_DOWNLOAD_ACTOR_ID = os.getenv(
 APIFY_SEGMENT_ACTOR_ID = os.getenv(
     "APIFY_SEGMENT_ACTOR_ID", "vidkraken/youtube-video-audio-downloader-reliable"
 ).strip()
+APIFY_TRANSCRIPT_ACTOR_ID = os.getenv(
+    "APIFY_TRANSCRIPT_ACTOR_ID", "om_kh/video-transcript-api"
+).strip()
 CLIP_ONLY_MODE = os.getenv("CLIP_ONLY_MODE", "true").lower() in ("true", "1", "yes")
 MAX_DISCOVERY_CANDIDATES = max(1, int(os.getenv("MAX_DISCOVERY_CANDIDATES", "12")))
+MAX_TRANSCRIPT_FALLBACKS = max(1, int(os.getenv("MAX_TRANSCRIPT_FALLBACKS", "3")))
 GROQ_API_KEY = (
     os.getenv("GROQ_API_KEY") or
     os.getenv("groq_api_key") or

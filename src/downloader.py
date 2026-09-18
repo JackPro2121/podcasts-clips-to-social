@@ -14,6 +14,7 @@ from src.config import (
     COBALT_API_URL, COBALT_INSTANCES, MIN_VIDEO_HEIGHT, MAX_VIDEO_HEIGHT,
     YTDLP_POT_PROVIDER_URL,
     APIFY_FULL_DOWNLOAD_ACTOR_ID, APIFY_SEGMENT_ACTOR_ID,
+    APIFY_TRANSCRIPT_ACTOR_ID,
 )
 
 # ---------------------------------------------------------------------------
@@ -975,7 +976,62 @@ def download_video(url_or_path: str, output_dir: Optional[Path] = None) -> Dict[
     raise RuntimeError(f"Failed to download video from {url_or_path} across all tiers (yt-dlp, Cobalt, RapidAPI, Apify).")
 
 
-def fetch_transcript_only(url: str) -> Optional[Dict]:
+def fetch_transcript_via_apify(video_url: str, api_token: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
+    """Fetch timestamped captions through Apify without downloading video bytes."""
+    token = api_token or APIFY_API_TOKEN
+    if not token:
+        return None
+    actor_path = quote(APIFY_TRANSCRIPT_ACTOR_ID.replace("/", "~"), safe="~")
+    endpoint = f"https://api.apify.com/v2/acts/{actor_path}/run-sync-get-dataset-items"
+    payload = {"videos": [video_url], "language": "en", "includeSegments": True}
+    try:
+        response = requests.post(
+            endpoint,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=90,
+        )
+        response.raise_for_status()
+        raw = response.json()
+    except requests.RequestException as e:
+        print(f"[-] Apify transcript request failed: {e}")
+        return None
+
+    records = raw if isinstance(raw, list) else [raw]
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        transcript_record = record.get("transcripts", record)
+        if isinstance(transcript_record, list):
+            transcript_record = next((item for item in transcript_record if isinstance(item, dict)), None)
+        if not isinstance(transcript_record, dict):
+            continue
+        raw_segments = transcript_record.get("segments") or transcript_record.get("transcript")
+        if not isinstance(raw_segments, list):
+            continue
+        normalized = []
+        for segment in raw_segments:
+            if not isinstance(segment, dict) or not str(segment.get("text", "")).strip():
+                continue
+            start = segment.get("start", segment.get("startMs", 0))
+            duration = segment.get("duration")
+            if duration is None and segment.get("endMs") is not None:
+                duration = float(segment["endMs"]) - float(start)
+            try:
+                start = float(start) / 1000 if "startMs" in segment else float(start)
+                duration = float(duration or 0) / 1000 if "durationMs" in segment else float(duration or 0)
+            except (TypeError, ValueError):
+                continue
+            if duration > 0:
+                normalized.append({"text": str(segment["text"]), "start": start, "duration": duration})
+        if normalized:
+            print(f"[+] Retrieved {len(normalized)} timestamped transcript segments via Apify.")
+            return normalized
+    print("[!] Apify transcript actor returned no usable timed captions.")
+    return None
+
+
+def fetch_transcript_only(url: str, allow_apify_fallback: bool = False) -> Optional[Dict]:
     """
     Step 0 of the Smart Pipeline: Fetches ONLY the transcript (text) from a
     YouTube video — ZERO video bytes downloaded. Returns transcript + video_id.
@@ -985,8 +1041,11 @@ def fetch_transcript_only(url: str) -> Optional[Dict]:
     if not video_id:
         return None
     transcript = fetch_youtube_transcript(video_id)
+    if not transcript and allow_apify_fallback:
+        print("[*] Native captions unavailable. Trying transcript-only Apify fallback...")
+        transcript = fetch_transcript_via_apify(url)
     if not transcript:
-        print("[!] No native transcript found. Targeted clip download unavailable; will fall back to full download.")
+        print("[!] No timed transcript found. Targeted clip download is unavailable for this source.")
         return None
     return {"video_id": video_id, "transcript": transcript}
 

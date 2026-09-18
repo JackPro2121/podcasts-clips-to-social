@@ -10,7 +10,10 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-from src.config import CLIPS_DIR, SUBTITLES_DIR, DOWNLOADS_DIR, CLIP_ONLY_MODE
+from src.config import (
+    CLIPS_DIR, SUBTITLES_DIR, DOWNLOADS_DIR, CLIP_ONLY_MODE,
+    MAX_TRANSCRIPT_FALLBACKS,
+)
 from src.downloader import (
     download_video, fetch_transcript_only, download_clip_segment, extract_youtube_id
 )
@@ -74,10 +77,13 @@ def run_pipeline(
     native_transcript = None
 
     if is_youtube_url and not is_local_file:
-        for cand in candidates:
+        for candidate_index, cand in enumerate(candidates):
             cand_id = extract_youtube_id(cand)
             print(f"[*] Checking candidate for native transcript: {cand}")
-            transcript_data = fetch_transcript_only(cand)
+            transcript_data = fetch_transcript_only(
+                cand,
+                allow_apify_fallback=candidate_index < MAX_TRANSCRIPT_FALLBACKS,
+            )
             if transcript_data and transcript_data.get("transcript"):
                 active_source_url = cand
                 video_id = transcript_data.get("video_id", cand_id)

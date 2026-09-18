@@ -321,6 +321,19 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertEqual(result["video_id"], "dQw4w9WgXcQ")
         self.assertEqual(result["transcript"], fake_transcript)
 
+    def test_fetch_transcript_only_uses_apify_when_native_captions_missing(self):
+        from unittest.mock import patch
+        from src.downloader import fetch_transcript_only
+        fallback = [{"text": "Timed fallback", "start": 0.0, "duration": 2.0}]
+        with patch("src.downloader.fetch_youtube_transcript", return_value=None), \
+             patch("src.downloader.fetch_transcript_via_apify", return_value=fallback) as apify:
+            result = fetch_transcript_only(
+                "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                allow_apify_fallback=True,
+            )
+        self.assertEqual(result["transcript"], fallback)
+        apify.assert_called_once()
+
     def test_download_clip_segment_permanent_error_returns_none(self):
         """download_clip_segment must return None cleanly on a permanent video error."""
         from unittest.mock import patch, MagicMock
