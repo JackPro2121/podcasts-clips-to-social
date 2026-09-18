@@ -35,9 +35,9 @@ def build_video_filtergraph(
     filters = []
 
     if framing.video_height and framing.video_height < 720:
-        studio_grade = "hqdn3d=2.0:2.0:4.0:4.0,unsharp=lx=7:ly=7:la=1.1:cx=5:cy=5:ca=0.50,eq=contrast=1.09:brightness=0.01:saturation=1.15"
+        studio_grade = "hqdn3d=2.0:2.0:4.0:4.0,unsharp=lx=7:ly=7:la=1.1:cx=5:cy=5:ca=0.50,cas=0.60,eq=contrast=1.09:brightness=0.01:saturation=1.15"
     else:
-        studio_grade = "hqdn3d=1.5:1.5:3:3,unsharp=lx=5:ly=5:la=0.75:cx=3:cy=3:ca=0.40,eq=contrast=1.07:brightness=0.01:saturation=1.12"
+        studio_grade = "hqdn3d=1.5:1.5:3:3,unsharp=lx=5:ly=5:la=0.75:cx=3:cy=3:ca=0.40,cas=0.45,eq=contrast=1.07:brightness=0.01:saturation=1.12"
 
     if ENABLE_FILM_GRAIN:
         studio_grade += ",noise=alls=1.2:allf=t"
@@ -125,10 +125,13 @@ def build_video_filtergraph(
         concat_f = f"{concat_inputs}concat=n={len(shot_labels)}:v=1:a=0,{studio_grade}[base]"
         v_filter = ";".join(shot_filters) + ";" + concat_f
 
-    elif framing.mode == "single_smooth":
+    elif framing.mode in ("single_smooth", "dynamic_cut"):
         crop_w = int(framing.video_height * (9 / 16))
-        cx = framing.smoothed_center_x or (framing.video_width // 2)
-        crop_x = max(0, min(cx - crop_w // 2, framing.video_width - crop_w))
+        if framing.mode == "dynamic_cut" and framing.crop_x_expr:
+            crop_x = f"'{framing.crop_x_expr}'"
+        else:
+            cx = framing.smoothed_center_x or (framing.video_width // 2)
+            crop_x = max(0, min(cx - crop_w // 2, framing.video_width - crop_w))
         v_filter = f"[0:v]crop={crop_w}:{framing.video_height}:{crop_x}:0,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,{studio_grade},fps={FPS}[base]"
 
     elif framing.mode == "split_screen" and framing.speaker1_box and framing.speaker2_box:
@@ -162,7 +165,7 @@ def build_video_filtergraph(
             f"[bg_in]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
             f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},boxblur=30:5,eq=brightness=-0.16:contrast=1.12[bg];"
             f"[fg_in]scale={OUTPUT_WIDTH}:-1:force_original_aspect_ratio=decrease,{studio_grade}[fg];"
-            f"[bg][fg]overlay=(W-w)/2:(H-h)/2,fps={FPS}[base]"
+            f"[bg][fg]overlay=0:(H-h)/2,fps={FPS}[base]"
         )
 
     filters.append(v_filter)

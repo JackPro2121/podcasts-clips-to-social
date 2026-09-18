@@ -11,6 +11,7 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from src.config import (
     DOWNLOADS_DIR, APIFY_API_TOKEN, YOUTUBE_COOKIES, YTDLP_PROXY, RAPIDAPI_KEY,
     COBALT_API_URL, COBALT_INSTANCES, MIN_VIDEO_HEIGHT, MAX_VIDEO_HEIGHT,
+    YTDLP_POT_PROVIDER_URL,
 )
 
 # ---------------------------------------------------------------------------
@@ -321,8 +322,12 @@ _HD_FORMAT = ('bestvideo[vcodec^=avc1][height>=720][height<=1080]+bestaudio/best
               'video[vcodec^=avc1][height<=1080]+bestaudio/best[ext=mp4][height<=1080]')
 _ANY_FORMAT = 'bestvideo[vcodec^=avc1][height<=1080]+bestaudio/best[ext=mp4][height<=1080]/best[vcodec^=avc1]'
 _FAILSAFE_FORMAT = 'bestvideo[vcodec^=avc1]+bestaudio/best'
-# Local bgutil POT provider (started as a sidecar in the CI workflow).
-_POT_ARGS = {'youtubepot-bgutilhttp': {'base_url': ['http://127.0.0.1:4416']}}
+# Local bgutil POT provider. This is only configured after its health check
+# succeeds in CI; otherwise yt-dlp must use its normal client fallback.
+_POT_ARGS = (
+    {'youtubepot-bgutilhttp': {'base_url': [YTDLP_POT_PROVIDER_URL]}}
+    if YTDLP_POT_PROVIDER_URL else {}
+)
 
 
 def _ytdlp_client_variants(cookie_path: Optional[Path] = None) -> List[Tuple[str, Dict[str, Any]]]:

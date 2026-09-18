@@ -272,6 +272,11 @@ def run_pipeline(
             )
             rendered_clips.append({"path": rendered_path, "moment": moment})
 
+    if not rendered_clips:
+        raise RuntimeError(
+            "No clips were rendered. Refusing to report a successful run without publishable output."
+        )
+
     # Step 6: Permanent Hosting & Buffer Social Distribution
     print("\n--- [6/6] PERMANENT HOSTING & BUFFER SOCIAL PUBLISHING ---")
     buffer_client = BufferClient() if post_to_buffer else None

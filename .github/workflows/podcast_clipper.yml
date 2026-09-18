@@ -82,8 +82,28 @@ permissions:
   contents: write
 
 jobs:
+  verify:
+    name: Verify pipeline contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libgl1 libglib2.0-0
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Run regression suite
+        run: python -m unittest discover -s tests -v
+
   clip-and-publish:
     name: Detect Viral Clips, Enhance & Publish
+    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 90
 
@@ -91,7 +111,8 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up Cloudflare WARP (Bypass Datacenter IP Blocks)
+      - name: Set up Cloudflare WARP (optional)
+        if: ${{ vars.ENABLE_WARP == 'true' }}
         uses: fscarmen/warp-on-actions@v1.4
         continue-on-error: true
         timeout-minutes: 2
@@ -109,9 +130,17 @@ jobs:
 
       - name: Start POT Provider Service (bgutil)
         run: |
-          docker run --name bgutil-provider -d --net=host --init brainicism/bgutil-ytdlp-pot-provider
-          sleep 4
-          curl -s http://127.0.0.1:4416/ping || echo "bgutil ready"
+          if docker run --name bgutil-provider -d --net=host --init brainicism/bgutil-ytdlp-pot-provider; then
+            for attempt in {1..10}; do
+              if curl --fail --silent http://127.0.0.1:4416/ping >/dev/null; then
+                echo "YTDLP_POT_PROVIDER_URL=http://127.0.0.1:4416" >> "$GITHUB_ENV"
+                echo "[*] POT provider is healthy."
+                exit 0
+              fi
+              sleep 2
+            done
+          fi
+          echo "[!] POT provider unavailable; yt-dlp will use its built-in client fallbacks."
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -148,6 +177,7 @@ jobs:
           RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
           COBALT_API_URL: ${{ secrets.COBALT_API_URL || 'https://api.cobalt.tools' }}
           APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
+          YTDLP_POT_PROVIDER_URL: ${{ env.YTDLP_POT_PROVIDER_URL }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}

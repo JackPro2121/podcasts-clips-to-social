@@ -73,9 +73,13 @@ COBALT_API_URL = os.getenv("COBALT_API_URL", "https://api.cobalt.tools")
 COBALT_INSTANCES = [
     url.strip() for url in (
         os.getenv("COBALT_INSTANCES") or
-        "https://api.cobalt.tools,https://cobalt-api.kwiatekm.tokyo,https://cobaltapi.pukeko.cyou,https://co.wuk.sh"
+        COBALT_API_URL
     ).split(",") if url.strip()
 ]
+# Leave the local Proof-of-Origin service optional. Sending yt-dlp to a dead
+# localhost service makes every extractor client fail before it can try its
+# normal authenticated/cookie-based path.
+YTDLP_POT_PROVIDER_URL = os.getenv("YTDLP_POT_PROVIDER_URL", "").strip()
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
 SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN", "")
 SLACK_CHANNEL = os.getenv("SLACK_CHANNEL", "podcast-clip")
