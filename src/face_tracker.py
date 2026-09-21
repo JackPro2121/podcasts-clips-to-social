@@ -226,6 +226,46 @@ def detect_faces_in_frame(detector, frame: np.ndarray, width: int, height: int) 
 
     return faces
 
+
+def _skin_tone_center_x(frame: np.ndarray, active_x: int, active_y: int, active_w: int, active_h: int) -> Optional[int]:
+    """Fallback: when face detector returns empty, find the dominant skin-tone region in the upper
+    60% of the active content area. This catches side-on heads, hats, and profile angles that
+    YuNet misses, preventing the crop from locking onto mic stands or lamps."""
+    if frame is None:
+        return None
+    try:
+        # Work only in the upper 60% where podcast speakers always appear
+        top_h = int(active_h * 0.60)
+        roi = frame[active_y:active_y + top_h, active_x:active_x + active_w]
+        if roi.size == 0:
+            return None
+        ycrcb = cv2.cvtColor(roi, cv2.COLOR_BGR2YCrCb)
+        # Standard skin-tone range in YCrCb
+        lower = np.array([0, 133, 77], dtype=np.uint8)
+        upper = np.array([235, 173, 127], dtype=np.uint8)
+        mask = cv2.inRange(ycrcb, lower, upper)
+        # Morphological cleanup to merge fragmented skin blobs
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+        # Find largest connected skin region
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None
+        largest = max(contours, key=cv2.contourArea)
+        area = cv2.contourArea(largest)
+        roi_area = roi.shape[0] * roi.shape[1]
+        # Must be at least 3% of the ROI to be a person, not noise
+        if area < roi_area * 0.03:
+            return None
+        M = cv2.moments(largest)
+        if M["m00"] == 0:
+            return None
+        cx_roi = int(M["m10"] / M["m00"])
+        return active_x + cx_roi
+    except Exception:
+        return None
+
+
 def analyze_faces_in_clip(
     video_path: Path,
     start_time: float,
@@ -309,10 +349,16 @@ def analyze_faces_in_clip(
         if area1 == 0 or area2 == 0:
             return False
         area_ratio = area1 / area2
+        # Require faces to be at least 30% of frame width apart (prevents treating
+        # a single face detected twice as two speakers)
+        # Also require both faces to be reasonably large (> 2% of frame area)
+        min_face_area = (active_w * active_h) * 0.02
         return (
-            x_dist >= active_w * 0.20 and
-            y_dist <= active_h * 0.30 and
-            0.30 <= area_ratio <= 3.3
+            x_dist >= active_w * 0.28 and
+            y_dist <= active_h * 0.28 and
+            0.28 <= area_ratio <= 3.6 and
+            area1 >= min_face_area and
+            area2 >= min_face_area
         )
 
     clip_duration = round(end_time - start_time, 2)
@@ -347,34 +393,53 @@ def analyze_faces_in_clip(
                 crop_h=active_h,
                 margin_v=400
             ))
-        # 2. Dynamic Split-Screen (Aspect-ratio preserving 9:8 pane crops)
+        # 2. Dynamic Split-Screen — tight face-relative crops so each pane
+        #    shows only THAT speaker, not the entire wide shot.
         elif valid_face_samples and (len(two_speaker_samples) / len(valid_face_samples) >= 0.40):
             s1_cx = int(np.median([f[0].center_x for f in two_speaker_samples]))
             s2_cx = int(np.median([f[1].center_x for f in two_speaker_samples]))
             s1_cy = int(np.median([f[0].center_y for f in two_speaker_samples]))
             s2_cy = int(np.median([f[1].center_y for f in two_speaker_samples]))
+            # Median face dimensions for tight crop scaling
+            s1_fw = int(np.median([f[0].w for f in two_speaker_samples]))
+            s2_fw = int(np.median([f[1].w for f in two_speaker_samples]))
+            s1_fh = int(np.median([f[0].h for f in two_speaker_samples]))
+            s2_fh = int(np.median([f[1].h for f in two_speaker_samples]))
 
-            target_aspect = 9.0 / 8.0  # 1080x960 pane aspect ratio
-            pane_h = active_h
-            pane_w = int(pane_h * target_aspect)
-            if pane_w > width:
-                pane_w = width
-                pane_h = int(pane_w / target_aspect)
+            # Tight crop: each pane is 3.5x the face width wide and full active_h tall
+            # but capped at 55% of active_w so crops don't overlap / show the other speaker.
+            min_pane_w = int(active_w * 0.30)  # never narrower than 30% of frame
+            max_pane_w = int(active_w * 0.55)  # never wider than 55% (prevent overlap)
+            s1_pane_w = max(min_pane_w, min(int(s1_fw * 3.8), max_pane_w))
+            s2_pane_w = max(min_pane_w, min(int(s2_fw * 3.8), max_pane_w))
+            # Pane height: maintain 9:16 portrait aspect for each pane (half of 1920 = 960)
+            s1_pane_h = int(s1_pane_w * 16.0 / 9.0)
+            s2_pane_h = int(s2_pane_w * 16.0 / 9.0)
+            # Cap pane height to active_h
+            if s1_pane_h > active_h:
+                s1_pane_h = active_h
+                s1_pane_w = int(s1_pane_h * 9.0 / 16.0)
+            if s2_pane_h > active_h:
+                s2_pane_h = active_h
+                s2_pane_w = int(s2_pane_h * 9.0 / 16.0)
 
-            s1_x = max(0, min(s1_cx - pane_w // 2, width - pane_w))
-            s1_y = active_y + max(0, min(s1_cy - pane_h // 2, active_h - pane_h))
-            s2_x = max(0, min(s2_cx - pane_w // 2, width - pane_w))
-            s2_y = active_y + max(0, min(s2_cy - pane_h // 2, active_h - pane_h))
+            # Position: center crop on each speaker's face; keep head in upper third of pane
+            s1_y_offset = max(0, int(s1_cy - s1_fh * 1.5))  # start crop 1.5 face-heights above eyes
+            s2_y_offset = max(0, int(s2_cy - s2_fh * 1.5))
+            s1_x = max(active_x, min(s1_cx - s1_pane_w // 2, active_x + active_w - s1_pane_w))
+            s2_x = max(active_x, min(s2_cx - s2_pane_w // 2, active_x + active_w - s2_pane_w))
+            s1_y = max(active_y, min(active_y + s1_y_offset, active_y + active_h - s1_pane_h))
+            s2_y = max(active_y, min(active_y + s2_y_offset, active_y + active_h - s2_pane_h))
 
             shot_plans.append(ShotPlan(
                 start=rel_s,
                 end=rel_e,
                 mode='split_screen',
-                speaker1_box=(s1_x, s1_y, pane_w, pane_h),
-                speaker2_box=(s2_x, s2_y, pane_w, pane_h),
+                speaker1_box=(s1_x, s1_y, s1_pane_w, s1_pane_h),
+                speaker2_box=(s2_x, s2_y, s2_pane_w, s2_pane_h),
                 margin_v=0  # Centered right on middle divider with \an5
             ))
-        # 3. Portrait Solo Face (with temporal anchor memory)
+        # 3. Portrait Solo Face (with temporal anchor memory + skin-tone fallback)
         else:
             eye_level_y = active_y + active_h * 0.35
             timed_single_faces = [(s[0], min(s[1], key=lambda f: abs(f.center_y - eye_level_y))) for s in shot_samples if s[1]]
@@ -388,8 +453,28 @@ def analyze_faces_in_clip(
                 avg_cy = int(np.median([f.center_y for f in single_faces]))
                 last_known_cx = avg_cx
             else:
-                # Persistent speaker memory: Never default to dead-center width // 2!
-                avg_cx = last_known_cx if last_known_cx is not None else global_anchor_cx
+                # Skin-tone heatmap fallback: smarter than global median anchor.
+                # Prevents crop landing on mic stand / lamp when face detector fails.
+                skin_cx = None
+                cap_inner = cv2.VideoCapture(str(video_path))
+                if cap_inner.isOpened():
+                    mid_t = (rel_s + rel_e) / 2.0
+                    cap_inner.set(cv2.CAP_PROP_POS_MSEC, (start_time + mid_t) * 1000)
+                    ret_s, sample_frame = cap_inner.read()
+                    cap_inner.release()
+                    if ret_s and sample_frame is not None:
+                        skin_cx = _skin_tone_center_x(sample_frame, active_x, active_y, active_w, active_h)
+                        if skin_cx is not None:
+                            print(f"[*] Skin-tone fallback: found person at x={skin_cx} (no face detected in shot)")
+                # Priority: skin-tone → last known position → global anchor
+                if skin_cx is not None:
+                    avg_cx = skin_cx
+                elif last_known_cx is not None:
+                    avg_cx = last_known_cx
+                    print(f"[*] Temporal anchor fallback: using last known x={avg_cx}")
+                else:
+                    avg_cx = global_anchor_cx
+                    print(f"[*] Global anchor fallback: using x={avg_cx}")
                 avg_cy = int(eye_level_y)
 
             crop_x = max(active_x, min(avg_cx - target_crop_w // 2, active_x + active_w - target_crop_w))

@@ -10,7 +10,7 @@ from src.transcriber import TranscriptSegment, WordTimestamp
 
 # Default lower-third safe-zone margins per layout (must match generate_ass_header).
 _SAFE_MARGIN_V = {
-    "split_screen": 0,    # Centered on the divider (Alignment 5)
+    "split_screen": 880,  # \an2 (bottom-center): MarginV=880 → text baseline at Y≈1000 (center divider)
     "blur_stack": 400,    # Just below the centered 16:9 panel
     "single_smooth": 460, # Lower-third, clear of the bottom UI overlay
 }
@@ -54,12 +54,13 @@ def generate_ass_header(
     shadow_d = theme["shadow_depth"]
 
     # Safe Zone Placement:
-    # In split_screen: captions placed right at the middle horizontal divider (center alignment 5, margin_v: 0)
-    # In single_smooth, dynamic_cut, or blur_stack: placed strictly in the lower-third safe zone (margin_v: 460)
-    # This prevents any overlap with TikTok/Reels/Shorts bottom description, sound title, or comment button.
+    # In split_screen: captions placed at the center divider — \an2 + MarginV=880 puts the
+    #   text baseline at Y≈1000px (just below the 960px midpoint), clearly over both panes
+    #   and well above TikTok's bottom 20% UI zone.
+    # In single_smooth, dynamic_cut, or blur_stack: placed strictly in the lower-third safe zone
     if layout_mode == "split_screen":
-        alignment = 5  # Middle Center
-        margin_v = 0
+        alignment = 2  # Bottom Center
+        margin_v = 880  # baseline at Y≈1000, straddles the center divider
     elif layout_mode == "blur_stack":
         alignment = 2  # Bottom Center
         margin_v = 400  # Perfectly below the 16:9 centered diagram (which ends at Y=1264)
@@ -178,8 +179,6 @@ def create_styled_ass_subtitles(
             dialogue_text = " ".join(word_elements)
             w_mid = (w_start + w_end) / 2
             active_margin_v = get_shot_margin_v(w_mid)
-            if active_margin_v == 0:
-                dialogue_text = "{\\an5}" + dialogue_text
             ass_line = f"Dialogue: 0,{format_ass_timestamp(w_start)},{format_ass_timestamp(w_end)},Default,,0,0,{active_margin_v},,{dialogue_text}"
             lines.append(ass_line)
 

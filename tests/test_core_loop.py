@@ -209,7 +209,7 @@ class TestSubtitleFormatting(unittest.TestCase):
         # single_smooth must NOT be 0 (that pinned captions under the UI).
         self.assertEqual(default_margin_v("single_smooth"), 460)
         self.assertEqual(default_margin_v("blur_stack"), 400)
-        self.assertEqual(default_margin_v("split_screen"), 0)
+        self.assertEqual(default_margin_v("split_screen"), 880)   # \an2 bottom-center at Y≈1000 (center divider)
         self.assertEqual(default_margin_v("multi_shot_dynamic"), 460)  # fallback default
 
 
