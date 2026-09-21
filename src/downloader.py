@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import math
 import tempfile
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
@@ -340,14 +341,22 @@ def download_segment_via_apify(
 
     actor_path = quote(APIFY_SEGMENT_ACTOR_ID.replace("/", "~"), safe="~")
     endpoint = f"https://api.apify.com/v2/acts/{actor_path}/run-sync-get-dataset-items"
+    
+    # The Apify segment actor strictly requires startTime and endTime to be integers.
+    # Flooring start_time and ceiling end_time guarantees the target range is captured.
+    int_start = int(start_time)
+    int_end = int(math.ceil(end_time))
+    if int_end <= int_start:
+        int_end = int_start + 1
+
     payload = {
         "url": video_url,
         "format": str(quality),
-        "startTime": round(start_time, 2),
-        "endTime": round(end_time, 2),
+        "startTime": int_start,
+        "endTime": int_end,
     }
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    print(f"[*] Requesting Apify source segment {start_time:.2f}s-{end_time:.2f}s via {APIFY_SEGMENT_ACTOR_ID}.")
+    print(f"[*] Requesting Apify source segment {start_time:.2f}s-{end_time:.2f}s (window: {int_start}s-{int_end}s) via {APIFY_SEGMENT_ACTOR_ID}.")
 
     try:
         started = requests.post(endpoint, headers=headers, json=payload, timeout=60)
@@ -386,7 +395,7 @@ def download_segment_via_apify(
             print("[-] Apify segment download completed without a video URL.")
             return None
         vid_id = extract_youtube_id(video_url) or "video"
-        out_file = output_dir / f"clip_{vid_id}_{int(start_time)}s_{int(end_time)}s.mp4"
+        out_file = output_dir / f"clip_{vid_id}_{int_start}s_{int_end}s.mp4"
         print(f"[*] Streaming requested Apify segment to {out_file.name}...")
         with requests.get(direct_url, stream=True, timeout=180) as stream_res:
             stream_res.raise_for_status()
@@ -395,12 +404,15 @@ def download_segment_via_apify(
                     if chunk:
                         f.write(chunk)
         height = get_video_height(out_file)
+        segment_start = max(0.0, start_time - float(int_start))
         return {
             "video_path": out_file.resolve(),
             "title": job.get("title", f"YouTube_{vid_id}"),
             "duration": get_video_duration(out_file) or (end_time - start_time),
             "height": height,
             "is_low_res": 0 < height < MIN_VIDEO_HEIGHT,
+            "segment_start": segment_start,
+            "segment_duration": end_time - start_time,
             "is_local": False,
         }
     except requests.RequestException as e:
@@ -1156,13 +1168,14 @@ def download_clip_segment(
         h = get_video_height(out_path)
         dur = get_video_duration(out_path)
         print(f"  [+] Segment downloaded via Apify fallback ({h}p, {out_path.stat().st_size / (1024*1024):.1f} MB)")
+        segment_start = float(apify_result.get("segment_start", 0.0))
         return {
             'video_path': out_path.resolve(),
             'title': f"clip_{clip_index}",
             'duration': dur or clip_duration,
             'height': h,
             'is_low_res': (0 < h < MIN_VIDEO_HEIGHT),
-            'segment_start': 0.0,
+            'segment_start': segment_start,
             'segment_duration': clip_duration,
             'is_local': False,
         }

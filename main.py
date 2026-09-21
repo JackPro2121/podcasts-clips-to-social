@@ -145,8 +145,8 @@ def run_pipeline(
             clip_path = clip_info['video_path']
             clip_duration = moment.end_time - moment.start_time
 
-            render_start = 0.0
-            render_end = clip_duration
+            render_start = float(clip_info.get("segment_start", 0.0))
+            render_end = render_start + clip_duration
 
             if framing_mode == "auto":
                 print("[*] Running AI Face Detection & Speaker Tracking on segment...")
