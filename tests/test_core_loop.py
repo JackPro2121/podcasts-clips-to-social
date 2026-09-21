@@ -118,6 +118,42 @@ class TestDownloaderClassification(unittest.TestCase):
                 self.assertAlmostEqual(result["segment_start"], 0.4, places=2)
                 self.assertEqual(result["height"], 1080)
 
+    def test_download_clip_segment_prioritizes_apify(self):
+        from unittest.mock import patch, MagicMock
+        from src.downloader import download_clip_segment
+        import tempfile
+
+        fake_apify_res = {
+            "video_path": Path("clip_apify.mp4"),
+            "segment_start": 0.25,
+            "duration": 30.0,
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir)
+            with patch("src.downloader.APIFY_API_TOKEN", "dummy-apify-token"), \
+                 patch("src.downloader.download_via_apify", return_value=fake_apify_res) as mock_apify, \
+                 patch("src.downloader.get_video_height", return_value=1080), \
+                 patch("src.downloader.get_video_duration", return_value=30.0), \
+                 patch("yt_dlp.YoutubeDL") as mock_ydl:
+                # Provide a dummy file so get_video_height / stat don't fail
+                dummy_file = out_dir / "clip_apify.mp4"
+                dummy_file.write_bytes(b"\x00" * 1024)
+                fake_apify_res["video_path"] = dummy_file
+
+                res = download_clip_segment(
+                    video_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                    start_time=10.25,
+                    end_time=40.25,
+                    clip_index=1,
+                    output_dir=out_dir,
+                )
+                self.assertIsNotNone(res)
+                # Apify must have been called first
+                mock_apify.assert_called_once()
+                # yt-dlp should not be invoked at all when Apify succeeds
+                mock_ydl.assert_not_called()
+                self.assertAlmostEqual(res["segment_start"], 0.25)
+
 
 class TestDiscoveryFilter(unittest.TestCase):
     def test_unknown_duration_is_kept(self):

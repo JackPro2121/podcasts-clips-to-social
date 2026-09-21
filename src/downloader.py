@@ -397,7 +397,13 @@ def download_segment_via_apify(
         vid_id = extract_youtube_id(video_url) or "video"
         out_file = output_dir / f"clip_{vid_id}_{int_start}s_{int_end}s.mp4"
         print(f"[*] Streaming requested Apify segment to {out_file.name}...")
-        with requests.get(direct_url, stream=True, timeout=180) as stream_res:
+
+        # Attach Apify bearer token if downloading from Apify storage/domains
+        stream_headers = {}
+        if "apify.com" in direct_url or "apify.dev" in direct_url:
+            stream_headers = {"Authorization": f"Bearer {token}"}
+
+        with requests.get(direct_url, headers=stream_headers, stream=True, timeout=180) as stream_res:
             stream_res.raise_for_status()
             with open(out_file, "wb") as f:
                 for chunk in stream_res.iter_content(chunk_size=1024 * 1024):
@@ -1090,6 +1096,41 @@ def download_clip_segment(
     section_spec = f"*{start_time:.2f}-{end_time:.2f}"
     print(f"[*] Targeted clip download: segment {section_spec} (~{clip_duration:.0f}s) → {out_file.name}")
 
+    # -------------------------------------------------------------------------
+    # STRATEGY 1: Apify Segment Actor (Primary — bypasses datacenter bot detection)
+    # -------------------------------------------------------------------------
+    if APIFY_API_TOKEN:
+        print(f"[*] Attempting primary segment download via Apify actor ({APIFY_SEGMENT_ACTOR_ID})...")
+        try:
+            apify_result = download_via_apify(
+                video_url=video_url,
+                output_dir=output_dir,
+                start_time=start_time,
+                end_time=end_time,
+            )
+            if apify_result:
+                out_path = Path(apify_result["video_path"])
+                h = get_video_height(out_path)
+                dur = get_video_duration(out_path)
+                print(f"  [+] Segment downloaded via Apify ({h}p, {out_path.stat().st_size / (1024*1024):.1f} MB)")
+                segment_start = float(apify_result.get("segment_start", 0.0))
+                return {
+                    'video_path': out_path.resolve(),
+                    'title': f"clip_{clip_index}",
+                    'duration': dur or clip_duration,
+                    'height': h,
+                    'is_low_res': (0 < h < MIN_VIDEO_HEIGHT),
+                    'segment_start': segment_start,
+                    'segment_duration': clip_duration,
+                    'is_local': False,
+                }
+        except Exception as e:
+            print(f"  [-] Apify segment download failed: {e}. Falling back to yt-dlp...")
+
+    # -------------------------------------------------------------------------
+    # STRATEGY 2: Local yt-dlp Multi-Client Waterfall (Fallback)
+    # -------------------------------------------------------------------------
+    print(f"[*] Attempting segment download via yt-dlp waterfall: {section_spec} (~{clip_duration:.0f}s)...")
     base_opts = {
         'js_runtimes': {'node': {}},
         'outtmpl': str(output_dir / f"clip_{clip_index}_{int(start_time)}s_{int(end_time)}s.%(ext)s"),
@@ -1155,29 +1196,5 @@ def download_clip_segment(
                 return None
             print(f"  [-] Client '{label}' segment download failed ({kind}): {e}")
 
-    print(f"[-] All yt-dlp clients failed for segment {section_spec}. Falling back to Apify...")
-    apify_result = download_via_apify(
-        video_url=video_url,
-        output_dir=output_dir,
-        start_time=start_time,
-        end_time=end_time,
-    )
-    if apify_result:
-        # Map Apify result to the segment result format expected by main.py
-        out_path = Path(apify_result["video_path"])
-        h = get_video_height(out_path)
-        dur = get_video_duration(out_path)
-        print(f"  [+] Segment downloaded via Apify fallback ({h}p, {out_path.stat().st_size / (1024*1024):.1f} MB)")
-        segment_start = float(apify_result.get("segment_start", 0.0))
-        return {
-            'video_path': out_path.resolve(),
-            'title': f"clip_{clip_index}",
-            'duration': dur or clip_duration,
-            'height': h,
-            'is_low_res': (0 < h < MIN_VIDEO_HEIGHT),
-            'segment_start': segment_start,
-            'segment_duration': clip_duration,
-            'is_local': False,
-        }
-    
+    print(f"[-] All segment download strategies failed for {section_spec}.")
     return None
