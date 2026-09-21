@@ -23,6 +23,9 @@ except ImportError:
 from src.config import GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY
 from src.transcriber import TranscriptSegment
 
+# Suppress the non-blocking AFC function-calling advisory notice from google.genai
+warnings.filterwarnings("ignore", message=".*Direct use of automatic function calling.*")
+
 class ViralClipCandidate(BaseModel):
     title: str = Field(description="Catchy viral hook title (under 50 chars)")
     start_time: float = Field(description="Start time in seconds")

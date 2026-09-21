@@ -443,6 +443,18 @@ def main():
         print("!" * 70)
         traceback.print_exc()
         print("\n" + "!" * 70)
+
+        # Automated error observability: dispatch high-priority alert to Slack
+        try:
+            from src.slack_notifier import SlackNotifier
+            notifier = SlackNotifier()
+            notifier.send_error_alert(
+                error_message=f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()[-300:]}",
+                podcast_url=str(target_url)[:100] if target_url else "N/A"
+            )
+        except Exception:
+            pass
+
         sys.exit(1)
 
 if __name__ == "__main__":

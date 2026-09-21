@@ -169,20 +169,44 @@ def extract_youtube_id(url_or_id: str) -> Optional[str]:
 
 def resolve_handle_to_id(handle: str) -> Optional[str]:
     """
-    Resolves a @handle (e.g. @hubermanlab) to a UC... channel ID using yt-dlp.
+    Resolves a @handle (e.g. @hubermanlab) to a UC... channel ID.
+    Tries lightweight direct HTTP search first (fast, avoids tab errors),
+    then falls back to yt-dlp with quiet logging.
     """
-    import yt_dlp
-    # Remove @ if present
     clean_handle = handle.lstrip('@')
-    url = f"https://www.youtube.com/@{clean_handle}/about"
-    
-    ydl_opts = {"quiet": True, "extract_flat": True}
+    # Strategy 1: Direct fast HTTP inspection of channel page
+    try:
+        url = f"https://www.youtube.com/@{clean_handle}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9"
+        }
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            match = re.search(r'itemprop="channelId"\s+content="(UC[\w-]+)"', res.text)
+            if not match:
+                match = re.search(r'"channelId":"(UC[\w-]+)"', res.text)
+            if not match:
+                match = re.search(r'/channel/(UC[\w-]+)', res.text)
+            if match:
+                return match.group(1)
+    except Exception:
+        pass
+
+    # Strategy 2: Fallback to yt-dlp
+    import yt_dlp
+    url = f"https://www.youtube.com/@{clean_handle}"
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "extract_flat": True,
+        "extractor_args": {"youtubetab": {"skip": ["authcheck"]}}
+    }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             return info.get("channel_id")
-    except Exception as e:
-        print(f"[-] Failed to resolve handle {handle}: {e}")
+    except Exception:
         return None
 
 def discover_via_rss(channel_id: str) -> List[Dict[str, Any]]:
