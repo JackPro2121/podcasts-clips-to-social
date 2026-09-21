@@ -108,7 +108,7 @@ MAX_VIDEO_HEIGHT = 1080
 ENABLE_PUNCH_ZOOM = os.getenv("ENABLE_PUNCH_ZOOM", "true").lower() in ("true", "1", "yes")
 ENABLE_TOP_HOOK_BADGE = os.getenv("ENABLE_TOP_HOOK_BADGE", "true").lower() in ("true", "1", "yes")
 HOOK_BADGE_DURATION = float(os.getenv("HOOK_BADGE_DURATION", "4.0"))  # 4-second initial hook retention badge
-HOOK_BADGE_MARGIN_V = int(os.getenv("HOOK_BADGE_MARGIN_V", "250"))    # Safe zone (below YT search UI, above speaker face)
+HOOK_BADGE_MARGIN_V = int(os.getenv("HOOK_BADGE_MARGIN_V", "120"))    # Safe zone (upper safe zone, above speaker face)
 ENABLE_BGM = os.getenv("ENABLE_BGM", "true").lower() in ("true", "1", "yes")  # Breaks audio fingerprinting
 ENABLE_FILM_GRAIN = os.getenv("ENABLE_FILM_GRAIN", "true").lower() in ("true", "1", "yes")  # Breaks visual pHash
 

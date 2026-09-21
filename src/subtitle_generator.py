@@ -10,9 +10,9 @@ from src.transcriber import TranscriptSegment, WordTimestamp
 
 # Default lower-third safe-zone margins per layout (must match generate_ass_header).
 _SAFE_MARGIN_V = {
-    "split_screen": 0,    # centered on the divider (Alignment 5)
-    "blur_stack": 400,    # just below the centered 16:9 panel
-    "single_smooth": 460, # lower-third, clear of the bottom UI overlay
+    "split_screen": 0,    # Centered on the divider (Alignment 5)
+    "blur_stack": 400,    # Just below the centered 16:9 panel
+    "single_smooth": 460, # Lower-third, clear of the bottom UI overlay
 }
 _DEFAULT_MARGIN_V = 460
 
@@ -39,7 +39,8 @@ def format_ass_timestamp(seconds: float) -> str:
 
 def generate_ass_header(
     theme_key: str = "hormozi",
-    layout_mode: str = "single_smooth"
+    layout_mode: str = "single_smooth",
+    watermark_margin_v: Optional[int] = None
 ) -> str:
     """Generates ASS header with custom high-end styling and safe-zone margin."""
     theme = SUBTITLE_THEMES.get(theme_key, SUBTITLE_THEMES["hormozi"])
@@ -53,7 +54,7 @@ def generate_ass_header(
     shadow_d = theme["shadow_depth"]
 
     # Safe Zone Placement:
-    # In split_screen: captions placed right at the middle horizontal divider (center alignment 5)
+    # In split_screen: captions placed right at the middle horizontal divider (center alignment 5, margin_v: 0)
     # In single_smooth, dynamic_cut, or blur_stack: placed strictly in the lower-third safe zone (margin_v: 460)
     # This prevents any overlap with TikTok/Reels/Shorts bottom description, sound title, or comment button.
     if layout_mode == "split_screen":
@@ -65,6 +66,9 @@ def generate_ass_header(
     else:
         alignment = 2  # Bottom Center
         margin_v = 460  # Y = 1460px (76% height, perfectly above bottom 22% UI overlay)
+
+    # Watermark MarginV: dynamically position @allinonepodcastsss right below the purple capsule
+    w_margin_v = watermark_margin_v if watermark_margin_v is not None else (HOOK_BADGE_MARGIN_V + 125)
 
     header = f"""[Script Info]
 Title: Viral Social Captions
@@ -78,7 +82,7 @@ PlayResY: {OUTPUT_HEIGHT}
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,{font_name},{font_size},{primary_col},&H000000FF,{outline_col},{shadow_col},-1,0,0,0,100,100,1.5,0,1,{outline_w},{shadow_d},{alignment},100,100,{margin_v},1
 Style: TopHeader,Montserrat Black,46,&H00FFFFFF,&H000000FF,&H00B86B62,&H00000000,-1,0,0,0,100,100,1.2,0,3,18,0,8,120,120,{HOOK_BADGE_MARGIN_V},1
-Style: Watermark,Arial,28,&H99FFFFFF,&H000000FF,&H99000000,&H00000000,-1,0,0,0,100,100,1.2,0,1,1.5,0.0,8,60,60,335,1
+Style: Watermark,Arial,28,&H99FFFFFF,&H000000FF,&H99000000,&H00000000,-1,0,0,0,100,100,1.2,0,1,1.5,0.0,8,60,60,{w_margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -174,10 +178,20 @@ def create_styled_ass_subtitles(
             dialogue_text = " ".join(word_elements)
             w_mid = (w_start + w_end) / 2
             active_margin_v = get_shot_margin_v(w_mid)
+            if active_margin_v == 0:
+                dialogue_text = "{\\an5}" + dialogue_text
             ass_line = f"Dialogue: 0,{format_ass_timestamp(w_start)},{format_ass_timestamp(w_end)},Default,,0,0,{active_margin_v},,{dialogue_text}"
             lines.append(ass_line)
 
-    header = generate_ass_header(theme_key=theme_key, layout_mode=layout_mode)
+    has_badge = bool(header_title and ENABLE_TOP_HOOK_BADGE)
+    if has_badge:
+        clean_words = re.sub(r'[^\w\s\-\'\,\.\?]', '', (header_title or "").strip().upper()).split()
+        num_lines = 2 if len(clean_words) >= 2 else 1
+        w_margin_v = HOOK_BADGE_MARGIN_V + (125 if num_lines == 2 else 75)
+    else:
+        w_margin_v = HOOK_BADGE_MARGIN_V
+
+    header = generate_ass_header(theme_key=theme_key, layout_mode=layout_mode, watermark_margin_v=w_margin_v)
     dur_str = format_ass_timestamp(clip_end - clip_start)
 
     # Watermark (if configured)
