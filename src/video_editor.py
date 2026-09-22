@@ -239,11 +239,13 @@ def render_viral_clip(
     active_bgm = bgm_path or (AUDIO_ASSETS_DIR / "ambient_lofi_loop.mp3")
     use_bgm = ENABLE_BGM and active_bgm and active_bgm.exists()
 
+    current_input_idx = 0
     input_args = ["-ss", f"{start_time:.2f}", "-t", f"{duration:.2f}", "-i", str(source_video_path)]
     
     bgm_input_idx = None
     if use_bgm:
-        bgm_input_idx = len(input_args) // 2
+        current_input_idx += 1
+        bgm_input_idx = current_input_idx
         input_args.extend(["-stream_loop", "-1", "-i", str(active_bgm)])
 
     # Collect valid SFX cues
@@ -257,9 +259,9 @@ def render_viral_clip(
 
     sfx_indices = []
     for cue_t, sfx_file, s_type in valid_sfx:
-        idx = len(input_args) // 2
+        current_input_idx += 1
         input_args.extend(["-i", str(sfx_file)])
-        sfx_indices.append((idx, cue_t, s_type))
+        sfx_indices.append((current_input_idx, cue_t, s_type))
 
     if has_audio:
         audio_subfilters = []
@@ -267,7 +269,8 @@ def render_viral_clip(
 
         # High-definition vocal chain: 80Hz rumble cut + 3kHz presence + 10kHz air
         voice_filter = (
-            f"[0:a]highpass=f={HIGHPASS_FREQ},"
+            f"[0:a]aformat=channel_layouts=stereo,"
+            f"highpass=f={HIGHPASS_FREQ},"
             f"equalizer=f={VOCAL_PRESENCE_FREQ}:width_type=h:width=1000:g=2.5,"
             f"equalizer=f={VOCAL_AIR_FREQ}:width_type=h:width=2500:g=1.8"
         )
@@ -276,13 +279,13 @@ def render_viral_clip(
             # Dynamic sidechain ducking: voice triggers downward compression on BGM
             audio_subfilters.append(f"{voice_filter},asplit=2[voice][voice_sc]")
             audio_subfilters.append(
-                f"[{bgm_input_idx}:a]volume=-15dB[bgm_pre];"
+                f"[{bgm_input_idx}:a]aformat=channel_layouts=stereo,volume=-15dB[bgm_pre];"
                 f"[bgm_pre][voice_sc]sidechaincompress=threshold=0.07:ratio=6:attack=30:release=350[bgm_duck]"
             )
             mix_inputs.append("[bgm_duck]")
         elif use_bgm:
             audio_subfilters.append(f"{voice_filter}[voice]")
-            audio_subfilters.append(f"[{bgm_input_idx}:a]volume=-22dB[bgm_duck]")
+            audio_subfilters.append(f"[{bgm_input_idx}:a]aformat=channel_layouts=stereo,volume=-22dB[bgm_duck]")
             mix_inputs.append("[bgm_duck]")
         else:
             audio_subfilters.append(f"{voice_filter}[voice]")
@@ -291,7 +294,7 @@ def render_viral_clip(
         for i, (idx, cue_t, s_type) in enumerate(sfx_indices):
             delay_ms = max(0, int(cue_t * 1000))
             vol = "-4dB" if s_type == "whoosh" else "-3dB"
-            audio_subfilters.append(f"[{idx}:a]adelay={delay_ms}|{delay_ms},volume={vol}[sfx_{i}]")
+            audio_subfilters.append(f"[{idx}:a]aformat=channel_layouts=stereo,adelay={delay_ms}|{delay_ms},volume={vol}[sfx_{i}]")
             mix_inputs.append(f"[sfx_{i}]")
 
         if len(mix_inputs) > 1:
@@ -338,7 +341,8 @@ def render_viral_clip(
     )
 
     if result.returncode != 0:
-        print(f"[-] FFmpeg error:\n{result.stderr[-1000:]}")
+        print(f"[-] FFmpeg error:\n{result.stderr[-1500:]}")
+        print(f"[-] FFmpeg complex filter was:\n{combined_filter}")
         raise RuntimeError(f"FFmpeg failed to render clip {output_clip_path.name}")
 
     size_mb = (output_clip_path.stat().st_size / (1024 * 1024)) if output_clip_path.exists() else 0.0

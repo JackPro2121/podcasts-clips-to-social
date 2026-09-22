@@ -483,6 +483,18 @@ class TestPodcastClipperPipeline(unittest.TestCase):
             # Verify amix
             self.assertIn("amix=", cmd_str)
 
+            # Extract filter_complex argument and verify indices match inputs
+            filter_idx = cmd.index("-filter_complex") + 1
+            filter_str = cmd[filter_idx]
+
+            # Count how many -i flags were provided in cmd
+            input_count = cmd.count("-i")
+            # Ensure no referenced audio input [N:a] exceeds the number of -i flags
+            import re
+            referenced_indices = [int(m) for m in re.findall(r"\[(\d+):a\]", filter_str)]
+            for ref_idx in referenced_indices:
+                self.assertLess(ref_idx, input_count, f"Input index [{ref_idx}:a] exceeds total input count {input_count}")
+
             if out_path.exists():
                 out_path.unlink()
 

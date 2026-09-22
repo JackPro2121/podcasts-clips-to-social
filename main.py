@@ -181,18 +181,22 @@ def run_pipeline(
             safe_title = safe_title.replace(" ", "_")[:30]
             out_clip_path = CLIPS_DIR / f"clip_{idx}_{safe_title}.mp4"
 
-            rendered_path = render_viral_clip(
-                source_video_path=clip_path,
-                start_time=render_start,
-                end_time=render_end,
-                output_clip_path=out_clip_path,
-                framing=framing,
-                peak_intensity_segments=getattr(moment, "peak_intensity_segments", []),
-                ass_subtitle_path=ass_path,
-                burn_subtitles=burn_subtitles,
-                sfx_cues=getattr(moment, "sfx_cues", [])
-            )
-            rendered_clips.append({"path": rendered_path, "moment": moment})
+            try:
+                rendered_path = render_viral_clip(
+                    source_video_path=clip_path,
+                    start_time=render_start,
+                    end_time=render_end,
+                    output_clip_path=out_clip_path,
+                    framing=framing,
+                    peak_intensity_segments=getattr(moment, "peak_intensity_segments", []),
+                    ass_subtitle_path=ass_path,
+                    burn_subtitles=burn_subtitles,
+                    sfx_cues=getattr(moment, "sfx_cues", [])
+                )
+                rendered_clips.append({"path": rendered_path, "moment": moment})
+            except Exception as e:
+                print(f"[-] Rendering failed for clip #{idx} ('{moment.title}'): {e}")
+                continue
 
     # ------ BRANCH B: Fallback Full-Download Pipeline ------
     else:

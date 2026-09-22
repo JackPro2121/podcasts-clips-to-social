@@ -369,31 +369,37 @@ def download_segment_via_apify(
             print("[-] Apify segment actor returned no job data.")
             return None
         job = first_item.get("output") if isinstance(first_item.get("output"), dict) else first_item
+        direct_url = job.get("downloadUrl")
         poll_url = job.get("pollUrl")
-        if not poll_url:
-            print("[-] Apify segment actor response did not include pollUrl.")
+
+        if not direct_url and not poll_url:
+            print("[-] Apify segment actor response did not include downloadUrl or pollUrl.")
             return None
 
-        completed = None
-        for attempt in range(100):
-            time.sleep(3)
-            poll = requests.get(poll_url, timeout=20)
-            poll.raise_for_status()
-            completed = poll.json()
-            status = str(completed.get("status", "")).upper()
-            if status == "COMPLETED":
-                break
-            if status in ("FAILED", "ERROR", "CANCELLED"):
-                print(f"[-] Apify segment download ended with {status}.")
+        if not direct_url and poll_url:
+            completed = None
+            for attempt in range(40):
+                time.sleep(3)
+                try:
+                    poll = requests.get(poll_url, timeout=20)
+                    if poll.status_code != 200:
+                        continue
+                    completed = poll.json()
+                    status = str(completed.get("status", "")).upper()
+                    if completed.get("downloadUrl") or status in ("COMPLETED", "DONE", "SUCCESS", "READY", "FINISHED"):
+                        direct_url = completed.get("downloadUrl")
+                        break
+                    if status in ("FAILED", "ERROR", "CANCELLED"):
+                        print(f"[-] Apify segment download ended with {status}.")
+                        return None
+                    if (attempt + 1) % 5 == 0:
+                        print(f"  [*] Still waiting for Apify segment ({attempt + 1}/40, status='{status}')...")
+                except requests.RequestException:
+                    continue
+
+            if not direct_url:
+                print("[-] Apify segment download timed out before completion.")
                 return None
-        if not completed or str(completed.get("status", "")).upper() != "COMPLETED":
-            print("[-] Apify segment download timed out before completion.")
-            return None
-
-        direct_url = completed.get("downloadUrl")
-        if not direct_url:
-            print("[-] Apify segment download completed without a video URL.")
-            return None
         vid_id = extract_youtube_id(video_url) or "video"
         out_file = output_dir / f"clip_{vid_id}_{int_start}s_{int_end}s.mp4"
         print(f"[*] Streaming requested Apify segment to {out_file.name}...")
