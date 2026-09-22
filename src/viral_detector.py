@@ -48,14 +48,15 @@ class ViralClipCandidate(BaseModel):
         description="Key spoken words mapped to relevant visual emojis, e.g. {'money': '💰', 'growth': '🚀'}"
     )
 
-# High-impact viral keywords mapped to emojis for dynamic subtitle graphics
+# High-impact viral keywords mapped to emojis for dynamic subtitle graphics (Finance & Wealth focus)
 DEFAULT_KEYWORD_EMOJIS = {
     "money": "💰", "cash": "💵", "dollar": "💵", "rich": "🤑", "wealth": "💎",
     "growth": "🚀", "grow": "🚀", "scale": "📈", "viral": "🔥", "fire": "🔥",
     "mind": "🧠", "brain": "🧠", "think": "💡", "idea": "💡", "secret": "🤫",
     "stop": "🛑", "danger": "⚠️", "warning": "⚠️", "win": "🏆", "winner": "🏆",
-    "love": "❤️", "time": "⏳", "clock": "⏰", "target": "🎯", "goal": "🎯",
-    "power": "⚡", "energy": "⚡", "game": "🎮", "truth": "💯", "future": "🔮"
+    "debt": "💳", "credit": "💳", "invest": "📊", "stock": "📈", "crypto": "🪙",
+    "bitcoin": "🪙", "profit": "💸", "bank": "🏦", "save": "🐷", "tax": "📝",
+    "million": "💰", "broke": "❌", "rule": "📜", "truth": "💯", "power": "⚡"
 }
 
 class ViralDetectionResponse(BaseModel):
@@ -282,7 +283,7 @@ def parse_clips_json(raw_text: str, segments: List[TranscriptSegment], num_clips
             viral_score=_safe_int(c.get("viral_score", 85), default=85),
             hook_reason=strip_emojis(str(c.get("hook_reason", "High engagement segment"))),
             social_caption=clean_caption,
-            hashtags=clean_hashtags or ["#podcast", "#viral", "#shorts"],
+            hashtags=clean_hashtags or ["#finance", "#money", "#wealth", "#investing", "#financialfreedom"],
             peak_intensity_segments=c.get("peak_intensity_segments", []),
             sfx_cues=clean_sfx,
             keyword_emojis=merged_emojis
@@ -307,16 +308,16 @@ def detect_viral_moments(
     transcript_text = format_transcript_with_timestamps(segments)
 
     prompt = f"""
-You are the world's top viral short-form video editor and content strategist (specializing in TikTok, Instagram Reels, and YouTube Shorts).
+You are the world's top viral short-form video editor and content strategist specializing in Personal Finance, Wealth Creation, Debt Drama, and Investing (on TikTok, Instagram Reels, and YouTube Shorts).
 Your goal is to analyze the following podcast transcript and extract the top {num_clips} most VIRAL standalone moments.
 
 ### VIRALITY CRITERIA:
-1. **Immediate Hook (0-3s)**: The clip MUST start directly on an impactful sentence. Never start on pauses, host chitchat, or filler words ('um', 'uh', 'so', 'you know', 'yeah'). The first 3 seconds decide viral retention on TikTok, YouTube Shorts, and Reels. Start at the exact second the punchline or core story begins.
-2. **High Emotional Intensity or Insight**: Debates, counter-intuitive advice, mind-blowing facts, deep vulnerability, or high humor.
+1. **Immediate Hook (0-3s)**: The clip MUST start directly on an impactful sentence about money, wealth, debt, income, or investing. Never start on pauses, host chitchat, or filler words ('um', 'uh', 'so', 'you know', 'yeah'). The first 3 seconds decide viral retention on TikTok, YouTube Shorts, and Reels. Start at the exact second the core argument begins.
+2. **High Emotional Intensity or Insight**: Heated debt arguments, shocking income numbers, millionaire habits, counter-intuitive financial advice, or psychological money breakdowns.
 3. **Standalone Cohesion**: The clip must make complete sense on its own without needing the rest of the 2-hour podcast.
 4. **Optimal Duration**: Each clip MUST be strictly between 30 and 60 seconds (target: 35-50s).
 5. **Exact Timestamps**: Use the provided transcript timestamps to specify precise start_time and end_time.
-6. **Punchy Curiosity-Gap Title**: Give each clip an engaging, high-CTR hook title in ALL CAPS (e.g., "THE SECRET TO WEALTH IN 2026", "WHY CORTISOL RUINS SLEEP", "DO THIS EVERY SINGLE MORNING"). Max 5-7 words. Never include filler words ("um", "uh", "yeah"), and strictly DO NOT include emojis or special symbols.
+6. **Punchy Curiosity-Gap Title**: Give each clip an engaging, high-CTR hook title in ALL CAPS (e.g., "THE $100,000 CREDIT CARD MISTAKE", "WHY YOU WILL NEVER RETIRE RICH", "THE 3 MONEY RULES OF MILLIONAIRES"). Max 5-7 words. Never include filler words ("um", "uh", "yeah"), and strictly DO NOT include emojis or special symbols.
 7. **STRICTLY NO EMOJIS IN METADATA**: Under NO circumstances use emojis in titles, social captions, or hashtags. Maintain an elite, clean broadcast aesthetic.
 8. **Director Cues**:
    - Identify 1-3 "Peak Intensity" segments for automatic 1.2x zoom. Provide relative start and end seconds.

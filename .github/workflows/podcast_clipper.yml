@@ -15,18 +15,18 @@ on:
         default: ''
         type: string
       niche:
-        description: 'High-CPM Niche for Auto-Discovery (if video_url is empty)'
+        description: 'Target Niche for Auto-Discovery (default: Personal Finance & Wealth)'
         required: false
-        default: 'auto'
+        default: 'finance'
         type: choice
         options:
-          - 'auto'
           - 'finance'
           - 'business'
           - 'ai_tech'
           - 'health_longevity'
           - 'real_estate'
           - 'mindset'
+          - 'auto'
       num_clips:
         description: 'Number of viral clips to extract (1 to 5)'
         required: true
@@ -205,13 +205,13 @@ jobs:
           set -euo pipefail
           args=()
           if [ "$EVENT_NAME" = "schedule" ]; then
-            echo "[*] Triggered by daily schedule! Running automated High-CPM discovery..."
-            args+=(--num-clips 3 --framing auto --subtitle-style hormozi --subtitles auto)
+            echo "[*] Triggered by daily schedule! Running automated High-CPM Finance & Wealth discovery..."
+            args+=(--niche "finance" --num-clips 3 --framing auto --subtitle-style hormozi --subtitles auto)
             args+=(--watermark "@allinonepodcastsss" --post-to-buffer)
           else
             echo "[*] Triggered manually via workflow_dispatch."
             [ -n "${IN_VIDEO_URL:-}" ] && args+=(--url "$IN_VIDEO_URL")
-            args+=(--niche "${IN_NICHE:-auto}")
+            args+=(--niche "${IN_NICHE:-finance}")
             args+=(--num-clips "${IN_NUM_CLIPS:-3}")
             args+=(--framing "${IN_FRAMING:-auto}")
             args+=(--subtitle-style "${IN_SUBTITLE_STYLE:-hormozi}")

@@ -23,28 +23,29 @@ HIGH_CPM_NICHES = {
         "rationale": "Financial institutions, stock brokers, crypto platforms, and credit card companies bid the highest advertising dollars on social media.",
         "channel_urls": [
             "https://www.youtube.com/@TheRamseyShow/videos",
-            "https://www.youtube.com/@MyFirstMillionPod/videos",
             "https://www.youtube.com/@TheIcedCoffeeHour/videos",
+            "https://www.youtube.com/@CalebHammer/videos",
+            "https://www.youtube.com/@MyFirstMillionPod/videos",
             "https://www.youtube.com/@TheMoneyGuyShow/videos",
             "https://www.youtube.com/@GrahamStephan/videos",
+            "https://www.youtube.com/@BiggerPockets/videos",
+            "https://www.youtube.com/@humphreytalks/videos",
+            "https://www.youtube.com/@AndreiJikh/videos",
+            "https://www.youtube.com/@marktilbury/videos",
             "https://www.youtube.com/@InvestorsPodcast/videos",
-            "https://www.youtube.com/@YahooFinance/videos",
-            "https://www.youtube.com/@PBDPodcast/videos",
             "https://www.youtube.com/@DamienTalksMoney/videos",
             "https://www.youtube.com/@Pensioncraft/videos",
-            "https://www.youtube.com/@marktilbury/videos",
-            "https://www.youtube.com/@ThePlainBagel/videos",
-            "https://www.youtube.com/@BenFelixCSI/videos",
-            "https://www.youtube.com/@RaskAustralia/videos",
+            "https://www.youtube.com/@PBDPodcast/videos",
         ],
         "search_queries": [
-            "The Ramsey Show podcast episode",
-            "My First Million podcast full episode",
+            "The Ramsey Show debt free screams episode",
+            "Caleb Hammer Financial Audit episode full",
             "The Iced Coffee Hour podcast episode",
-            "The Money Guy Show full podcast",
-            "BiggerPockets Money Podcast",
-            "We Study Billionaires investor podcast",
-            "Patrick Bet-David PBD podcast episode",
+            "My First Million podcast full episode",
+            "The Money Guy Show full podcast episode",
+            "BiggerPockets Money Podcast episode",
+            "Graham Stephan podcast full episode",
+            "Patrick Bet-David PBD podcast money wealth",
         ]
     },
     "business": {
@@ -276,16 +277,12 @@ def record_history(video_url: str, title: str, niche: str, history_file_path: Op
     except Exception as e:
         print(f"[-] Failed to update history: {e}")
 
-DAY_OF_WEEK_NICHES = [
-    "finance", "ai_tech", "health_longevity", "business", "real_estate", "mindset", "health_longevity"
-]
+DAY_OF_WEEK_NICHES = ["finance"] * 7
 
 def resolve_daily_niche(niche: Optional[str] = None) -> str:
-    if niche and niche in HIGH_CPM_NICHES:
+    if niche and niche in HIGH_CPM_NICHES and niche != "auto":
         return niche
-    import datetime
-    day_idx = datetime.datetime.now(datetime.timezone.utc).weekday()
-    return DAY_OF_WEEK_NICHES[day_idx]
+    return "finance"
 
 def classify_candidate_entry(entry: Dict[str, Any], processed_ids: set) -> Optional[tuple]:
     if not entry:
