@@ -6,31 +6,33 @@ An automated, broadcast-grade pipeline that extracts high-retention viral moment
 
 ## 🌟 Key Capabilities
 
-1. **$0 Budget Architecture**:
-   - **AI Brain**: Google Gemini 1.5/2.5 Flash Free Tier (15 RPM, 1M tokens/min free).
-   - **Instant Transcripts**: Native YouTube caption retrieval (0 compute) + `faster-whisper` CPU int8 fallback.
-   - **Face Tracking & Layouts**: Runs on lightweight CPU OpenCV, no expensive GPU servers needed.
-   - **Free Hosting for Buffer**: Solves Buffer's public URL requirement by uploading clips to **GitHub Releases** using `${{ secrets.GITHUB_TOKEN }}`.
+1. **$0 Budget & Zero-Download Architecture**:
+   - **Targeted Segment Extraction**: Never downloads entire 2GB–4GB long podcasts. Transcripts are evaluated first, and only the 30–50s viral snippet (~15–25MB) is streamed using rotating residential proxies via Apify (`vidkraken/youtube-video-audio-downloader-reliable`), bypassing datacenter bot blocks (`Sign in to confirm you're not a bot`).
+   - **AI Brain**: Google Gemini 1.5/2.5 Flash Free Tier for hook detection and viral scoring.
+   - **Face Tracking & Layouts**: Runs on lightweight CPU OpenCV / YuNet, zero GPU server costs.
+   - **Free Hosting for Buffer**: Uploads clips to **GitHub Releases** for permanent high-bandwidth public MP4 URLs.
    - **Zero-Cost Cloud Runner**: Runs entirely on **GitHub Actions** (2,000 free minutes/month).
 
-2. **Studio-Grade Multi-Speaker & Framing Engine**:
-   - **Single Speaker**: Smooth camera tracking with exponential moving average (no jitter).
-   - **Two Speakers in Wide Shot (Host & Guest)**: Automatically creates a **Dynamic Split-Screen** (Host top 1080x960, Guest bottom 1080x960) with a modern divider bar — the signature viral podcast format.
-   - **Panel / Group Discussions**: Dynamic **Blurred-Stack Layout** (crisp 16:9 centered over an ambient blurred and darkened background, preserving all participants without head cutoffs).
+2. **Studio-Grade Video Editing & Audio Mastering**:
+   - **Dynamic Audio Sidechain Ducking**: Voice automatically triggers downward compression on background music (`sidechaincompress`), ensuring crisp speech clarity with cinema-level polish.
+   - **Precision SFX Sound Design**: Millisecond-accurate sound effects (`whoosh.wav`, `pop.wav`, `ding.wav`) synchronized with kinetic hooks and text pops.
+   - **Broadcast Audio Standards**: 80Hz rumble highpass filter, +2.5dB vocal presence boost at 3kHz, and EBU R128 (-14 LUFS / -1.5 dBTP) normalization.
 
-3. **Universal Social Media Safe-Zone Compliance**:
-   - Strictly optimized for **TikTok, Instagram Reels, Facebook Reels, and YouTube Shorts** (1080x1920).
-   - Captions and focal action are placed in the safe zone (avoiding like/share buttons, account handles, search bars, and audio discs).
-
-4. **Studio Audio Mastering**:
-   - **80Hz High-Pass Filter**: Removes room rumble and desk vibrations.
-   - **3000Hz Voice Presence EQ**: Lifts vocal clarity and intelligibility.
-   - **EBU R128 (-14 LUFS / -1.5 dBTP)**: Broadcast-standard loudness normalization matching official Reels and TikTok specifications.
-
-5. **Ultra-Premium Animated Subtitle Themes**:
-   - **High-Retention Pacing**: Displays only 2–4 words at a time.
-   - **Word-Level Karaoke Animation**: The spoken word pops with color as it is uttered.
+3. **Kinetic Bounce Subtitles & Contextual Emojis**:
+   - **Kinetic Pop Animation**: High-energy spring scaling (`\t(0,70,\fscx118\fscy118)`) for maximum retention.
+   - **Dynamic Keyword Emojis**: High-CPM keywords trigger relevant emojis (`money` 💰, `debt` 💸, `invest` 📈, `bank` 🏦, `tax` 🏛️, `salary` 💼).
+   - **Safe-Zone Compliance**: Formatted strictly within mobile UI safe boundaries (avoiding buttons and handles).
    - Themes: `hormozi` (Yellow & White), `neon_green`, `luxury_gold`, and `cyber_cyan`.
+
+4. **100% Hyper-Focused Niche: Personal Finance & Wealth**:
+   - Locked entirely around top-earning US/UK finance content: Caleb Hammer (*Financial Audit*), The Ramsey Show, The Iced Coffee Hour, My First Million, The Money Guy Show, Humphrey Yang, and BiggerPockets.
+   - Viral detection prompt specifically tuned for debt confessions, net worth reveals, and high-stakes financial drama.
+
+5. **AI Active Speaker & Dynamic Framing**:
+   - **Single Speaker**: Smooth camera tracking with exponential moving average (EMA).
+   - **Active Speaker Mouth Tracking**: CPU-based mouth motion detection dynamically selects between solo framing and dual-speaker split screen.
+   - **Two Speakers in Wide Shot**: Dynamic Split-Screen (Host top 1080x960, Guest bottom 1080x960) with divider bar.
+   - **Group Panels**: Ambient Blurred-Stack layout (16:9 centered over blurred canvas).
 
 ---
 

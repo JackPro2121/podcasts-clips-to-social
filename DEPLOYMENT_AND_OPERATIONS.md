@@ -39,7 +39,9 @@ Navigate to your GitHub repository:
      - `luxury_gold`: Warm Gold accent + Ivory text.
      - `cyber_cyan`: Electric Cyan accent + Pure White text.
    - **Subtitles Mode**: `auto` (burn captions), `skip` (if video already has captions baked-in).
+   - **Niche**: `finance` (Default, locked for maximum CPM/RPM), or specify another category.
    - **Post to Buffer**: Check `true` to auto-schedule across your social channels.
+> ⚡ **Zero Full-Video Download**: The workflow only fetches captions first and then streams only the 30–50s segment (~15–25MB) using Apify rotating proxies, running in under 2 minutes per clip with zero bot blocks!
 4. Click **Run workflow**.
 
 ---

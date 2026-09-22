@@ -7,15 +7,13 @@ Welcome agent / developer. This document establishes the operational rules, tech
 ## 🎯 Repository Purpose & Mission
 
 This repository provides a **$0-budget, automated, broadcast-grade pipeline** that:
-1. Ingests full-length YouTube podcasts via Apify Actor proxies (bypassing cloud datacenter bot-detection).
-2. Transcribes dialogue with word-level precision (native transcript or `faster-whisper` CPU int8).
-3. Evaluates high-retention viral moments (30–60s) using Google Gemini 1.5 Flash Free Tier.
-4. Detects active speakers and frames them in 9:16 portrait (1080x1920) with smooth panning, dynamic host/guest split-screen stacking, or blurred-stack layouts.
-5. Burns studio-grade animated karaoke subtitles (`hormozi`, `neon_green`, `luxury_gold`, `cyber_cyan`) placed strictly inside social media UI safe zones.
-6. Masters audio to broadcast standards: 80Hz rumble cut, voice presence boost (3kHz), and EBU R128 (-14 LUFS / -1.5 dBTP) normalization.
-7. Uploads clips permanently for $0 to GitHub Releases as downloadable MP4 assets.
-8. Automatically schedules posts across TikTok, Instagram Reels, YouTube Shorts, and X/Twitter via Buffer GraphQL API.
-9. Automatically auto-deletes releases and assets older than 5 days to prevent storage bloat.
+1. **Hyper-Focuses on Finance & Wealth**: Locks channel auto-discovery, Gemini prompts, and hashtags to top-earning personal finance, debt drama, and wealth creation podcasts (Caleb Hammer, Ramsey, Graham Stephan, Humphrey Yang, My First Million).
+2. **Zero Full-Video Download**: Ingests transcripts first (0 video bytes), identifies high-retention 30–60s windows, and streams *only* the targeted snippet (~15–25MB) via Apify residential proxy actors (`vidkraken/youtube-video-audio-downloader-reliable`), eliminating datacenter bot-blocks (`Sign in to confirm you're not a bot`).
+3. **Studio Sound Design & Sidechain Ducking**: Mixes vocal presence (+2.5dB at 3kHz), 80Hz rumble cut, dynamic voice sidechain ducking on BGM (`sidechaincompress`), millisecond-accurate SFX cues (`whoosh`, `pop`, `ding`), and EBU R128 (-14 LUFS / -1.5 dBTP) normalization.
+4. **Kinetic Subtitles & Emoji Hook Caps**: Burns word-by-word spring-bounce subtitles (`\t(0,70,\fscx118\fscy118)`) with contextual finance emojis (💰, 💸, 📈, 🏦) placed strictly within mobile UI safe zones.
+5. **AI Active Speaker Tracking**: Employs OpenCV YuNet on CPU to detect active speaker mouth motion, dynamically choosing between solo 9:16 portrait and dual-speaker split screen.
+6. **Free Release Hosting & Buffer Posting**: Uploads clips permanently for $0 to GitHub Releases and dispatches direct public video URLs across TikTok, Instagram Reels, YouTube Shorts, and X via Buffer GraphQL API.
+7. **Storage Hygiene**: Automatically deletes releases and assets older than 5 days.
 
 ---
 
@@ -110,6 +108,9 @@ python -m unittest discover -s tests
 
 1. **Zero-Cost Constraint**: All components must remain within free tier allocations (Gemini Flash Free API, GitHub Actions runners, GitHub Releases asset hosting, Apify cheap pay-per-event).
 2. **Safe-Zone Compliance**: Never place subtitles outside the safe zone (Y: 60–72% or center divider on split screen). UI buttons on TikTok/Reels will obscure anything in the lower 20% or right 15%.
-3. **Audio Integrity**: Always master audio to EBU R128 (-14 LUFS, -1.5 dBTP) with 80Hz highpass rumble cut. Never push volume above -1.0 dBTP to avoid distortion upon social media re-compression.
-4. **Permanent Direct Video URLs**: Buffer's API requires a publicly accessible video URL. Video assets uploaded to GitHub Releases provide permanent, high-bandwidth public direct URLs.
-5. **Storage Hygiene**: Always ensure the 5-day release cleanup routine is active to avoid accumulation of multi-gigabyte video files in GitHub Releases.
+3. **Audio Integrity & Sidechain Balancing**: Always master audio to EBU R128 (-14 LUFS, -1.5 dBTP) with 80Hz highpass rumble cut. Ensure background music is dynamically ducked when voice is present and maintain stereo stream formatting across all mixed inputs.
+4. **Deterministic FFmpeg Stream Indexing**: Never compute `-filter_complex` stream indices with heuristic division. Maintain an integer counter that increments with each `-i` flag to strictly match FFmpeg's 0-indexed input stream references (`[0:a]`, `[1:a]`, `[2:a]`, ...).
+5. **Targeted Segment Extraction**: Never attempt to download full multi-gigabyte podcast videos on GitHub Actions. Evaluate captions first and extract only the 30–60s clip window via Apify or range-limited yt-dlp.
+6. **Isolated Per-Clip Failure Recovery**: Always wrap clip rendering in isolated `try/except` handlers so a failure in a single clip does not abort the entire batch of clips.
+7. **Permanent Direct Video URLs**: Buffer's API requires a publicly accessible video URL. Video assets uploaded to GitHub Releases provide permanent, high-bandwidth public direct URLs.
+8. **Storage Hygiene**: Always ensure the 5-day release cleanup routine is active to avoid accumulation of multi-gigabyte video files in GitHub Releases.

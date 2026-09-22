@@ -14,16 +14,22 @@ A strategic guide to selecting, clipping, and monetizing podcasts in the highest
 
 ## 🏆 Top 5 High-CPM Podcast Niches Ranked
 
-### 1. 💰 Personal Finance, Investing & Wealth Building
+### 1. 💰 Personal Finance, Investing & Wealth Building *(LOCKED PROJECT DEFAULT)*
+> 🔒 **Official Project Strategy**: This repository is 100% locked to Personal Finance & Wealth Building for automated discovery, Gemini hook prompts, and scheduled social distribution to capture the highest short-form RPM ($2.50–$7.00+) and maximum US/UK audience retention.
+
 - **Estimated CPM**: **$30.00 – $65.00+**
 - **Estimated RPM**: **$2.50 – $7.00+**
 - **Why Advertisers Pay Top Dollar**:
   Banks, investment brokerages (Robinhood, Webull, Charles Schwab), cryptocurrency exchanges, credit card providers, and budgeting software have massive customer lifetime values (LTV). Acquiring one funded account is worth hundreds to thousands of dollars to them.
 - **Top Channels with Active Audiences**:
+  - **Caleb Hammer (Financial Audit)** (`@CalebHammer`): Insane viral retention, dramatic debt confrontations, and credit card emergencies.
   - **The Ramsey Show** (`@TheRamseyShowEpisodes`): High emotional debt-free calls, intense financial debates.
-  - **My First Million** (`@MyFirstMillionPod`): Sam Parr & Shaan Puri brainstorming business opportunities.
   - **The Iced Coffee Hour** (`@TheIcedCoffeeHour`): Graham Stephan & Jack Selby breaking down creator incomes.
+  - **My First Million** (`@MyFirstMillionPod`): Sam Parr & Shaan Puri brainstorming business opportunities.
   - **The Money Guy Show** (`@MoneyGuyShow`): Technical financial planning and retirement formulas.
+  - **Humphrey Yang** (`@humphrey`): High-clarity financial concepts, tax loopholes, and salary breakdowns.
+  - **Andrei Jikh** (`@AndreiJikh`): Dividend investing, crypto macro, and wealth management.
+  - **Mark Tilbury** (`@marktilbury`): Millionaire habits, negotiation tactics, and business tips.
   - **BiggerPockets Money**: F.I.R.E. movement, saving tactics, and index fund investing.
 - **Proven Hook Patterns**:
   - *"If you have less than $10,000 in your bank account, you need to hear this..."*
