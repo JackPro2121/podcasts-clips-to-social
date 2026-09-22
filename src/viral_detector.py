@@ -39,6 +39,24 @@ class ViralClipCandidate(BaseModel):
         default_factory=list, 
         description="Segments within the clip (relative to start_time) where emotional intensity peaks, for automatic 1.2x zoom. Format: [[start, end], ...]"
     )
+    sfx_cues: List[Tuple[float, str]] = Field(
+        default_factory=list,
+        description="Sound effect triggers relative to clip start: [[timestamp_sec, 'whoosh'|'pop'|'ding'], ...]"
+    )
+    keyword_emojis: dict[str, str] = Field(
+        default_factory=dict,
+        description="Key spoken words mapped to relevant visual emojis, e.g. {'money': '💰', 'growth': '🚀'}"
+    )
+
+# High-impact viral keywords mapped to emojis for dynamic subtitle graphics
+DEFAULT_KEYWORD_EMOJIS = {
+    "money": "💰", "cash": "💵", "dollar": "💵", "rich": "🤑", "wealth": "💎",
+    "growth": "🚀", "grow": "🚀", "scale": "📈", "viral": "🔥", "fire": "🔥",
+    "mind": "🧠", "brain": "🧠", "think": "💡", "idea": "💡", "secret": "🤫",
+    "stop": "🛑", "danger": "⚠️", "warning": "⚠️", "win": "🏆", "winner": "🏆",
+    "love": "❤️", "time": "⏳", "clock": "⏰", "target": "🎯", "goal": "🎯",
+    "power": "⚡", "energy": "⚡", "game": "🎮", "truth": "💯", "future": "🔮"
+}
 
 class ViralDetectionResponse(BaseModel):
     clips: List[ViralClipCandidate]
@@ -229,6 +247,33 @@ def parse_clips_json(raw_text: str, segments: List[TranscriptSegment], num_clips
         raw_hashtags = c.get("hashtags", ["#podcast", "#viral", "#shorts"])
         clean_hashtags = [strip_emojis(str(h)).strip() for h in raw_hashtags if strip_emojis(str(h)).strip()]
 
+        # Extract or synthesize sfx_cues
+        raw_sfx = c.get("sfx_cues", [])
+        clean_sfx = []
+        for s in raw_sfx:
+            if isinstance(s, (list, tuple)) and len(s) == 2:
+                try:
+                    s_t = float(s[0])
+                    s_type = str(s[1]).lower().strip()
+                    if s_type in ("whoosh", "pop", "ding"):
+                        clean_sfx.append((s_t, s_type))
+                except (ValueError, TypeError):
+                    continue
+
+        # If no SFX cues provided, synthesize intelligent defaults based on peak segments
+        if not clean_sfx:
+            clean_sfx.append((0.1, "whoosh"))  # Intro hook transition
+            for p_seg in c.get("peak_intensity_segments", []):
+                if isinstance(p_seg, (list, tuple)) and len(p_seg) >= 1:
+                    clean_sfx.append((float(p_seg[0]), "whoosh"))
+            if dur > 15:
+                clean_sfx.append((round(dur - 2.0, 1), "ding"))
+
+        raw_kw_emojis = c.get("keyword_emojis", {})
+        merged_emojis = dict(DEFAULT_KEYWORD_EMOJIS)
+        if isinstance(raw_kw_emojis, dict):
+            merged_emojis.update({k.lower().strip(): str(v).strip() for k, v in raw_kw_emojis.items()})
+
         candidate = ViralClipCandidate(
             title=candidate_title or "VIRAL MOMENT",
             start_time=start,
@@ -238,7 +283,9 @@ def parse_clips_json(raw_text: str, segments: List[TranscriptSegment], num_clips
             hook_reason=strip_emojis(str(c.get("hook_reason", "High engagement segment"))),
             social_caption=clean_caption,
             hashtags=clean_hashtags or ["#podcast", "#viral", "#shorts"],
-            peak_intensity_segments=c.get("peak_intensity_segments", [])
+            peak_intensity_segments=c.get("peak_intensity_segments", []),
+            sfx_cues=clean_sfx,
+            keyword_emojis=merged_emojis
         )
         candidates.append(candidate)
 
@@ -270,8 +317,11 @@ Your goal is to analyze the following podcast transcript and extract the top {nu
 4. **Optimal Duration**: Each clip MUST be strictly between 30 and 60 seconds (target: 35-50s).
 5. **Exact Timestamps**: Use the provided transcript timestamps to specify precise start_time and end_time.
 6. **Punchy Curiosity-Gap Title**: Give each clip an engaging, high-CTR hook title in ALL CAPS (e.g., "THE SECRET TO WEALTH IN 2026", "WHY CORTISOL RUINS SLEEP", "DO THIS EVERY SINGLE MORNING"). Max 5-7 words. Never include filler words ("um", "uh", "yeah"), and strictly DO NOT include emojis or special symbols.
-7. **STRICTLY NO EMOJIS**: Under NO circumstances use emojis anywhere in titles, social captions, or hashtags. Maintain an elite, clean broadcast aesthetic.
-8. **Visual Hook Mapping**: For each clip, identify 1-3 "Peak Intensity" segments. These are the absolute high-points of the dialogue (shocking revelations, emotional peaks, punchlines). Provide these as relative timestamps (seconds from the clip's start_time). These will trigger a subtle 1.2x zoom.
+7. **STRICTLY NO EMOJIS IN METADATA**: Under NO circumstances use emojis in titles, social captions, or hashtags. Maintain an elite, clean broadcast aesthetic.
+8. **Director Cues**:
+   - Identify 1-3 "Peak Intensity" segments for automatic 1.2x zoom. Provide relative start and end seconds.
+   - Suggest sound effect triggers in "sfx_cues": e.g. [[0.1, "whoosh"], [15.2, "pop"], [32.0, "ding"]].
+   - Select 2-5 high-impact keywords for "keyword_emojis" (e.g. {{"money": "💰", "focus": "🎯"}}).
 
 ### PODCAST TRANSCRIPT:
 {transcript_text}
@@ -289,7 +339,9 @@ Output MUST be valid JSON only matching this schema:
       "hook_reason": "Opens with a shocking contrarian statement about wealth.",
       "social_caption": "This perspective changes everything. Drop your thoughts below.",
       "hashtags": ["#mindset", "#podcast", "#success", "#reels"],
-      "peak_intensity_segments": [[5.0, 12.0], [30.5, 38.0]]
+      "peak_intensity_segments": [[5.0, 12.0], [30.5, 38.0]],
+      "sfx_cues": [[0.1, "whoosh"], [5.0, "whoosh"], [20.4, "pop"], [45.0, "ding"]],
+      "keyword_emojis": {{"wealth": "💰", "mindset": "🧠"}}
     }}
   ]
 }}
@@ -358,14 +410,23 @@ def fallback_rule_based_detector(segments: List[TranscriptSegment], num_clips: i
         else:
             derived_title = f"POWERFUL PODCAST INSIGHT #{i+1}"
         
+        dur = round(end_t - start_t, 1)
+        peaks = [[5.0, 10.0], [20.0, 25.0]] if dur > 30 else [[3.0, 7.0]]
+        sfx = [(0.1, "whoosh"), (peaks[0][0], "whoosh")]
+        if dur > 20:
+            sfx.append((round(dur - 2.0, 1), "ding"))
+
         candidates.append(ViralClipCandidate(
             title=derived_title,
             start_time=round(start_t, 1),
             end_time=round(end_t, 1),
-            duration=round(end_t - start_t, 1),
+            duration=dur,
             viral_score=80 - (i * 5),
             hook_reason="Engaging dialogue section with high-retention speech",
             social_caption=strip_emojis(f"{derived_title}\n\nWhat are your thoughts on this? Let us know below."),
-            hashtags=["#podcast", "#mindset", "#shorts", "#reels", "#viral"]
+            hashtags=["#podcast", "#mindset", "#shorts", "#reels", "#viral"],
+            peak_intensity_segments=peaks,
+            sfx_cues=sfx,
+            keyword_emojis=dict(DEFAULT_KEYWORD_EMOJIS)
         ))
     return candidates

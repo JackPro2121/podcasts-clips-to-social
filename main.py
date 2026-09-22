@@ -173,7 +173,8 @@ def run_pipeline(
                     layout_mode=framing.mode,
                     header_title=moment.title,
                     watermark=watermark,
-                    shots=framing.shots
+                    shots=framing.shots,
+                    keyword_emojis=getattr(moment, "keyword_emojis", None)
                 )
 
             safe_title = "".join(c for c in moment.title if c.isalnum() or c in (" ", "_", "-")).rstrip()
@@ -186,8 +187,10 @@ def run_pipeline(
                 end_time=render_end,
                 output_clip_path=out_clip_path,
                 framing=framing,
+                peak_intensity_segments=getattr(moment, "peak_intensity_segments", []),
                 ass_subtitle_path=ass_path,
-                burn_subtitles=burn_subtitles
+                burn_subtitles=burn_subtitles,
+                sfx_cues=getattr(moment, "sfx_cues", [])
             )
             rendered_clips.append({"path": rendered_path, "moment": moment})
 
@@ -265,7 +268,8 @@ def run_pipeline(
                     layout_mode=framing.mode,
                     header_title=moment.title,
                     watermark=watermark,
-                    shots=framing.shots
+                    shots=framing.shots,
+                    keyword_emojis=getattr(moment, "keyword_emojis", None)
                 )
 
             safe_title = "".join(c for c in moment.title if c.isalnum() or c in (" ", "_", "-")).rstrip()
@@ -278,8 +282,10 @@ def run_pipeline(
                 end_time=moment.end_time,
                 output_clip_path=out_clip_path,
                 framing=framing,
+                peak_intensity_segments=getattr(moment, "peak_intensity_segments", []),
                 ass_subtitle_path=ass_path,
-                burn_subtitles=burn_subtitles
+                burn_subtitles=burn_subtitles,
+                sfx_cues=getattr(moment, "sfx_cues", [])
             )
             rendered_clips.append({"path": rendered_path, "moment": moment})
 

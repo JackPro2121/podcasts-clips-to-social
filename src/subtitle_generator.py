@@ -99,11 +99,13 @@ def create_styled_ass_subtitles(
     layout_mode: str = "single_smooth",
     header_title: Optional[str] = None,
     watermark: Optional[str] = None,
-    shots: Optional[List[Any]] = None
+    shots: Optional[List[Any]] = None,
+    keyword_emojis: Optional[Dict[str, str]] = None
 ) -> Path:
     """
     Generates word-level animated karaoke-style ASS subtitles for a specific clip window.
-    Dynamically positions subtitles based on active shot layout (e.g. margin_v=420 during slides).
+    Dynamically positions subtitles based on active shot layout (e.g. margin_v=420 during slides),
+    with kinetic bounce pops and contextual emoji injection.
     """
     theme = SUBTITLE_THEMES.get(theme_key, SUBTITLE_THEMES["hormozi"])
     max_words = theme.get("max_words_per_line", 3)
@@ -156,6 +158,8 @@ def create_styled_ass_subtitles(
     # Group words into short punchy batches of 2-4 words
     lines: List[str] = []
     i = 0
+    emoji_lookup = {k.lower().strip(): v for k, v in (keyword_emojis or {}).items()}
+
     while i < len(clip_words):
         chunk = clip_words[i:i + max_words]
         i += max_words
@@ -172,7 +176,12 @@ def create_styled_ass_subtitles(
             word_elements = []
             for idx, w in enumerate(chunk):
                 if idx == active_idx:
-                    word_elements.append(f"{{\\c{highlight_color}\\t(0,80,\\fscx112\\fscy112)\\t(80,160,\\fscx100\\fscy100)}}{w.word}{{\\c{primary_color}\\fscx100\\fscy100}}")
+                    matched_emoji = emoji_lookup.get(w.word.lower(), "")
+                    emoji_suffix = f" {matched_emoji}" if matched_emoji else ""
+                    # High-energy kinetic bounce animation: 118% scale pop returning to 100%
+                    word_elements.append(
+                        f"{{\\c{highlight_color}\\t(0,70,\\fscx118\\fscy118)\\t(70,140,\\fscx100\\fscy100)}}{w.word}{emoji_suffix}{{\\c{primary_color}\\fscx100\\fscy100}}"
+                    )
                 else:
                     word_elements.append(w.word)
 

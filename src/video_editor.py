@@ -6,7 +6,8 @@ from typing import Optional, Dict, Any, List, Tuple
 from src.config import (
     OUTPUT_WIDTH, OUTPUT_HEIGHT, FPS, VIDEO_CRF, AUDIO_BITRATE,
     TARGET_LUFS, TARGET_TRUE_PEAK, HIGHPASS_FREQ, VOCAL_PRESENCE_FREQ, VOCAL_AIR_FREQ, CLIPS_DIR,
-    ENABLE_PUNCH_ZOOM, ENABLE_BGM, AUDIO_ASSETS_DIR, ENABLE_FILM_GRAIN, IS_CI
+    ENABLE_PUNCH_ZOOM, ENABLE_BGM, AUDIO_ASSETS_DIR, ENABLE_FILM_GRAIN, IS_CI,
+    SFX_ASSETS_DIR, ENABLE_SFX, ENABLE_DYNAMIC_DUCKING
 )
 from src.face_tracker import FramingDecision, ShotPlan
 
@@ -213,7 +214,8 @@ def render_viral_clip(
     peak_intensity_segments: List[Tuple[float, float]] = [],
     ass_subtitle_path: Optional[Path] = None,
     burn_subtitles: bool = True,
-    bgm_path: Optional[Path] = None
+    bgm_path: Optional[Path] = None,
+    sfx_cues: List[Tuple[float, str]] = []
 ) -> Path:
     duration = end_time - start_time
     output_clip_path.parent.mkdir(parents=True, exist_ok=True)
@@ -238,19 +240,70 @@ def render_viral_clip(
     use_bgm = ENABLE_BGM and active_bgm and active_bgm.exists()
 
     input_args = ["-ss", f"{start_time:.2f}", "-t", f"{duration:.2f}", "-i", str(source_video_path)]
+    
+    bgm_input_idx = None
     if use_bgm:
+        bgm_input_idx = len(input_args) // 2
         input_args.extend(["-stream_loop", "-1", "-i", str(active_bgm)])
 
-    if has_audio and use_bgm:
-        combined_filter = (
-            f"{video_filters};"
-            f"[0:a]highpass=f={HIGHPASS_FREQ},equalizer=f={VOCAL_PRESENCE_FREQ}:width_type=h:width=1000:g=2.5,equalizer=f={VOCAL_AIR_FREQ}:width_type=h:width=2500:g=1.8[voice];"
-            f"[1:a]volume=-22dB[bgm_duck];"
-            f"[voice][bgm_duck]amix=inputs=2:duration=first:dropout_transition=2,loudnorm=I={TARGET_LUFS}:TP={TARGET_TRUE_PEAK}:LRA=11[outa]"
+    # Collect valid SFX cues
+    valid_sfx = []
+    if ENABLE_SFX and sfx_cues:
+        for cue_t, s_type in sfx_cues:
+            if 0.0 <= cue_t < duration:
+                sfx_file = SFX_ASSETS_DIR / f"{s_type}.wav"
+                if sfx_file.exists() and len(valid_sfx) < 5:
+                    valid_sfx.append((cue_t, sfx_file, s_type))
+
+    sfx_indices = []
+    for cue_t, sfx_file, s_type in valid_sfx:
+        idx = len(input_args) // 2
+        input_args.extend(["-i", str(sfx_file)])
+        sfx_indices.append((idx, cue_t, s_type))
+
+    if has_audio:
+        audio_subfilters = []
+        mix_inputs = ["[voice]"]
+
+        # High-definition vocal chain: 80Hz rumble cut + 3kHz presence + 10kHz air
+        voice_filter = (
+            f"[0:a]highpass=f={HIGHPASS_FREQ},"
+            f"equalizer=f={VOCAL_PRESENCE_FREQ}:width_type=h:width=1000:g=2.5,"
+            f"equalizer=f={VOCAL_AIR_FREQ}:width_type=h:width=2500:g=1.8"
         )
-        map_args = ["-map", "[outv]", "-map", "[outa]"]
-    elif has_audio:
-        combined_filter = f"{video_filters};[0:a]{audio_filters}[outa]"
+
+        if use_bgm and ENABLE_DYNAMIC_DUCKING:
+            # Dynamic sidechain ducking: voice triggers downward compression on BGM
+            audio_subfilters.append(f"{voice_filter},asplit=2[voice][voice_sc]")
+            audio_subfilters.append(
+                f"[{bgm_input_idx}:a]volume=-15dB[bgm_pre];"
+                f"[bgm_pre][voice_sc]sidechaincompress=threshold=0.07:ratio=6:attack=30:release=350[bgm_duck]"
+            )
+            mix_inputs.append("[bgm_duck]")
+        elif use_bgm:
+            audio_subfilters.append(f"{voice_filter}[voice]")
+            audio_subfilters.append(f"[{bgm_input_idx}:a]volume=-22dB[bgm_duck]")
+            mix_inputs.append("[bgm_duck]")
+        else:
+            audio_subfilters.append(f"{voice_filter}[voice]")
+
+        # Process SFX cues with millisecond precision positioning via adelay
+        for i, (idx, cue_t, s_type) in enumerate(sfx_indices):
+            delay_ms = max(0, int(cue_t * 1000))
+            vol = "-4dB" if s_type == "whoosh" else "-3dB"
+            audio_subfilters.append(f"[{idx}:a]adelay={delay_ms}|{delay_ms},volume={vol}[sfx_{i}]")
+            mix_inputs.append(f"[sfx_{i}]")
+
+        if len(mix_inputs) > 1:
+            mix_str = "".join(mix_inputs)
+            audio_subfilters.append(
+                f"{mix_str}amix=inputs={len(mix_inputs)}:duration=first:dropout_transition=2,"
+                f"loudnorm=I={TARGET_LUFS}:TP={TARGET_TRUE_PEAK}:LRA=11[outa]"
+            )
+        else:
+            audio_subfilters.append(f"[voice]loudnorm=I={TARGET_LUFS}:TP={TARGET_TRUE_PEAK}:LRA=11[outa]")
+
+        combined_filter = f"{video_filters};" + ";".join(audio_subfilters)
         map_args = ["-map", "[outv]", "-map", "[outa]"]
     else:
         combined_filter = video_filters
@@ -263,7 +316,8 @@ def render_viral_clip(
         *map_args,
         "-c:v", "libx264",
         "-crf", str(VIDEO_CRF),
-        "-preset", "medium",
+        "-preset", "faster" if IS_CI else "medium",
+        "-threads", "2" if IS_CI else "4",
         "-pix_fmt", "yuv420p",
         "-color_primaries", "bt709",
         "-color_trc", "bt709",
@@ -287,5 +341,6 @@ def render_viral_clip(
         print(f"[-] FFmpeg error:\n{result.stderr[-1000:]}")
         raise RuntimeError(f"FFmpeg failed to render clip {output_clip_path.name}")
 
-    print(f"[+] Clip rendered successfully: {output_clip_path} (Size: {output_clip_path.stat().st_size / (1024*1024):.2f} MB)")
+    size_mb = (output_clip_path.stat().st_size / (1024 * 1024)) if output_clip_path.exists() else 0.0
+    print(f"[+] Clip rendered successfully: {output_clip_path} (Size: {size_mb:.2f} MB)")
     return output_clip_path

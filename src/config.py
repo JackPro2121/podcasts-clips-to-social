@@ -13,6 +13,7 @@ SUBTITLES_DIR = BASE_DIR / "subtitles"
 DATA_DIR = BASE_DIR / "data"
 ASSETS_DIR = BASE_DIR / "assets"
 AUDIO_ASSETS_DIR = ASSETS_DIR / "audio"
+SFX_ASSETS_DIR = ASSETS_DIR / "sfx"
 HISTORY_FILE = DATA_DIR / "history.json"
 
 # Ensure directories exist
@@ -21,6 +22,7 @@ CLIPS_DIR.mkdir(exist_ok=True, parents=True)
 SUBTITLES_DIR.mkdir(exist_ok=True, parents=True)
 DATA_DIR.mkdir(exist_ok=True, parents=True)
 AUDIO_ASSETS_DIR.mkdir(exist_ok=True, parents=True)
+SFX_ASSETS_DIR.mkdir(exist_ok=True, parents=True)
 
 # API Keys & Credentials
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -110,6 +112,8 @@ ENABLE_TOP_HOOK_BADGE = os.getenv("ENABLE_TOP_HOOK_BADGE", "true").lower() in ("
 HOOK_BADGE_DURATION = float(os.getenv("HOOK_BADGE_DURATION", "4.0"))  # 4-second initial hook retention badge
 HOOK_BADGE_MARGIN_V = int(os.getenv("HOOK_BADGE_MARGIN_V", "120"))    # Safe zone (upper safe zone, above speaker face)
 ENABLE_BGM = os.getenv("ENABLE_BGM", "true").lower() in ("true", "1", "yes")  # Breaks audio fingerprinting
+ENABLE_SFX = os.getenv("ENABLE_SFX", "true").lower() in ("true", "1", "yes")  # Transitions & keyword sound design
+ENABLE_DYNAMIC_DUCKING = os.getenv("ENABLE_DYNAMIC_DUCKING", "true").lower() in ("true", "1", "yes")  # Sidechain BGM ducking
 ENABLE_FILM_GRAIN = os.getenv("ENABLE_FILM_GRAIN", "true").lower() in ("true", "1", "yes")  # Breaks visual pHash
 
 # Video & Format Defaults (Ultra HD 60FPS Broadcast Studio)

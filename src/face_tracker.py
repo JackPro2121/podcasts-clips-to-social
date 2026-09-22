@@ -265,6 +265,27 @@ def _skin_tone_center_x(frame: np.ndarray, active_x: int, active_y: int, active_
     except Exception:
         return None
 
+def _estimate_mouth_motion(prev_patch: Optional[np.ndarray], frame: np.ndarray, f: FaceBox) -> Tuple[float, Optional[np.ndarray]]:
+    """Calculates normalized pixel displacement in the mouth region (lower 35% of face box) for active speaker detection."""
+    try:
+        h, w = frame.shape[:2]
+        my1 = max(0, min(h - 1, int(f.y + f.h * 0.62)))
+        my2 = max(my1 + 1, min(h, int(f.y + f.h * 0.98)))
+        mx1 = max(0, min(w - 1, int(f.x + f.w * 0.20)))
+        mx2 = max(mx1 + 1, min(w, int(f.x + f.w * 0.80)))
+        roi = frame[my1:my2, mx1:mx2]
+        if roi.size == 0:
+            return 0.0, None
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        resized = cv2.resize(gray, (32, 24))
+        if prev_patch is None or prev_patch.shape != (24, 32):
+            return 0.0, resized
+        diff = cv2.absdiff(resized, prev_patch)
+        score = float(np.mean(diff))
+        return score, resized
+    except Exception:
+        return 0.0, None
+
 
 def analyze_faces_in_clip(
     video_path: Path,
@@ -298,7 +319,8 @@ def analyze_faces_in_clip(
     detected_cuts = detect_clip_shots(video_path, start_time, end_time, min_shot_duration=0.4)
     print(f"[*] Visual Shot Segmentation: Detected {len(detected_cuts)} distinct camera cuts.")
 
-    timeline_samples: List[Tuple[float, List[FaceBox], bool]] = []
+    timeline_samples: List[Tuple[float, List[FaceBox], bool, List[float]]] = []
+    prev_mouth_patches = [None, None]
     
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
     current_frame = start_frame
@@ -322,7 +344,16 @@ def analyze_faces_in_clip(
 
             faces = detect_faces_in_frame(detector, frame, width, height)
             faces.sort(key=lambda f: f.center_x)
-            timeline_samples.append((rel_t, faces, is_slide))
+
+            mouth_scores: List[float] = []
+            if len(faces) == 2:
+                s1_score, prev_mouth_patches[0] = _estimate_mouth_motion(prev_mouth_patches[0], frame, faces[0])
+                s2_score, prev_mouth_patches[1] = _estimate_mouth_motion(prev_mouth_patches[1], frame, faces[1])
+                mouth_scores = [s1_score, s2_score]
+            else:
+                prev_mouth_patches = [None, None]
+
+            timeline_samples.append((rel_t, faces, is_slide, mouth_scores))
 
         current_frame += 1
 
@@ -335,7 +366,7 @@ def analyze_faces_in_clip(
         )
 
     # Compute global anchor across entire clip for robust temporal anchoring
-    all_cx = [f.center_x for _, flist, _ in timeline_samples for f in flist if active_x <= f.center_x <= active_x + active_w]
+    all_cx = [f.center_x for s in timeline_samples for f in s[1] if active_x <= f.center_x <= active_x + active_w]
     global_anchor_cx = int(np.median(all_cx)) if all_cx else (active_x + active_w // 2)
 
     def is_valid_two_speaker_frame(face_pair: List[FaceBox]) -> bool:
@@ -393,18 +424,54 @@ def analyze_faces_in_clip(
                 crop_h=active_h,
                 margin_v=400
             ))
-        # 2. Dynamic Split-Screen — tight face-relative crops so each pane
-        #    shows only THAT speaker, not the entire wide shot.
+        # 2. Dynamic Split-Screen or Active Solo Speaker — tight face-relative crops
         elif valid_face_samples and (len(two_speaker_samples) / len(valid_face_samples) >= 0.40):
-            s1_cx = int(np.median([f[0].center_x for f in two_speaker_samples]))
-            s2_cx = int(np.median([f[1].center_x for f in two_speaker_samples]))
-            s1_cy = int(np.median([f[0].center_y for f in two_speaker_samples]))
-            s2_cy = int(np.median([f[1].center_y for f in two_speaker_samples]))
-            # Median face dimensions for tight crop scaling
-            s1_fw = int(np.median([f[0].w for f in two_speaker_samples]))
-            s2_fw = int(np.median([f[1].w for f in two_speaker_samples]))
-            s1_fh = int(np.median([f[0].h for f in two_speaker_samples]))
-            s2_fh = int(np.median([f[1].h for f in two_speaker_samples]))
+            # Check for dominant single-speaker speech activity (lip motion)
+            s1_motions = [s[3][0] for s in shot_samples if len(s) > 3 and len(s[3]) == 2]
+            s2_motions = [s[3][1] for s in shot_samples if len(s) > 3 and len(s[3]) == 2]
+            avg_m1 = float(np.mean(s1_motions)) if s1_motions else 0.0
+            avg_m2 = float(np.mean(s2_motions)) if s2_motions else 0.0
+
+            # If Speaker 1 is speaking dominantly (> 2.8x higher activity than Speaker 2)
+            if avg_m1 > 5.5 and avg_m1 > 2.8 * max(1.0, avg_m2):
+                s1_cx = int(np.median([f[0].center_x for f in two_speaker_samples]))
+                crop_x = max(active_x, min(s1_cx - target_crop_w // 2, active_x + active_w - target_crop_w))
+                shot_plans.append(ShotPlan(
+                    start=rel_s,
+                    end=rel_e,
+                    mode='portrait_face',
+                    crop_x=crop_x,
+                    crop_y=active_y,
+                    crop_w=target_crop_w,
+                    crop_h=active_h,
+                    center_y=int(active_y + active_h * 0.35),
+                    margin_v=460
+                ))
+            # If Speaker 2 is speaking dominantly (> 2.8x higher activity than Speaker 1)
+            elif avg_m2 > 5.5 and avg_m2 > 2.8 * max(1.0, avg_m1):
+                s2_cx = int(np.median([f[1].center_x for f in two_speaker_samples]))
+                crop_x = max(active_x, min(s2_cx - target_crop_w // 2, active_x + active_w - target_crop_w))
+                shot_plans.append(ShotPlan(
+                    start=rel_s,
+                    end=rel_e,
+                    mode='portrait_face',
+                    crop_x=crop_x,
+                    crop_y=active_y,
+                    crop_w=target_crop_w,
+                    crop_h=active_h,
+                    center_y=int(active_y + active_h * 0.35),
+                    margin_v=460
+                ))
+            else:
+                s1_cx = int(np.median([f[0].center_x for f in two_speaker_samples]))
+                s2_cx = int(np.median([f[1].center_x for f in two_speaker_samples]))
+                s1_cy = int(np.median([f[0].center_y for f in two_speaker_samples]))
+                s2_cy = int(np.median([f[1].center_y for f in two_speaker_samples]))
+                # Median face dimensions for tight crop scaling
+                s1_fw = int(np.median([f[0].w for f in two_speaker_samples]))
+                s2_fw = int(np.median([f[1].w for f in two_speaker_samples]))
+                s1_fh = int(np.median([f[0].h for f in two_speaker_samples]))
+                s2_fh = int(np.median([f[1].h for f in two_speaker_samples]))
 
             # Tight crop: each pane is 3.5x the face width wide and full active_h tall
             # but capped at 55% of active_w so crops don't overlap / show the other speaker.

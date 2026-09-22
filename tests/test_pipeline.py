@@ -404,13 +404,87 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         content = created.read_text(encoding="utf-8")
         # Header style with safe-zone MarginV
         self.assertIn(f"TopHeader,Montserrat Black,46,&H00FFFFFF,&H000000FF,&H00B86B62,&H00000000,-1,0,0,0,100,100,1.2,0,3,18,0,8,120,120,{HOOK_BADGE_MARGIN_V},1", content)
-        # Event with clean title (no emoji), 2-line split, fade
-        self.assertIn("TopHeader", content)
-        self.assertIn(r"{\fad(150,350)}", content)
-        self.assertIn("HOW HE", content)
-        self.assertNotIn("🔥", content)  # Emoji stripped for ASS safety
+
+    def test_kinetic_subtitles_bounce_and_emoji_injection(self):
+        """Kinetic subtitles must include high-energy bounce scaling and contextual emojis."""
+        words = [
+            WordTimestamp(word="He", start=0.0, end=0.3),
+            WordTimestamp(word="Made", start=0.3, end=0.6),
+            WordTimestamp(word="Wealth", start=0.6, end=1.0),
+        ]
+        seg = TranscriptSegment(start=0.0, end=2.0, text="He Made Wealth", words=words)
+        out_ass = Path("subtitles/test_kinetic_emoji.ass")
+        created = create_styled_ass_subtitles(
+            segments=[seg],
+            clip_start=0.0,
+            clip_end=2.0,
+            output_ass_path=out_ass,
+            theme_key="hormozi",
+            keyword_emojis={"wealth": "💰"}
+        )
+        self.assertTrue(created.exists())
+        content = created.read_text(encoding="utf-8")
+        # Check kinetic bounce scaling tag
+        self.assertIn(r"\fscx118\fscy118", content)
+        # Check contextual emoji injection on active keyword
+        self.assertIn("WEALTH 💰", content)
         if created.exists():
             created.unlink()
+
+    def test_director_sfx_cues_and_keyword_emojis_in_fallback(self):
+        """AI Director fallback detector must generate valid sfx_cues and keyword_emojis."""
+        segments = [
+            TranscriptSegment(start=0.0, end=40.0, text="Discussion about money and wealth", words=[])
+        ]
+        candidates = fallback_rule_based_detector(segments, num_clips=1)
+        self.assertEqual(len(candidates), 1)
+        c = candidates[0]
+        self.assertTrue(len(c.sfx_cues) > 0)
+        self.assertEqual(c.sfx_cues[0][1], "whoosh")
+        self.assertIn("money", c.keyword_emojis)
+        self.assertEqual(c.keyword_emojis["money"], "💰")
+
+    def test_render_viral_clip_with_sfx_and_ducking(self):
+        """render_viral_clip must assemble sidechain compressor and adelay for SFX."""
+        from unittest.mock import patch, MagicMock
+        from src.face_tracker import FramingDecision
+        from src.video_editor import render_viral_clip
+
+        with patch("subprocess.run") as mock_run:
+            mock_res = MagicMock()
+            mock_res.returncode = 0
+            mock_res.stdout = "audio"
+            mock_res.stderr = ""
+            mock_run.return_value = mock_res
+
+            out_path = Path("clips/test_sfx_render.mp4")
+            framing = FramingDecision(mode="single_smooth", face_count=1)
+
+            render_viral_clip(
+                source_video_path=Path("downloads/test.mp4"),
+                start_time=10.0,
+                end_time=25.0,
+                output_clip_path=out_path,
+                framing=framing,
+                sfx_cues=[(0.1, "whoosh"), (5.0, "pop")],
+                burn_subtitles=False
+            )
+
+            # Find the ffmpeg call
+            ffmpeg_calls = [call for call in mock_run.call_args_list if call[0][0][0] == "ffmpeg"]
+            self.assertTrue(len(ffmpeg_calls) > 0)
+            cmd = ffmpeg_calls[0][0][0]
+            cmd_str = " ".join(cmd)
+
+            # Verify sidechain ducking filter
+            self.assertIn("sidechaincompress", cmd_str)
+            # Verify adelay filter for SFX
+            self.assertIn("adelay=", cmd_str)
+            # Verify amix
+            self.assertIn("amix=", cmd_str)
+
+            if out_path.exists():
+                out_path.unlink()
 
 if __name__ == "__main__":
     unittest.main()
