@@ -99,8 +99,8 @@ PlayResY: {OUTPUT_HEIGHT}
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,{font_name},{font_size},{primary_col},&H000000FF,{outline_col},{shadow_col},-1,0,0,0,100,100,1.5,0,1,{outline_w},{shadow_d},{alignment},100,100,{margin_v},1
-Style: TopHeader,Montserrat Black,46,&H00FFFFFF,&H000000FF,&H00B86B62,&H00000000,-1,0,0,0,100,100,1.2,0,3,18,0,8,120,120,{HOOK_BADGE_MARGIN_V},1
-Style: Watermark,Montserrat Black,26,&H88FFFFFF,&H000000FF,&H88000000,&H00000000,-1,0,0,0,100,100,1.2,0,1,1.5,0.0,8,60,60,{w_margin_v},1
+Style: TopHeader,Montserrat Black,42,&H00FFFFFF,&H000000FF,&H00B86B62,&H00000000,-1,0,0,0,100,100,1.2,0,3,11,0,8,100,100,{HOOK_BADGE_MARGIN_V},1
+Style: Watermark,Montserrat Black,24,&H90FFFFFF,&H000000FF,&H90000000,&H00000000,-1,0,0,0,100,100,1.2,0,1,1.5,0.0,7,60,60,90,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -137,8 +137,9 @@ def create_styled_ass_subtitles(
             if w.end >= clip_start and w.start <= clip_end:
                 rel_start = max(0.0, w.start - clip_start)
                 rel_end = max(rel_start + 0.1, min(clip_end - clip_start, w.end - clip_start))
-                clean_word = re.sub(r'^[^\w]+|[^\w]+$', '', w.word.strip())
-                if not clean_word:
+                clean_word = re.sub(r'^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$', '', w.word.strip())
+                # Strictly filter out empty or non-alphanumeric ghost artifacts (e.g. '__', '--', '—')
+                if not clean_word or not any(c.isalnum() for c in clean_word):
                     continue
                 clean_text = clean_word.upper() if uppercase else clean_word
                 clip_words.append(WordTimestamp(

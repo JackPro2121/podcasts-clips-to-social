@@ -403,7 +403,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertTrue(created.exists())
         content = created.read_text(encoding="utf-8")
         # Header style with safe-zone MarginV
-        self.assertIn(f"TopHeader,Montserrat Black,46,&H00FFFFFF,&H000000FF,&H00B86B62,&H00000000,-1,0,0,0,100,100,1.2,0,3,18,0,8,120,120,{HOOK_BADGE_MARGIN_V},1", content)
+        self.assertIn(f"TopHeader,Montserrat Black,42,&H00FFFFFF,&H000000FF,&H00B86B62,&H00000000,-1,0,0,0,100,100,1.2,0,3,11,0,8,100,100,{HOOK_BADGE_MARGIN_V},1", content)
 
     def test_kinetic_subtitles_bounce_and_emoji_injection(self):
         """Kinetic subtitles must include high-energy bounce scaling and contextual emojis."""

@@ -155,11 +155,11 @@ SUBTITLE_THEMES: Dict[str, Dict[str, Any]] = {
         "name": "Hormozi Viral",
         "font_name": "Montserrat Black",
         "fallback_font": "Arial Black",
-        "font_size": 58,
+        "font_size": 66,
         "primary_color": "&H00FFFFFF",      # Crisp White
         "highlight_color": "&H0000E6FF",    # Electric Yellow (&H00BBGGRR: Blue 00, Green E6, Red FF)
         "outline_color": "&H00000000",      # Deep Black Outline
-        "outline_width": 6.0,
+        "outline_width": 6.5,
         "shadow_color": "&H90000000",       # Deep Soft Drop Shadow
         "shadow_depth": 3.5,
         "max_words_per_line": 2,            # Fast-paced punchy 2-word flash
@@ -169,11 +169,11 @@ SUBTITLE_THEMES: Dict[str, Dict[str, Any]] = {
         "name": "Toxic Neon",
         "font_name": "Montserrat Black",
         "fallback_font": "Arial Black",
-        "font_size": 58,
+        "font_size": 66,
         "primary_color": "&H00FFFFFF",      # Crisp White
         "highlight_color": "&H0033FF22",    # Toxic Lime Green
         "outline_color": "&H00000000",
-        "outline_width": 6.0,
+        "outline_width": 6.5,
         "shadow_color": "&HA0000000",
         "shadow_depth": 3.5,
         "max_words_per_line": 2,
@@ -183,11 +183,11 @@ SUBTITLE_THEMES: Dict[str, Dict[str, Any]] = {
         "name": "Luxury Mindset",
         "font_name": "Bebas Neue",
         "fallback_font": "Helvetica",
-        "font_size": 62,
+        "font_size": 68,
         "primary_color": "&H00F5F5F5",      # Ivory White
         "highlight_color": "&H0000D7FF",    # Warm Gold
         "outline_color": "&H00101010",      # Charcoal Deep Outline
-        "outline_width": 5.5,
+        "outline_width": 6.0,
         "shadow_color": "&H80000000",
         "shadow_depth": 3.0,
         "max_words_per_line": 3,
@@ -197,11 +197,11 @@ SUBTITLE_THEMES: Dict[str, Dict[str, Any]] = {
         "name": "Cyber Cyan",
         "font_name": "Anton",
         "fallback_font": "Arial Black",
-        "font_size": 60,
+        "font_size": 66,
         "primary_color": "&H00FFFFFF",      # Crisp White
         "highlight_color": "&H00FFFF00",    # Pure Cyan
         "outline_color": "&H00000000",
-        "outline_width": 6.0,
+        "outline_width": 6.5,
         "shadow_color": "&HA0000000",
         "shadow_depth": 3.5,
         "max_words_per_line": 2,
