@@ -200,52 +200,154 @@ def run_pipeline(
 
     # ------ BRANCH B: Fallback Full-Download Pipeline ------
     else:
+        # Smart Whisper Probe Fallback:
+        # If CLIP_ONLY_MODE is active but no transcript was found, we avoid
+        # downloading the full video. Instead, we probe only the first 10 minutes
+        # via Apify (a targeted range download), run faster-whisper STT on that
+        # short audio probe, detect viral moments from the resulting segments,
+        # then download ONLY those clip segments — keeping the zero-full-download contract.
         if CLIP_ONLY_MODE and is_youtube_url and not is_local_file:
-            raise RuntimeError(
-                "Native captions or viable viral ranges were unavailable. "
-                "Clip-only mode stopped before downloading a full source video."
-            )
-        print("\n--- [3/6] FULL VIDEO DOWNLOAD (Fallback: no transcript / local file) ---")
+            from src.downloader import download_clip_segment, APIFY_API_TOKEN
+            from src.transcriber import transcribe_audio_whisper
+            print("\n[!] No transcript found. Attempting smart Whisper probe (first 10 min via Apify)...")
+            PROBE_END = 600.0  # 10 minutes — enough for viral moment detection
+            probe_info = None
+            if APIFY_API_TOKEN:
+                try:
+                    probe_info = download_clip_segment(
+                        video_url=active_source_url,
+                        start_time=0.0,
+                        end_time=PROBE_END,
+                        clip_index=0,
+                        output_dir=DOWNLOADS_DIR,
+                    )
+                except Exception as e:
+                    print(f"[-] Apify probe download failed: {e}")
+            if probe_info:
+                probe_path = Path(probe_info["video_path"])
+                print(f"[+] Probe downloaded: {probe_path.name} ({probe_path.stat().st_size / (1024*1024):.1f} MB). Running Whisper STT...")
+                try:
+                    segments = transcribe_audio_whisper(probe_path)
+                except Exception as e:
+                    print(f"[-] Whisper STT on probe failed: {e}")
+                    segments = []
+                if segments:
+                    print(f"[+] Whisper produced {len(segments)} segments from probe. Running viral detection...")
+                    viral_moments = detect_viral_moments(segments, num_clips=num_clips)
+                    if viral_moments:
+                        print(f"[+] Viral moments detected from Whisper probe. Downloading {len(viral_moments)} targeted clips...")
+                        DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
+                        rendered_clips = []
+                        for idx, moment in enumerate(viral_moments, 1):
+                            try:
+                                clip_info = download_clip_segment(
+                                    video_url=active_source_url,
+                                    start_time=moment.start_time,
+                                    end_time=moment.end_time,
+                                    clip_index=idx,
+                                    output_dir=DOWNLOADS_DIR,
+                                )
+                                if not clip_info:
+                                    print(f"[-] Targeted clip #{idx} download returned nothing. Skipping.")
+                                    continue
+                                clip_path = Path(clip_info["video_path"])
+                                render_start = 0.0
+                                render_end = moment.end_time - moment.start_time
+                                framing = analyze_faces_in_clip(clip_path, framing_mode)
+                                ass_path = SUBTITLES_DIR / f"probe_clip_{idx}.ass"
+                                burn_subtitles = subtitles_mode != "skip"
+                                if burn_subtitles:
+                                    create_styled_ass_subtitles(
+                                        segments=segments,
+                                        clip_start=moment.start_time,
+                                        clip_end=moment.end_time,
+                                        output_ass_path=ass_path,
+                                        theme_key=subtitle_style,
+                                        layout_mode=framing.mode,
+                                        header_title=moment.title,
+                                        watermark=watermark,
+                                        shots=framing.shots,
+                                        keyword_emojis=getattr(moment, "keyword_emojis", None)
+                                    )
+                                safe_title = "".join(c for c in moment.title if c.isalnum() or c in (" ", "_", "-")).rstrip()
+                                safe_title = safe_title.replace(" ", "_")[:30]
+                                out_clip_path = CLIPS_DIR / f"clip_{idx}_{safe_title}.mp4"
+                                rendered_path = render_viral_clip(
+                                    source_video_path=clip_path,
+                                    start_time=render_start,
+                                    end_time=render_end,
+                                    output_clip_path=out_clip_path,
+                                    framing=framing,
+                                    peak_intensity_segments=getattr(moment, "peak_intensity_segments", []),
+                                    ass_subtitle_path=ass_path,
+                                    burn_subtitles=burn_subtitles,
+                                    sfx_cues=getattr(moment, "sfx_cues", [])
+                                )
+                                rendered_clips.append({"path": rendered_path, "moment": moment})
+                            except Exception as e:
+                                print(f"[-] Probe clip #{idx} failed: {e}")
+                                continue
+                        # Jump to the Buffer/upload section by falling through
+                        # to the rendered_clips handler below (skip the old full-download branch)
+                        pass
+                    else:
+                        print("[-] Whisper probe found no viral moments. Cannot produce clips without captions or viable transcript.")
+                        sys.exit(1)
+                else:
+                    print("[-] Whisper STT produced no segments from probe. Exiting.")
+                    sys.exit(1)
+            else:
+                raise RuntimeError(
+                    "No native captions, Apify transcript, or Apify probe download available. "
+                    "Cannot produce clips without a transcript source."
+                )
+            # Rendered clips from probe path — fall through to Buffer upload section
+            if not rendered_clips:
+                print("[-] No clips rendered from Whisper probe. Exiting.")
+                sys.exit(1)
+        else:
+            print("\n--- [3/6] FULL VIDEO DOWNLOAD (Fallback: no transcript / local file) ---")
 
-        download_info = None
-        for cand_url in candidates:
-            try:
-                print(f"[*] Ingesting video candidate: {cand_url}")
-                download_info = download_video(cand_url)
-                if download_info:
-                    active_source_url = cand_url
-                    break
-            except Exception as e:
-                print(f"[-] Candidate '{cand_url}' download failed: {e}. Trying next candidate...")
+            download_info = None
+            for cand_url in candidates:
+                try:
+                    print(f"[*] Ingesting video candidate: {cand_url}")
+                    download_info = download_video(cand_url)
+                    if download_info:
+                        active_source_url = cand_url
+                        break
+                except Exception as e:
+                    print(f"[-] Candidate '{cand_url}' download failed: {e}. Trying next candidate...")
 
-        if not download_info:
-            print("[-] Fatal: All candidate downloads failed. Exiting.")
-            sys.exit(1)
+            if not download_info:
+                print("[-] Fatal: All candidate downloads failed. Exiting.")
+                sys.exit(1)
 
-        video_path = download_info['video_path']
-        video_title = download_info['title']
-        native_transcript_fb = download_info.get('transcript')
-        print(f"[+] Active video file: {video_path}")
+            video_path = download_info['video_path']
+            video_title = download_info['title']
+            native_transcript_fb = download_info.get('transcript')
+            print(f"[+] Active video file: {video_path}")
 
-        print("\n--- [2b/6] SPEECH-TO-TEXT / TRANSCRIPT EXTRACTION ---")
-        segments = get_transcript(video_path, native_transcript_fb, video_id=download_info.get('video_id'))
-        if not segments:
-            print("[-] Error: Could not obtain transcript for video. Exiting.")
-            sys.exit(1)
+            print("\n--- [2b/6] SPEECH-TO-TEXT / TRANSCRIPT EXTRACTION ---")
+            segments = get_transcript(video_path, native_transcript_fb, video_id=download_info.get('video_id'))
+            if not segments:
+                print("[-] Error: Could not obtain transcript for video. Exiting.")
+                sys.exit(1)
 
-        print("\n--- [3b/6] VIRAL MOMENT HUNTING & HOOK SCORING (Fallback) ---")
-        viral_moments = detect_viral_moments(segments, num_clips=num_clips)
-        if not viral_moments:
-            print("[-] No viral moments detected. Exiting.")
-            sys.exit(1)
+            print("\n--- [3b/6] VIRAL MOMENT HUNTING & HOOK SCORING (Fallback) ---")
+            viral_moments = detect_viral_moments(segments, num_clips=num_clips)
+            if not viral_moments:
+                print("[-] No viral moments detected. Exiting.")
+                sys.exit(1)
 
-        print(f"\n[+] Top {len(viral_moments)} Viral Moments Identified:")
-        for idx, m in enumerate(viral_moments, 1):
-            print(f"   #{idx}: [{m.start_time:.1f}s - {m.end_time:.1f}s] (Virality: {m.viral_score}/100) '{m.title}'")
+            print(f"\n[+] Top {len(viral_moments)} Viral Moments Identified:")
+            for idx, m in enumerate(viral_moments, 1):
+                print(f"   #{idx}: [{m.start_time:.1f}s - {m.end_time:.1f}s] (Virality: {m.viral_score}/100) '{m.title}'")
 
-        print("\n--- [4/6 & 5/6] EDITING, FACE TRACKING, AUDIO MASTERING & RENDERING ---")
-        for idx, moment in enumerate(viral_moments, 1):
-            print(f"\n>>> Processing Clip #{idx}: {moment.title} ({moment.duration:.1f}s)")
+            print("\n--- [4/6 & 5/6] EDITING, FACE TRACKING, AUDIO MASTERING & RENDERING ---")
+            for idx, moment in enumerate(viral_moments, 1):
+                print(f"\n>>> Processing Clip #{idx}: {moment.title} ({moment.duration:.1f}s)")
+
 
             if framing_mode == "auto":
                 print("[*] Running AI Face Detection & Speaker Tracking...")
