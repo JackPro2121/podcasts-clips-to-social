@@ -377,11 +377,12 @@ def download_segment_via_apify(
             return None
 
         if not direct_url and poll_url:
+            poll_headers = {"Authorization": f"Bearer {token}"} if "apify.com" in poll_url else {}
             completed = None
-            for attempt in range(40):
+            for attempt in range(75):
                 time.sleep(3)
                 try:
-                    poll = requests.get(poll_url, timeout=20)
+                    poll = requests.get(poll_url, headers=poll_headers, timeout=20)
                     if poll.status_code != 200:
                         continue
                     completed = poll.json()
@@ -393,7 +394,7 @@ def download_segment_via_apify(
                         print(f"[-] Apify segment download ended with {status}.")
                         return None
                     if (attempt + 1) % 5 == 0:
-                        print(f"  [*] Still waiting for Apify segment ({attempt + 1}/40, status='{status}')...")
+                        print(f"  [*] Still waiting for Apify segment ({attempt + 1}/75, status='{status}')...")
                 except requests.RequestException:
                     continue
 
