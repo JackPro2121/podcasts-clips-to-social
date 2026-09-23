@@ -15,9 +15,10 @@ from src.config import (
     MAX_TRANSCRIPT_FALLBACKS,
 )
 from src.downloader import (
-    download_video, fetch_transcript_only, download_clip_segment, extract_youtube_id
+    download_video, fetch_transcript_only, download_clip_segment, extract_youtube_id,
+    APIFY_API_TOKEN,
 )
-from src.transcriber import get_transcript, TranscriptSegment
+from src.transcriber import get_transcript, TranscriptSegment, transcribe_audio_whisper
 from src.viral_detector import detect_viral_moments
 from src.face_tracker import analyze_faces_in_clip, FramingDecision
 from src.subtitle_generator import create_styled_ass_subtitles
@@ -207,8 +208,6 @@ def run_pipeline(
         # short audio probe, detect viral moments from the resulting segments,
         # then download ONLY those clip segments — keeping the zero-full-download contract.
         if CLIP_ONLY_MODE and is_youtube_url and not is_local_file:
-            from src.downloader import download_clip_segment, APIFY_API_TOKEN
-            from src.transcriber import transcribe_audio_whisper
             print("\n[!] No transcript found. Attempting smart Whisper probe (first 10 min via Apify)...")
             PROBE_END = 600.0  # 10 minutes — enough for viral moment detection
             probe_info = None
