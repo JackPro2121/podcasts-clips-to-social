@@ -104,7 +104,7 @@ jobs:
   clip-and-publish:
     name: Detect Viral Clips, Enhance & Publish
     needs: verify
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 90
 
     steps:
