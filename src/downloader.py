@@ -161,29 +161,58 @@ def fetch_youtube_transcript(video_id: str) -> Optional[List[Dict[str, Any]]]:
     Returns list of dicts: [{'text': str, 'start': float, 'duration': float}]
     """
     raw_snippets = None
-    try:
-        # Try new API (1.x+)
-        api = YouTubeTranscriptApi()
-        if hasattr(api, "fetch"):
-            raw_snippets = api.fetch(video_id)
-        elif hasattr(api, "list"):
-            transcripts = api.list(video_id)
-            for t in transcripts:
-                raw_snippets = t.fetch()
-                break
-    except Exception:
-        pass
 
-    if raw_snippets is None:
+    # Strategy 1: youtube-transcript-api 1.x instance method
+    try:
+        api = YouTubeTranscriptApi()
+        # 1A. Try listing transcripts first (handles en, en-US, generated captions)
+        if hasattr(api, "list"):
+            try:
+                transcript_list = api.list(video_id)
+                try:
+                    t = transcript_list.find_transcript(['en', 'en-US', 'en-GB'])
+                except Exception:
+                    t = next(iter(transcript_list), None)
+                if t:
+                    raw_snippets = t.fetch()
+            except Exception as e:
+                print(f"[*] api.list() attempt note: {e}")
+
+        # 1B. Direct fetch if list() did not succeed
+        if not raw_snippets and hasattr(api, "fetch"):
+            try:
+                raw_snippets = api.fetch(video_id)
+            except Exception as e:
+                print(f"[*] api.fetch() attempt note: {e}")
+    except Exception as e:
+        print(f"[*] YouTubeTranscriptApi initialization note: {e}")
+
+    # Strategy 2: Fallback to legacy static method (0.x)
+    if not raw_snippets:
         try:
-            # Fallback to legacy static method (0.x)
             if hasattr(YouTubeTranscriptApi, "get_transcript"):
-                raw_snippets = YouTubeTranscriptApi.get_transcript(video_id)
-        except Exception as e:
-            print(f"[-] Native YouTube transcript fetch failed ({e}). Will use speech-to-text fallback.")
-            return None
+                raw_snippets = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'en-US'])
+        except Exception:
+            pass
+
+    # Strategy 3: Retry once after a brief pause if rate-limited or challenged
+    if not raw_snippets:
+        time.sleep(2.0)
+        try:
+            api = YouTubeTranscriptApi()
+            if hasattr(api, "list"):
+                t_list = api.list(video_id)
+                try:
+                    t = t_list.find_transcript(['en', 'en-US', 'en-GB'])
+                except Exception:
+                    t = next(iter(t_list), None)
+                if t:
+                    raw_snippets = t.fetch()
+        except Exception:
+            pass
 
     if not raw_snippets:
+        print(f"[-] Native YouTube transcript unavailable for video {video_id}.")
         return None
 
     # Normalize snippets into standard dict format
@@ -1063,17 +1092,44 @@ def fetch_transcript_only(url: str, allow_apify_fallback: bool = False) -> Optio
     """
     Step 0 of the Smart Pipeline: Fetches ONLY the transcript (text) from a
     YouTube video — ZERO video bytes downloaded. Returns transcript + video_id.
-    This is the trigger for Gemini to identify viral moments BEFORE any download.
+
+    Fallback chain (zero video bytes at every tier):
+      Tier 1: YouTubeTranscriptApi  — free, instant, no API key needed
+      Tier 2: Apify transcript actor — cheap, residential proxy (if token set)
+      Tier 3: Chocodata API          — $0.0009/call, bypasses all bot detection
     """
     video_id = extract_youtube_id(url)
     if not video_id:
         return None
+
+    # Tier 1: Native YouTube captions (free)
     transcript = fetch_youtube_transcript(video_id)
+
+    # Tier 2: Apify transcript actor (cheap, residential proxy)
     if not transcript and allow_apify_fallback:
         print("[*] Native captions unavailable. Trying transcript-only Apify fallback...")
         transcript = fetch_transcript_via_apify(url)
+
+    # Tier 3: Chocodata REST API ($0.0009/call — runs even if Apify is down/exhausted)
     if not transcript:
-        print("[!] No timed transcript found. Targeted clip download is unavailable for this source.")
+        try:
+            from src.config import CHOCODATA_API_KEY
+            from src.transcriber import fetch_transcript_chocodata, parse_native_transcript
+            if CHOCODATA_API_KEY:
+                print("[*] Trying Chocodata API as transcript fallback (tier 3)...")
+                choco_segments = fetch_transcript_chocodata(video_id)
+                if choco_segments:
+                    # Convert TranscriptSegment objects back to raw dict format
+                    transcript = [
+                        {"text": s.text, "start": s.start, "duration": s.end - s.start}
+                        for s in choco_segments
+                    ]
+                    print(f"[+] Chocodata returned {len(transcript)} transcript segments.")
+        except Exception as e:
+            print(f"[*] Chocodata transcript fallback note: {e}")
+
+    if not transcript:
+        print("[!] No timed transcript found across all 3 tiers. Targeted clip download unavailable.")
         return None
     return {"video_id": video_id, "transcript": transcript}
 
