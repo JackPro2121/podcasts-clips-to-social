@@ -56,13 +56,14 @@ def format_ass_timestamp(seconds: float) -> str:
 def generate_ass_header(
     theme_key: str = "hormozi",
     layout_mode: str = "single_smooth",
-    watermark_margin_v: Optional[int] = None
+    watermark_margin_v: Optional[int] = None,
+    font_size_override: Optional[int] = None
 ) -> str:
     """Generates ASS header with custom high-end styling and safe-zone margin."""
     theme = SUBTITLE_THEMES.get(theme_key, SUBTITLE_THEMES["hormozi"])
 
     font_name = theme["font_name"]
-    font_size = theme["font_size"]
+    font_size = font_size_override or theme["font_size"]
     primary_col = theme["primary_color"]
     outline_col = theme["outline_color"]
     outline_w = theme["outline_width"]
@@ -85,7 +86,7 @@ def generate_ass_header(
         margin_v = 460  # Y ≈ 1460px (sweet spot: clear of bottom drawer, below mouth)
 
     # Watermark MarginV: dynamically position @allinonepodcastsss right below the purple capsule
-    w_margin_v = watermark_margin_v if watermark_margin_v is not None else (HOOK_BADGE_MARGIN_V + 125)
+    w_margin_v = watermark_margin_v if watermark_margin_v is not None else (HOOK_BADGE_MARGIN_V + 95)
 
     header = f"""[Script Info]
 Title: Viral Social Captions
@@ -162,6 +163,7 @@ def create_styled_ass_subtitles(
     clip_dur = max(1.0, clip_end - clip_start)
     wpm = (len(clip_words) / clip_dur) * 60.0
     effective_max_words = 1 if (wpm > 190 and len(clip_words) > 10) else max_words
+    single_word_font_size = 78 if effective_max_words == 1 else None
 
     base_margin_v = default_margin_v(layout_mode)
 
@@ -180,7 +182,6 @@ def create_styled_ass_subtitles(
     # Group words into short punchy batches of 1-3 words
     lines: List[str] = []
     i = 0
-    emoji_lookup = {k.lower().strip(): v for k, v in (keyword_emojis or {}).items()}
 
     while i < len(clip_words):
         chunk = clip_words[i:i + effective_max_words]
@@ -198,9 +199,6 @@ def create_styled_ass_subtitles(
             word_elements = []
             for idx, w in enumerate(chunk):
                 if idx == active_idx:
-                    matched_emoji = emoji_lookup.get(w.word.lower(), "")
-                    emoji_suffix = f" {matched_emoji}" if matched_emoji else ""
-                    
                     # Semantic word coloring: Money/Numbers = Lime Green, Danger = Red, Power = Gold
                     clean_lower = re.sub(r'[^a-z0-9]', '', w.word.lower())
                     if clean_lower in MONEY_KEYWORDS or any(c.isdigit() for c in w.word) or '$' in w.word:
@@ -213,8 +211,9 @@ def create_styled_ass_subtitles(
                         active_color = highlight_color
 
                     # High-energy kinetic bounce pop: 118% scale punch settling to 100%
+                    # Clean bold typography without unrenderable emoji tofu boxes
                     word_elements.append(
-                        f"{{\\c{active_color}\\t(0,70,\\fscx118\\fscy118)\\t(70,140,\\fscx100\\fscy100)}}{w.word}{emoji_suffix}{{\\c{primary_color}\\fscx100\\fscy100}}"
+                        f"{{\\c{active_color}\\t(0,70,\\fscx118\\fscy118)\\t(70,140,\\fscx100\\fscy100)}}{w.word}{{\\c{primary_color}\\fscx100\\fscy100}}"
                     )
                 else:
                     word_elements.append(w.word)
@@ -229,11 +228,16 @@ def create_styled_ass_subtitles(
     if has_badge:
         clean_words = re.sub(r'[^\w\s\-\'\,\.\?]', '', (header_title or "").strip().upper()).split()
         num_lines = 2 if len(clean_words) >= 2 else 1
-        w_margin_v = HOOK_BADGE_MARGIN_V + (125 if num_lines == 2 else 75)
+        w_margin_v = HOOK_BADGE_MARGIN_V + (95 if num_lines == 2 else 55)
     else:
         w_margin_v = HOOK_BADGE_MARGIN_V
 
-    header = generate_ass_header(theme_key=theme_key, layout_mode=layout_mode, watermark_margin_v=w_margin_v)
+    header = generate_ass_header(
+        theme_key=theme_key,
+        layout_mode=layout_mode,
+        watermark_margin_v=w_margin_v,
+        font_size_override=single_word_font_size
+    )
     dur_str = format_ass_timestamp(clip_end - clip_start)
 
     # Watermark (if configured)

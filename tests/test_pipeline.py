@@ -426,8 +426,9 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         content = created.read_text(encoding="utf-8")
         # Check kinetic bounce scaling tag
         self.assertIn(r"\fscx118\fscy118", content)
-        # Check contextual emoji injection on active keyword
-        self.assertIn("WEALTH 💰", content)
+        # Check clean word rendering without unrenderable emoji tofu boxes
+        self.assertIn("WEALTH", content)
+        self.assertNotIn("💰", content)
         if created.exists():
             created.unlink()
 

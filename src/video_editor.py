@@ -113,12 +113,12 @@ def build_video_filtergraph(
                     eff_h = int(s_ch / zoom)
                     eff_w = int(target_crop_w / zoom)
                     eff_y = max(active_y, min(int(s_cy + (s_ch - eff_h) * 0.28), active_y + active_h - eff_h))
-                    if shot.face_centers_timeline:
-                        points = shot.face_centers_timeline
-                        t_start, x_start = points[0]
-                        t_end, x_end = points[-1]
-                        duration = t_end - t_start if t_end > t_start else 1.0
-                        cx_expr = f"{x_start} + ({x_end}-{x_start})*(t-{t_start})/{duration}"
+                    shot_dur = max(0.5, shot.end - shot.start)
+                    points = shot.face_centers_timeline
+                    if points and len(points) >= 2 and abs(points[-1][1] - points[0][1]) > 40:
+                        x_start = points[0][1]
+                        x_end = points[-1][1]
+                        cx_expr = f"{x_start} + ({x_end}-{x_start})*min(1.0,max(0.0,t/{shot_dur:.2f}))"
                         crop_x_expr = f"max({active_x},min({cx_expr}-{eff_w//2},{active_x + active_w}-{eff_w}))"
                         shot_f = (
                             f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,"
@@ -134,15 +134,13 @@ def build_video_filtergraph(
                             f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[{label}]"
                         )
                 else:
-                    if shot.face_centers_timeline:
-                        points = shot.face_centers_timeline
-                        t_start, x_start = points[0]
-                        t_end, x_end = points[-1]
-                        duration = t_end - t_start if t_end > t_start else 1.0
-                        
-                        cx_expr = f"{x_start} + ({x_end}-{x_start})*(t-{t_start})/{duration}"
+                    shot_dur = max(0.5, shot.end - shot.start)
+                    points = shot.face_centers_timeline
+                    if points and len(points) >= 2 and abs(points[-1][1] - points[0][1]) > 40:
+                        x_start = points[0][1]
+                        x_end = points[-1][1]
+                        cx_expr = f"{x_start} + ({x_end}-{x_start})*min(1.0,max(0.0,t/{shot_dur:.2f}))"
                         crop_x_expr = f"max({active_x},min({cx_expr}-{target_crop_w//2},{active_x + active_w}-{target_crop_w}))"
-                        
                         shot_f = (
                             f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,"
                             f"crop={target_crop_w}:{s_ch}:'{crop_x_expr}':{s_cy},"

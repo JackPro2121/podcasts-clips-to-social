@@ -205,7 +205,7 @@ def detect_faces_in_frame(
                     fw = int(d[2])
                     fh = int(d[3])
                     conf = float(d[-1])
-                    if conf >= 0.40 and is_plausible_speaker_face(fx, fy, fw, fh):
+                    if conf >= 0.32 and is_plausible_speaker_face(fx, fy, fw, fh):
                         faces.append(FaceBox(
                             x=max(0, fx), y=max(0, fy),
                             w=fw, h=fh,
@@ -286,6 +286,12 @@ def _skin_tone_center_x(frame: np.ndarray, active_x: int, active_y: int, active_
         roi_area = roi.shape[0] * roi.shape[1]
         # Must be at least 2.5% of the ROI to be a person, not noise
         if area < roi_area * 0.025:
+            return None
+        # Human head/torso is vertically oriented or square-ish (aspect ratio roughly 0.35 to 1.85)
+        # Horizontal wooden shelves, desks, or wall panels have aspect_ratio > 2.0
+        bx, by, bw, bh = cv2.boundingRect(largest)
+        aspect_ratio = bw / float(max(1, bh))
+        if aspect_ratio > 2.0 or aspect_ratio < 0.30:
             return None
         M = cv2.moments(largest)
         if M["m00"] == 0:
@@ -565,8 +571,8 @@ def analyze_faces_in_clip(
                 avg_cy = int(np.median([f.center_y for f in single_faces]))
                 last_known_cx = avg_cx
             else:
-                # Skin-tone heatmap fallback: smarter than global median anchor.
-                # Prevents crop landing on mic stand / lamp when face detector fails.
+                # Skin-tone heatmap fallback: verified against known speaker anchors.
+                # Prevents crop landing on mic stand, warm wooden shelves, or lamps.
                 skin_cx = None
                 cap_inner = cv2.VideoCapture(str(video_path))
                 if cap_inner.isOpened():
@@ -577,20 +583,35 @@ def analyze_faces_in_clip(
                     if ret_s and sample_frame is not None:
                         skin_cx = _skin_tone_center_x(sample_frame, active_x, active_y, active_w, active_h)
                         if skin_cx is not None:
-                            print(f"[*] Skin-tone fallback: found person at x={skin_cx} (no face detected in shot)")
-                # Priority: skin-tone → last known position → global anchor
-                if skin_cx is not None:
+                            anchor_ref = last_known_cx if last_known_cx is not None else global_anchor_cx
+                            if anchor_ref is not None and abs(skin_cx - anchor_ref) > active_w * 0.22:
+                                print(f"[*] Rejecting skin_cx={skin_cx} as background artifact (too far from anchor {anchor_ref})")
+                                skin_cx = None
+                            else:
+                                print(f"[*] Skin-tone fallback: verified person at x={skin_cx} (no face detected in shot)")
+                # Priority: verified skin-tone near anchor → last known position → global anchor
+                if last_known_cx is not None:
+                    avg_cx = skin_cx if skin_cx is not None else last_known_cx
+                    print(f"[*] Temporal anchor fallback: using x={avg_cx}")
+                elif skin_cx is not None:
                     avg_cx = skin_cx
-                elif last_known_cx is not None:
-                    avg_cx = last_known_cx
-                    print(f"[*] Temporal anchor fallback: using last known x={avg_cx}")
                 else:
                     avg_cx = global_anchor_cx
                     print(f"[*] Global anchor fallback: using x={avg_cx}")
                 avg_cy = int(eye_level_y)
 
             crop_x = max(active_x, min(avg_cx - target_crop_w // 2, active_x + active_w - target_crop_w))
-            raw_timeline = [(s, f.center_x) for s, f in timed_single_faces if isinstance(f, FaceBox)] if timed_single_faces else []
+            # Protect speaker head/ears from border cutoff: ensure at least 35% face width padding
+            if single_faces:
+                med_fw = int(np.median([f.w for f in single_faces]))
+                med_fx = int(np.median([f.x for f in single_faces]))
+                min_safe_pad = int(med_fw * 0.35)
+                if med_fx - crop_x < min_safe_pad:
+                    crop_x = max(active_x, med_fx - min_safe_pad)
+                elif (crop_x + target_crop_w) - (med_fx + med_fw) < min_safe_pad:
+                    crop_x = min(active_x + active_w - target_crop_w, med_fx + med_fw + min_safe_pad - target_crop_w)
+
+            raw_timeline = [(round(s - rel_s, 2), f.center_x) for s, f in timed_single_faces if isinstance(f, FaceBox)] if timed_single_faces else []
             timeline = _apply_autoflip_smoothing(raw_timeline, dead_zone_px=40)
 
             # High-retention opening hook: Apply 1.15x punch-zoom on the first 3.5 seconds
