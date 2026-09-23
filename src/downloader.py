@@ -433,9 +433,12 @@ def download_segment_via_apify(
 
 # Deduplicated format selectors (were copy-pasted across 7 strategies).
 # Strictly prefer avc1 (H.264) to avoid AV1 decoding loops on GitHub Actions runners.
-_HD_FORMAT = ('bestvideo[vcodec^=avc1][height>=720][height<=1080]+bestaudio/best'
-              'video[vcodec^=avc1][height<=1080]+bestaudio/best[ext=mp4][height<=1080]')
-_ANY_FORMAT = 'bestvideo[vcodec^=avc1][height<=1080]+bestaudio/best[ext=mp4][height<=1080]/best[vcodec^=avc1]'
+_HD_FORMAT = (
+    'bestvideo[vcodec^=avc1][height>=720][height<=1080]+bestaudio/'
+    'bestvideo[vcodec^=avc1][height<=1080]+bestaudio/'
+    'best[ext=mp4][height<=1080]/best'
+)
+_ANY_FORMAT = 'bestvideo[vcodec^=avc1][height<=1080]+bestaudio/best[ext=mp4][height<=1080]/best[vcodec^=avc1]/best'
 _FAILSAFE_FORMAT = 'bestvideo[vcodec^=avc1]+bestaudio/best'
 # Local bgutil POT provider. This is only configured after its health check
 # succeeds in CI; otherwise yt-dlp must use its normal client fallback.

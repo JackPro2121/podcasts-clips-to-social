@@ -104,15 +104,15 @@ jobs:
   clip-and-publish:
     name: Detect Viral Clips, Enhance & Publish
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     timeout-minutes: 90
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up Cloudflare WARP (Bypass Datacenter IP Blacklist)
-        if: ${{ vars.DISABLE_WARP != 'true' }}
+      - name: Set up Cloudflare WARP (Optional, Linux only)
+        if: ${{ runner.os == 'Linux' && vars.ENABLE_WARP == 'true' }}
         uses: fscarmen/warp-on-actions@v1.4
         continue-on-error: true
         timeout-minutes: 3
@@ -120,17 +120,18 @@ jobs:
           stack: dual
           mode: wireguard
 
-      - name: Verify Network Egress & WARP Status
+      - name: Verify Network Egress
         run: |
           echo "[*] Runner Outbound IP:"
           curl -s https://api.ipify.org || true
           echo ""
-          echo "[*] Cloudflare Trace:"
+          echo "[*] Network Trace:"
           curl -s https://cloudflare.com/cdn-cgi/trace | grep -E "warp|ip|loc" || true
 
-      - name: Start POT Provider Service (bgutil)
+      - name: Start POT Provider Service (bgutil, Linux only)
+        if: ${{ runner.os == 'Linux' }}
         run: |
-          if docker run --name bgutil-provider -d --net=host --init brainicism/bgutil-ytdlp-pot-provider; then
+          if command -v docker >/dev/null && docker run --name bgutil-provider -d --net=host --init brainicism/bgutil-ytdlp-pot-provider; then
             for attempt in {1..10}; do
               if curl --fail --silent http://127.0.0.1:4416/ping >/dev/null; then
                 echo "YTDLP_POT_PROVIDER_URL=http://127.0.0.1:4416" >> "$GITHUB_ENV"
@@ -148,11 +149,17 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Install System Dependencies (FFmpeg & MediaPipe)
+      - name: Install System Dependencies (FFmpeg)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg libgl1 -y
-          sudo apt-get install -y libglib2.0-0
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y ffmpeg libgl1 libglib2.0-0
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            if ! command -v ffmpeg &> /dev/null; then
+              brew install ffmpeg
+            fi
+          fi
+          ffmpeg -version | head -n 1
 
 
       - name: Install Python Dependencies
