@@ -134,5 +134,16 @@ PODCASTS-CLIPS-TO-SOCIAL/
 ├── main.py                       # Unified CLI entrypoint
 ├── requirements.txt              # Minimal lightweight dependencies
 ├── .env.example                  # Environment credentials template
+├── YOUTUBE_BYPASS_GUIDE.md       # YouTube IP Block Bypass Guide & Post-Mortem
 └── README.md                     # Documentation
 ```
+
+---
+
+## 📚 Complete Guides & Specifications
+
+* [YOUTUBE_BYPASS_GUIDE.md](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/YOUTUBE_BYPASS_GUIDE.md) — Comprehensive guide on how YouTube datacenter IP blocking works, what failed (Tor, WARP, Railway, etc.), and what works ($0).
+* [ARCHITECTURE_AND_METHODOLOGY.md](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/ARCHITECTURE_AND_METHODOLOGY.md) — Deep architectural deep dive on face tracking, ASS subtitles, and FFmpeg filtergraphs.
+* [HIGH_CPM_NICHES_GUIDE.md](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/HIGH_CPM_NICHES_GUIDE.md) — Playbook on Personal Finance & Wealth viral content.
+* [DEPLOYMENT_AND_OPERATIONS.md](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/DEPLOYMENT_AND_OPERATIONS.md) — Setup and deployment manual for GitHub Actions and Buffer.
+

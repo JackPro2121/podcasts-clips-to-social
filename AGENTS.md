@@ -42,6 +42,7 @@ PODCASTS-CLIPS-TO-SOCIAL/
 ├── requirements.txt                 # Dependencies
 ├── .env.example                     # Environment template
 ├── README.md                        # Project overview
+├── YOUTUBE_BYPASS_GUIDE.md          # YouTube datacenter IP bypass post-mortem & guide
 ├── ARCHITECTURE_AND_METHODOLOGY.md  # Detailed technical specifications
 ├── HIGH_CPM_NICHES_GUIDE.md         # Playbook on high-earning niches
 └── DEPLOYMENT_AND_OPERATIONS.md     # Production setup & run guide
