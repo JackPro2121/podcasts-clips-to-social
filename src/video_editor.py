@@ -185,7 +185,12 @@ def build_video_filtergraph(
 
     if burn_subtitles and ass_subtitle_path and ass_subtitle_path.exists():
         escaped_ass = sanitize_ffmpeg_path(ass_subtitle_path)
-        sub_filter = f"{base_label}subtitles='{escaped_ass}'[outv]"
+        from src.config import FONTS_DIR
+        if FONTS_DIR.exists():
+            escaped_fonts = sanitize_ffmpeg_path(FONTS_DIR)
+            sub_filter = f"{base_label}subtitles='{escaped_ass}':fontsdir='{escaped_fonts}'[outv]"
+        else:
+            sub_filter = f"{base_label}subtitles='{escaped_ass}'[outv]"
         filters.append(sub_filter)
     else:
         filters.append(f"{base_label}null[outv]")

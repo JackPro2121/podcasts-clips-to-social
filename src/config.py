@@ -14,6 +14,7 @@ DATA_DIR = BASE_DIR / "data"
 ASSETS_DIR = BASE_DIR / "assets"
 AUDIO_ASSETS_DIR = ASSETS_DIR / "audio"
 SFX_ASSETS_DIR = ASSETS_DIR / "sfx"
+FONTS_DIR = ASSETS_DIR / "fonts"
 HISTORY_FILE = DATA_DIR / "history.json"
 
 # Ensure directories exist
@@ -23,6 +24,7 @@ SUBTITLES_DIR.mkdir(exist_ok=True, parents=True)
 DATA_DIR.mkdir(exist_ok=True, parents=True)
 AUDIO_ASSETS_DIR.mkdir(exist_ok=True, parents=True)
 SFX_ASSETS_DIR.mkdir(exist_ok=True, parents=True)
+FONTS_DIR.mkdir(exist_ok=True, parents=True)
 
 # API Keys & Credentials
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -153,56 +155,56 @@ SUBTITLE_THEMES: Dict[str, Dict[str, Any]] = {
         "name": "Hormozi Viral",
         "font_name": "Montserrat Black",
         "fallback_font": "Arial Black",
-        "font_size": 52,
+        "font_size": 58,
         "primary_color": "&H00FFFFFF",      # Crisp White
         "highlight_color": "&H0000E6FF",    # Electric Yellow (&H00BBGGRR: Blue 00, Green E6, Red FF)
         "outline_color": "&H00000000",      # Deep Black Outline
-        "outline_width": 4.5,
-        "shadow_color": "&H80000000",       # Soft Black Shadow
-        "shadow_depth": 2.5,
-        "max_words_per_line": 3,
+        "outline_width": 6.0,
+        "shadow_color": "&H90000000",       # Deep Soft Drop Shadow
+        "shadow_depth": 3.5,
+        "max_words_per_line": 2,            # Fast-paced punchy 2-word flash
         "uppercase": True
     },
     "neon_green": {
         "name": "Toxic Neon",
         "font_name": "Montserrat Black",
         "fallback_font": "Arial Black",
-        "font_size": 52,
+        "font_size": 58,
         "primary_color": "&H00FFFFFF",      # Crisp White
-        "highlight_color": "&H0066FF00",    # Neon Toxic Green
+        "highlight_color": "&H0033FF22",    # Toxic Lime Green
         "outline_color": "&H00000000",
-        "outline_width": 4.0,
-        "shadow_color": "&H90000000",
-        "shadow_depth": 2.0,
-        "max_words_per_line": 3,
+        "outline_width": 6.0,
+        "shadow_color": "&HA0000000",
+        "shadow_depth": 3.5,
+        "max_words_per_line": 2,
         "uppercase": True
     },
     "luxury_gold": {
         "name": "Luxury Mindset",
-        "font_name": "Arial",
+        "font_name": "Bebas Neue",
         "fallback_font": "Helvetica",
-        "font_size": 50,
+        "font_size": 62,
         "primary_color": "&H00F5F5F5",      # Ivory White
         "highlight_color": "&H0000D7FF",    # Warm Gold
-        "outline_color": "&H001A1A1A",      # Charcoal Outline
-        "outline_width": 3.5,
-        "shadow_color": "&H70000000",
+        "outline_color": "&H00101010",      # Charcoal Deep Outline
+        "outline_width": 5.5,
+        "shadow_color": "&H80000000",
         "shadow_depth": 3.0,
-        "max_words_per_line": 4,
-        "uppercase": False
+        "max_words_per_line": 3,
+        "uppercase": True
     },
     "cyber_cyan": {
         "name": "Cyber Cyan",
-        "font_name": "Montserrat Black",
+        "font_name": "Anton",
         "fallback_font": "Arial Black",
-        "font_size": 52,
+        "font_size": 60,
         "primary_color": "&H00FFFFFF",      # Crisp White
         "highlight_color": "&H00FFFF00",    # Pure Cyan
         "outline_color": "&H00000000",
-        "outline_width": 4.0,
-        "shadow_color": "&H90000000",
-        "shadow_depth": 2.5,
-        "max_words_per_line": 3,
+        "outline_width": 6.0,
+        "shadow_color": "&HA0000000",
+        "shadow_depth": 3.5,
+        "max_words_per_line": 2,
         "uppercase": True
     }
 }

@@ -137,7 +137,12 @@ def classify_frame_scene(frame: np.ndarray) -> Dict[str, Any]:
         except Exception:
             pass
             
-    is_presentation = has_slide_layout or yolo_detected_presentation
+    # If a person is in the scene, it is a human presentation or talk (e.g. at a blackboard/whiteboard),
+    # NEVER a static presentation slide. Only pure graphics/slides without humans qualify.
+    if person_detected:
+        is_presentation = False
+    else:
+        is_presentation = has_slide_layout or yolo_detected_presentation
     return {
         "is_presentation": is_presentation,
         "person_detected": person_detected,

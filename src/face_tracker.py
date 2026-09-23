@@ -158,11 +158,37 @@ def get_face_detector():
         print(f"[-] All face detectors failed: {e}.")
     return None
 
-def detect_faces_in_frame(detector, frame: np.ndarray, width: int, height: int) -> List[FaceBox]:
-    """Performs face detection across different detector backends."""
+def detect_faces_in_frame(
+    detector,
+    frame: np.ndarray,
+    width: int,
+    height: int,
+    active_y: int = 0,
+    active_h: int = 0
+) -> List[FaceBox]:
+    """Performs face detection across different detector backends with strict false-positive filtering."""
     faces: List[FaceBox] = []
     if detector is None or frame is None:
         return faces
+
+    frame_h, frame_w = frame.shape[:2]
+    effective_h = active_h if active_h > 0 else frame_h
+    effective_top = active_y if active_h > 0 else 0
+
+    def is_plausible_speaker_face(fx: int, fy: int, fw: int, fh: int) -> bool:
+        """Filters out lower-third avatar icons, channel watermarks, and noise."""
+        if fw < 28 or fh < 28:
+            return False
+        cx = fx + fw // 2
+        cy = fy + fh // 2
+        # Reject lower-third region: Speakers' heads are NEVER in the bottom 32% of active video.
+        # This rejects social media avatar badges, profile pictures in corners, and lower-third graphics.
+        if cy > (effective_top + effective_h * 0.68) or fy > (effective_top + effective_h * 0.62):
+            return False
+        # Reject extreme bottom corners (small icons at edge)
+        if cy > (effective_top + effective_h * 0.50) and (cx < frame_w * 0.15 or cx > frame_w * 0.85) and (fw < frame_w * 0.08):
+            return False
+        return True
 
     # Case A: OpenCV FaceDetectorYN (YuNet)
     if hasattr(cv2, 'FaceDetectorYN') and isinstance(detector, cv2.FaceDetectorYN):
@@ -177,7 +203,7 @@ def detect_faces_in_frame(detector, frame: np.ndarray, width: int, height: int) 
                     fw = int(d[2])
                     fh = int(d[3])
                     conf = float(d[-1])
-                    if conf >= 0.40 and fw >= 25 and fh >= 25:
+                    if conf >= 0.40 and is_plausible_speaker_face(fx, fy, fw, fh):
                         faces.append(FaceBox(
                             x=max(0, fx), y=max(0, fy),
                             w=fw, h=fh,
@@ -200,12 +226,13 @@ def detect_faces_in_frame(detector, frame: np.ndarray, width: int, height: int) 
                     fy = int(bbox.ymin * height)
                     fw = int(bbox.width * width)
                     fh = int(bbox.height * height)
-                    faces.append(FaceBox(
-                        x=max(0, fx), y=max(0, fy),
-                        w=fw, h=fh,
-                        center_x=max(0, fx) + fw // 2,
-                        center_y=max(0, fy) + fh // 2
-                    ))
+                    if is_plausible_speaker_face(fx, fy, fw, fh):
+                        faces.append(FaceBox(
+                            x=max(0, fx), y=max(0, fy),
+                            w=fw, h=fh,
+                            center_x=max(0, fx) + fw // 2,
+                            center_y=max(0, fy) + fh // 2
+                        ))
             return faces
         except Exception:
             pass
@@ -216,11 +243,12 @@ def detect_faces_in_frame(detector, frame: np.ndarray, width: int, height: int) 
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             rects = detector.detectMultiScale(gray, 1.1, 4)
             for (x, y, w_box, h_box) in rects:
-                faces.append(FaceBox(
-                    x=x, y=y, w=w_box, h=h_box,
-                    center_x=x + w_box // 2,
-                    center_y=y + h_box // 2
-                ))
+                if is_plausible_speaker_face(x, y, w_box, h_box):
+                    faces.append(FaceBox(
+                        x=x, y=y, w=w_box, h=h_box,
+                        center_x=x + w_box // 2,
+                        center_y=y + h_box // 2
+                    ))
         except Exception:
             pass
 
@@ -229,13 +257,13 @@ def detect_faces_in_frame(detector, frame: np.ndarray, width: int, height: int) 
 
 def _skin_tone_center_x(frame: np.ndarray, active_x: int, active_y: int, active_w: int, active_h: int) -> Optional[int]:
     """Fallback: when face detector returns empty, find the dominant skin-tone region in the upper
-    60% of the active content area. This catches side-on heads, hats, and profile angles that
+    55% of the active content area. This catches side-on heads, hats, and profile angles that
     YuNet misses, preventing the crop from locking onto mic stands or lamps."""
     if frame is None:
         return None
     try:
-        # Work only in the upper 60% where podcast speakers always appear
-        top_h = int(active_h * 0.60)
+        # Work strictly in the upper 55% where podcast speakers always appear
+        top_h = int(active_h * 0.55)
         roi = frame[active_y:active_y + top_h, active_x:active_x + active_w]
         if roi.size == 0:
             return None
@@ -254,8 +282,8 @@ def _skin_tone_center_x(frame: np.ndarray, active_x: int, active_y: int, active_
         largest = max(contours, key=cv2.contourArea)
         area = cv2.contourArea(largest)
         roi_area = roi.shape[0] * roi.shape[1]
-        # Must be at least 3% of the ROI to be a person, not noise
-        if area < roi_area * 0.03:
+        # Must be at least 2.5% of the ROI to be a person, not noise
+        if area < roi_area * 0.025:
             return None
         M = cv2.moments(largest)
         if M["m00"] == 0:
@@ -342,7 +370,7 @@ def analyze_faces_in_clip(
                 except Exception:
                     pass
 
-            faces = detect_faces_in_frame(detector, frame, width, height)
+            faces = detect_faces_in_frame(detector, frame, width, height, active_y=active_y, active_h=active_h)
             faces.sort(key=lambda f: f.center_x)
 
             mouth_scores: List[float] = []

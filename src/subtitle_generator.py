@@ -12,9 +12,25 @@ from src.transcriber import TranscriptSegment, WordTimestamp
 _SAFE_MARGIN_V = {
     "split_screen": 880,  # \an2 (bottom-center): MarginV=880 → text baseline at Y≈1000 (center divider)
     "blur_stack": 400,    # Just below the centered 16:9 panel
-    "single_smooth": 460, # Lower-third, clear of the bottom UI overlay
+    "single_smooth": 460, # Golden sweet spot: Y≈1460 (safely above TikTok drawer, below speaker)
 }
 _DEFAULT_MARGIN_V = 460
+
+MONEY_KEYWORDS = {
+    "money", "cash", "dollar", "dollars", "wealth", "invest", "investing", "saving", "savings",
+    "profit", "net", "worth", "assets", "million", "millions", "billion", "billions", "income",
+    "tax", "taxes", "crypto", "salary", "rich", "fund", "budget", "bank", "credit", "paycheck",
+    "paid", "earn", "earning"
+}
+DANGER_KEYWORDS = {
+    "broke", "debt", "lie", "lied", "hate", "hater", "scam", "lost", "lose", "losing",
+    "risk", "danger", "stupid", "mistake", "zero", "fail", "failed", "crash", "boredom",
+    "worst", "unemployment", "seduction", "fool", "stop", "bad", "cut", "terrible"
+}
+POWER_KEYWORDS = {
+    "rules", "rule", "game", "secret", "never", "always", "truth", "master", "power",
+    "double", "boss", "timing", "how", "much", "left", "win", "winning"
+}
 
 
 def default_margin_v(layout_mode: str) -> int:
@@ -66,7 +82,7 @@ def generate_ass_header(
         margin_v = 400  # Perfectly below the 16:9 centered diagram (which ends at Y=1264)
     else:
         alignment = 2  # Bottom Center
-        margin_v = 460  # Y = 1460px (76% height, perfectly above bottom 22% UI overlay)
+        margin_v = 460  # Y ≈ 1460px (sweet spot: clear of bottom drawer, below mouth)
 
     # Watermark MarginV: dynamically position @allinonepodcastsss right below the purple capsule
     w_margin_v = watermark_margin_v if watermark_margin_v is not None else (HOOK_BADGE_MARGIN_V + 125)
@@ -83,7 +99,7 @@ PlayResY: {OUTPUT_HEIGHT}
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,{font_name},{font_size},{primary_col},&H000000FF,{outline_col},{shadow_col},-1,0,0,0,100,100,1.5,0,1,{outline_w},{shadow_d},{alignment},100,100,{margin_v},1
 Style: TopHeader,Montserrat Black,46,&H00FFFFFF,&H000000FF,&H00B86B62,&H00000000,-1,0,0,0,100,100,1.2,0,3,18,0,8,120,120,{HOOK_BADGE_MARGIN_V},1
-Style: Watermark,Arial,28,&H99FFFFFF,&H000000FF,&H99000000,&H00000000,-1,0,0,0,100,100,1.2,0,1,1.5,0.0,8,60,60,{w_margin_v},1
+Style: Watermark,Montserrat Black,26,&H88FFFFFF,&H000000FF,&H88000000,&H00000000,-1,0,0,0,100,100,1.2,0,1,1.5,0.0,8,60,60,{w_margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -178,9 +194,21 @@ def create_styled_ass_subtitles(
                 if idx == active_idx:
                     matched_emoji = emoji_lookup.get(w.word.lower(), "")
                     emoji_suffix = f" {matched_emoji}" if matched_emoji else ""
-                    # High-energy kinetic bounce animation: 118% scale pop returning to 100%
+                    
+                    # Semantic word coloring: Money/Numbers = Lime Green, Danger = Red, Power = Gold
+                    clean_lower = re.sub(r'[^a-z0-9]', '', w.word.lower())
+                    if clean_lower in MONEY_KEYWORDS or any(c.isdigit() for c in w.word) or '$' in w.word:
+                        active_color = "&H0033FF22"  # Neon Lime Green
+                    elif clean_lower in DANGER_KEYWORDS:
+                        active_color = "&H003333FF"  # Fire Red
+                    elif clean_lower in POWER_KEYWORDS:
+                        active_color = "&H0000D7FF"  # Warm Gold
+                    else:
+                        active_color = highlight_color
+
+                    # High-energy kinetic bounce pop: 118% scale punch settling to 100%
                     word_elements.append(
-                        f"{{\\c{highlight_color}\\t(0,70,\\fscx118\\fscy118)\\t(70,140,\\fscx100\\fscy100)}}{w.word}{emoji_suffix}{{\\c{primary_color}\\fscx100\\fscy100}}"
+                        f"{{\\c{active_color}\\t(0,70,\\fscx118\\fscy118)\\t(70,140,\\fscx100\\fscy100)}}{w.word}{emoji_suffix}{{\\c{primary_color}\\fscx100\\fscy100}}"
                     )
                 else:
                     word_elements.append(w.word)
