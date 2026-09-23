@@ -108,27 +108,53 @@ def build_video_filtergraph(
                 s_ch = getattr(shot, "crop_h", None) or active_h
                 target_crop_w = int(s_ch * (9 / 16))
 
-                if shot.face_centers_timeline:
-                    points = shot.face_centers_timeline
-                    t_start, x_start = points[0]
-                    t_end, x_end = points[-1]
-                    duration = t_end - t_start if t_end > t_start else 1.0
-                    
-                    cx_expr = f"{x_start} + ({x_end}-{x_start})*(t-{t_start})/{duration}"
-                    crop_x_expr = f"max({active_x},min({cx_expr}-{target_crop_w//2},{active_x + active_w}-{target_crop_w}))"
-                    
-                    shot_f = (
-                        f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,"
-                        f"crop={target_crop_w}:{s_ch}:'{crop_x_expr}':{s_cy},"
-                        f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[{label}]"
-                    )
+                zoom = getattr(shot, "zoom_factor", 1.0) or 1.0
+                if zoom > 1.01:
+                    eff_h = int(s_ch / zoom)
+                    eff_w = int(target_crop_w / zoom)
+                    eff_y = max(active_y, min(int(s_cy + (s_ch - eff_h) * 0.28), active_y + active_h - eff_h))
+                    if shot.face_centers_timeline:
+                        points = shot.face_centers_timeline
+                        t_start, x_start = points[0]
+                        t_end, x_end = points[-1]
+                        duration = t_end - t_start if t_end > t_start else 1.0
+                        cx_expr = f"{x_start} + ({x_end}-{x_start})*(t-{t_start})/{duration}"
+                        crop_x_expr = f"max({active_x},min({cx_expr}-{eff_w//2},{active_x + active_w}-{eff_w}))"
+                        shot_f = (
+                            f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,"
+                            f"crop={eff_w}:{eff_h}:'{crop_x_expr}':{eff_y},"
+                            f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[{label}]"
+                        )
+                    else:
+                        base_cx = shot.crop_x + target_crop_w // 2
+                        eff_x = max(active_x, min(base_cx - eff_w // 2, active_x + active_w - eff_w))
+                        shot_f = (
+                            f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,"
+                            f"crop={eff_w}:{eff_h}:{eff_x}:{eff_y},"
+                            f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[{label}]"
+                        )
                 else:
-                    crop_x = max(active_x, min(shot.crop_x, active_x + active_w - target_crop_w))
-                    shot_f = (
-                        f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,"
-                        f"crop={target_crop_w}:{s_ch}:{crop_x}:{s_cy},"
-                        f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[{label}]"
-                    )
+                    if shot.face_centers_timeline:
+                        points = shot.face_centers_timeline
+                        t_start, x_start = points[0]
+                        t_end, x_end = points[-1]
+                        duration = t_end - t_start if t_end > t_start else 1.0
+                        
+                        cx_expr = f"{x_start} + ({x_end}-{x_start})*(t-{t_start})/{duration}"
+                        crop_x_expr = f"max({active_x},min({cx_expr}-{target_crop_w//2},{active_x + active_w}-{target_crop_w}))"
+                        
+                        shot_f = (
+                            f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,"
+                            f"crop={target_crop_w}:{s_ch}:'{crop_x_expr}':{s_cy},"
+                            f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[{label}]"
+                        )
+                    else:
+                        crop_x = max(active_x, min(shot.crop_x, active_x + active_w - target_crop_w))
+                        shot_f = (
+                            f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,"
+                            f"crop={target_crop_w}:{s_ch}:{crop_x}:{s_cy},"
+                            f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[{label}]"
+                        )
             shot_filters.append(shot_f)
 
         concat_inputs = "".join(shot_labels)

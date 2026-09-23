@@ -99,55 +99,53 @@ def detect_slide_heuristics(frame: np.ndarray) -> bool:
 def classify_frame_scene(frame: np.ndarray) -> Dict[str, Any]:
     """
     Classifies a frame as 'presentation' (slide/chart/paper) or 'human' (speaker/interview).
-    Combines YOLOv8 deep learning detection with document text density heuristics.
+    Combines visual text/diagram heuristics with face detection to guarantee that
+    any frame containing a human speaker is never misclassified as a static slide.
     """
     h, w = frame.shape[:2]
     
-    # Heuristic text check
+    # 1. Visual document / chart / slide analysis
     has_slide_layout = detect_slide_heuristics(frame)
     
-    net = get_yolo_net()
-    yolo_detected_presentation = False
+    # 2. Check for human speaker presence via face detection
     person_detected = False
-    
-    if net is not None:
+    try:
+        from src.face_tracker import get_face_detector, detect_faces_in_frame
+        detector = get_face_detector()
+        if detector is not None:
+            faces = detect_faces_in_frame(detector, frame, w, h)
+            if faces:
+                person_detected = True
+    except Exception:
+        pass
+
+    # Fallback face check if detector was not ready: OpenCV Haar Cascade
+    if not person_detected:
         try:
-            blob = cv2.dnn.blobFromImage(frame, 1/255.0, (640, 640), swapRB=True, crop=False)
-            net.setInput(blob)
-            preds = net.forward() # shape (1, 84, 8400)
-            
-            # YOLOv8 format: preds[0] is (84, 8400) -> transpose to (8400, 84)
-            preds = preds[0].T
-            boxes = preds[:, :4]
-            scores = preds[:, 4:]
-            
-            class_ids = np.argmax(scores, axis=1)
-            confidences = np.max(scores, axis=1)
-            
-            mask = confidences > 0.40
-            valid_class_ids = class_ids[mask]
-            
-            for cid in valid_class_ids:
-                if cid < len(COCO_CLASSES):
-                    cname = COCO_CLASSES[cid]
-                    if cname in PRESENTATION_CLASSES:
-                        yolo_detected_presentation = True
-                    elif cname == "person":
-                        person_detected = True
+            import os
+            cascade_path = getattr(cv2.data, 'haarcascades', '') + 'haarcascade_frontalface_default.xml'
+            if os.path.isfile(cascade_path):
+                cascade = cv2.CascadeClassifier(cascade_path)
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                faces = cascade.detectMultiScale(gray, 1.2, 3, minSize=(30, 30))
+                if len(faces) > 0:
+                    person_detected = True
         except Exception:
             pass
-            
-    # If a person is in the scene, it is a human presentation or talk (e.g. at a blackboard/whiteboard),
-    # NEVER a static presentation slide. Only pure graphics/slides without humans qualify.
+
+    # 3. Decision: If a human is in the scene (e.g. host talking at whiteboard/desk),
+    # it is a human talk, NEVER a static presentation slide.
+    # Only pure graphics, charts, and slides without a human speaker qualify as presentation.
     if person_detected:
         is_presentation = False
     else:
-        is_presentation = has_slide_layout or yolo_detected_presentation
+        is_presentation = has_slide_layout
+
     return {
         "is_presentation": is_presentation,
         "person_detected": person_detected,
         "has_slide_layout": has_slide_layout,
-        "yolo_presentation": yolo_detected_presentation
+        "yolo_presentation": False
     }
 
 def analyze_clip_presentation_ratio(video_path: Path, start_sec: float, end_sec: float) -> float:

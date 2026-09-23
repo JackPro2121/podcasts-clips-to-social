@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Any
 from dataclasses import dataclass, field
 from src.scene_classifier import classify_frame_scene, detect_clip_shots
+from src.config import ENABLE_PUNCH_ZOOM
 
 MODEL_DIR = Path(__file__).resolve().parent / "models"
 YUNET_MODEL_PATH = MODEL_DIR / "face_detection_yunet.onnx"
@@ -30,6 +31,7 @@ class ShotPlan:
     crop_w: int = 0
     crop_h: int = 0
     center_y: int = 0
+    zoom_factor: float = 1.0  # 1.15 for viral hook punch-zoom
     # Timeline of center_x for each sample in this shot to enable LERP panning
     face_centers_timeline: List[Tuple[float, int]] = field(default_factory=list)
     speaker1_box: Optional[Tuple[int, int, int, int]] = None
@@ -315,6 +317,21 @@ def _estimate_mouth_motion(prev_patch: Optional[np.ndarray], frame: np.ndarray, 
         return 0.0, None
 
 
+def _apply_autoflip_smoothing(timeline: List[Tuple[float, int]], dead_zone_px: int = 40) -> List[Tuple[float, int]]:
+    """Applies Google AutoFlip dead-zone & smooth panning to eliminate camera micro-jitter."""
+    if len(timeline) <= 1:
+        return timeline
+    smoothed: List[Tuple[float, int]] = []
+    current_anchor = timeline[0][1]
+    for t, x in timeline:
+        diff = x - current_anchor
+        if abs(diff) > dead_zone_px:
+            # Shift anchor towards new position with smooth exponential easing
+            current_anchor = int(current_anchor + 0.60 * diff)
+        smoothed.append((t, current_anchor))
+    return smoothed
+
+
 def analyze_faces_in_clip(
     video_path: Path,
     start_time: float,
@@ -573,7 +590,11 @@ def analyze_faces_in_clip(
                 avg_cy = int(eye_level_y)
 
             crop_x = max(active_x, min(avg_cx - target_crop_w // 2, active_x + active_w - target_crop_w))
-            timeline = [(s, f.center_x) for s, f in timed_single_faces if isinstance(f, FaceBox)] if timed_single_faces else []
+            raw_timeline = [(s, f.center_x) for s, f in timed_single_faces if isinstance(f, FaceBox)] if timed_single_faces else []
+            timeline = _apply_autoflip_smoothing(raw_timeline, dead_zone_px=40)
+
+            # High-retention opening hook: Apply 1.15x punch-zoom on the first 3.5 seconds
+            zoom = 1.15 if (rel_s < 3.2 and ENABLE_PUNCH_ZOOM) else 1.0
 
             shot_plans.append(ShotPlan(
                 start=rel_s,
@@ -584,6 +605,7 @@ def analyze_faces_in_clip(
                 crop_w=target_crop_w,
                 crop_h=active_h,
                 center_y=avg_cy,
+                zoom_factor=zoom,
                 face_centers_timeline=timeline,
                 margin_v=460
             ))

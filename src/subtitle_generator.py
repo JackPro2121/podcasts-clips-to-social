@@ -157,6 +157,12 @@ def create_styled_ass_subtitles(
         last_end = w_end
     clip_words = monotonic_words
 
+    # Adaptive Cadence: If speaker is talking at ultra-fast pace (> 190 WPM),
+    # switch to punchy 1-word flash chunks to match speed. Otherwise use theme default.
+    clip_dur = max(1.0, clip_end - clip_start)
+    wpm = (len(clip_words) / clip_dur) * 60.0
+    effective_max_words = 1 if (wpm > 190 and len(clip_words) > 10) else max_words
+
     base_margin_v = default_margin_v(layout_mode)
 
     def get_shot_margin_v(t: float) -> int:
@@ -171,14 +177,14 @@ def create_styled_ass_subtitles(
                     return getattr(s, "margin_v", None) or base_margin_v
         return base_margin_v
 
-    # Group words into short punchy batches of 2-4 words
+    # Group words into short punchy batches of 1-3 words
     lines: List[str] = []
     i = 0
     emoji_lookup = {k.lower().strip(): v for k, v in (keyword_emojis or {}).items()}
 
     while i < len(clip_words):
-        chunk = clip_words[i:i + max_words]
-        i += max_words
+        chunk = clip_words[i:i + effective_max_words]
+        i += effective_max_words
         if not chunk:
             continue
 
