@@ -89,6 +89,26 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertIn("response", results[0])
         self.assertIn("response", results[1])
 
+    def test_buffer_channel_query_uses_organization_id_scalar(self):
+        from unittest.mock import MagicMock, patch
+        from src.buffer_client import BufferClient
+
+        org_response = MagicMock(status_code=200)
+        org_response.json.return_value = {
+            "data": {"account": {"organizations": [{"id": "org-1", "name": "Org"}]}}
+        }
+        channel_response = MagicMock(status_code=200)
+        channel_response.json.return_value = {
+            "data": {"channels": [{"id": "channel-1", "name": "TikTok", "service": "tiktok"}]}
+        }
+
+        with patch("src.buffer_client.requests.post", side_effect=[org_response, channel_response]) as post:
+            channels = BufferClient("token").get_channels()
+
+        self.assertEqual(channels[0]["service"], "tiktok")
+        channel_query = post.call_args_list[1].kwargs["json"]["query"]
+        self.assertIn("$organizationId: OrganizationId!", channel_query)
+
     def test_niche_fallback_uses_selected_hashtags(self):
         segments = [TranscriptSegment(0.0, 80.0, "AI automation discussion", [])]
         clips = fallback_rule_based_detector(segments, num_clips=1, niche="ai_tech")

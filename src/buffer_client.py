@@ -50,7 +50,7 @@ class BufferClient:
                 org_id = org.get("id")
                 if not org_id:
                     continue
-                ch_query = """query GetChannels($organizationId: ID!) {
+                ch_query = """query GetChannels($organizationId: OrganizationId!) {
                   channels(input: { organizationId: $organizationId }) {
                     id
                     name
