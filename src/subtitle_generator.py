@@ -86,9 +86,9 @@ def generate_ass_header(
     font_size = font_size_override or theme["font_size"]
     primary_col = theme["primary_color"]
     outline_col = theme["outline_color"]
-    outline_w = theme["outline_width"]
+    outline_w = min(float(theme["outline_width"]), 4.0)
     shadow_col = theme["shadow_color"]
-    shadow_d = theme["shadow_depth"]
+    shadow_d = min(float(theme["shadow_depth"]), 2.5)
 
     alignment = 2
     margin_v = get_subtitle_margin_v(layout_mode)
@@ -131,7 +131,7 @@ def create_styled_ass_subtitles(
     with kinetic bounce pops and contextual emoji injection.
     """
     theme = SUBTITLE_THEMES.get(theme_key, SUBTITLE_THEMES["hormozi"])
-    max_words = theme.get("max_words_per_line", 3)
+    max_words = max(2, min(4, int(theme.get("max_words_per_line", 3))))
     uppercase = theme.get("uppercase", True)
     highlight_color = theme.get("highlight_color", "&H0000E6FF")
     primary_color = theme.get("primary_color", "&H00FFFFFF")
@@ -197,12 +197,12 @@ def create_styled_ass_subtitles(
         last_end = w_end
     clip_words = monotonic_words
 
-    # Adaptive Cadence: If speaker is talking at ultra-fast pace (> 190 WPM),
-    # switch to punchy 1-word flash chunks to match speed. Otherwise use theme default.
     clip_dur = max(1.0, clip_end - clip_start)
     wpm = (len(clip_words) / clip_dur) * 60.0
-    effective_max_words = 1 if (wpm > 190 and len(clip_words) > 10) else max_words
-    single_word_font_size = 78 if effective_max_words == 1 else None
+    effective_max_words = max_words
+    if wpm > 190 and len(clip_words) > 10:
+        effective_max_words = min(4, effective_max_words + 1)
+    single_word_font_size = None
 
     base_margin_v = default_margin_v(layout_mode)
 
@@ -219,13 +219,17 @@ def create_styled_ass_subtitles(
                     return margin, int(getattr(s, "subtitle_alignment", 2)), placement
         return base_margin_v, 2, "lower_third"
 
-    # Group words into short punchy batches of 1-3 words
     lines: List[str] = []
     i = 0
 
     while i < len(clip_words):
-        chunk = clip_words[i:i + effective_max_words]
-        i += effective_max_words
+        chunk: List[WordTimestamp] = []
+        while i < len(clip_words) and len(chunk) < effective_max_words:
+            candidate = clip_words[i]
+            if chunk and candidate.start - chunk[-1].end >= 0.45:
+                break
+            chunk.append(candidate)
+            i += 1
         if not chunk:
             continue
 

@@ -126,7 +126,7 @@ MAX_VIDEO_HEIGHT = 1080
 # Visual Retention & Anti-Fingerprint Features
 ENABLE_PUNCH_ZOOM = os.getenv("ENABLE_PUNCH_ZOOM", "true").lower() in ("true", "1", "yes")
 ENABLE_TOP_HOOK_BADGE = os.getenv("ENABLE_TOP_HOOK_BADGE", "true").lower() in ("true", "1", "yes")
-HOOK_BADGE_DURATION = float(os.getenv("HOOK_BADGE_DURATION", "4.0"))  # 4-second initial hook retention badge
+HOOK_BADGE_DURATION = float(os.getenv("HOOK_BADGE_DURATION", "3.0"))  # 3-second initial hook retention badge
 HOOK_BADGE_MARGIN_V = int(os.getenv("HOOK_BADGE_MARGIN_V", "95"))     # Safe zone (upper safe zone 90-140px, above speaker forehead)
 ENABLE_BGM = os.getenv("ENABLE_BGM", "true").lower() in ("true", "1", "yes")  # Breaks audio fingerprinting
 ENABLE_SFX = os.getenv("ENABLE_SFX", "true").lower() in ("true", "1", "yes")  # Transitions & keyword sound design
@@ -194,7 +194,7 @@ SUBTITLE_THEMES: Dict[str, Dict[str, Any]] = {
         "outline_width": 6.5,
         "shadow_color": "&H90000000",       # Deep Soft Drop Shadow
         "shadow_depth": 3.5,
-        "max_words_per_line": 2,            # Fast-paced punchy 2-word flash
+         "max_words_per_line": 2,            # Fast-paced phrase grouping
         "uppercase": True
     },
     "neon_green": {

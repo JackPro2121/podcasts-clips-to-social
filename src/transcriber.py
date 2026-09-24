@@ -20,6 +20,9 @@ class TranscriptSegment:
     text: str
     words: List[WordTimestamp]
 
+
+_WHISPER_MODELS: Dict[tuple[str, str, str], Any] = {}
+
 def fetch_transcript_chocodata(video_id: str, api_key: Optional[str] = None) -> Optional[List[TranscriptSegment]]:
     """
     Fetches official timestamped YouTube transcript via Chocodata REST API in 0.4s.
@@ -98,8 +101,14 @@ def transcribe_audio_whisper(
     except ImportError:
         raise ImportError("faster-whisper is required for audio transcription when native captions are missing.")
 
-    print(f"[*] Initializing Whisper ({model_size}, {device}, {compute_type})...")
-    model = WhisperModel(model_size, device=device, compute_type=compute_type)
+    model_key = (model_size, device, compute_type)
+    model = _WHISPER_MODELS.get(model_key)
+    if model is None:
+        print(f"[*] Initializing Whisper ({model_size}, {device}, {compute_type})...")
+        model = WhisperModel(model_size, device=device, compute_type=compute_type)
+        _WHISPER_MODELS[model_key] = model
+    else:
+        print(f"[*] Reusing Whisper ({model_size}, {device}, {compute_type})...")
 
     print(f"[*] Transcribing audio from {video_or_audio_path.name}...")
     whisper_segments, _ = model.transcribe(
@@ -142,6 +151,50 @@ def transcribe_audio_whisper(
 
     print(f"[+] Transcription complete: {len(results)} segments generated.")
     return results
+
+
+def align_clip_transcript(
+    clip_path: Path,
+    render_start: float,
+    output_start: float,
+    output_end: float,
+    fallback_segments: List[TranscriptSegment],
+    model_size: Optional[str] = None,
+) -> List[TranscriptSegment]:
+    if not any(
+        word.is_estimated
+        and word.end > output_start
+        and word.start < output_end
+        for segment in fallback_segments
+        for word in segment.words
+    ):
+        return fallback_segments
+    aligned = transcribe_audio_whisper(clip_path, model_size=model_size, device="cpu", compute_type="int8")
+    if not aligned:
+        return fallback_segments
+    shifted: List[TranscriptSegment] = []
+    clip_file_duration = max(0.0, output_end - output_start + render_start)
+    for segment in aligned:
+        words = [
+            WordTimestamp(
+                word=word.word,
+                start=max(output_start, min(output_end, output_start + (word.start - render_start))),
+                end=max(output_start, min(output_end, output_start + (word.end - render_start))),
+                is_estimated=bool(word.is_estimated),
+            )
+            for word in segment.words
+            if word.end > render_start and word.start < clip_file_duration
+        ]
+        if not words:
+            continue
+        shifted.append(TranscriptSegment(
+            start=words[0].start,
+            end=words[-1].end,
+            text=segment.text,
+            words=words,
+        ))
+    return shifted or fallback_segments
+
 
 def get_transcript(
     video_path: Path,

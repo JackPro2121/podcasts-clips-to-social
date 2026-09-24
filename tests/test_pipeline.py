@@ -53,7 +53,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         candidates = fallback_rule_based_detector(segments, num_clips=2)
         self.assertEqual(len(candidates), 2)
         for c in candidates:
-            self.assertTrue(30.0 <= c.duration <= 60.0)
+            self.assertTrue(30.0 <= c.duration <= 140.0)
             self.assertTrue(len(c.hashtags) > 0)
             self.assertTrue(c.viral_score > 0)
 
@@ -67,8 +67,8 @@ class TestPodcastClipperPipeline(unittest.TestCase):
             ]
         })
         clips = parse_clips_json(raw, segments, num_clips=3)
-        self.assertEqual([(c.start_time, c.end_time) for c in clips], [(20.0, 50.0), (20.0, 80.0)])
-        self.assertTrue(all(30.0 <= c.duration <= 60.0 for c in clips))
+        self.assertEqual([(c.start_time, c.end_time) for c in clips], [(20.0, 50.0), (20.0, 90.0)])
+        self.assertTrue(all(30.0 <= c.duration <= 140.0 for c in clips))
 
     def test_buffer_results_preserve_partial_dispatch(self):
         from unittest.mock import patch, MagicMock
@@ -133,6 +133,28 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertEqual(format_ass_timestamp(65.25), "0:01:05.25")
         self.assertEqual(format_ass_timestamp(3661.5), "1:01:01.50")
 
+    def test_clip_window_extends_to_sentence_boundaries(self):
+        from src.viral_detector import _normalize_clip_window
+
+        segments = [
+            TranscriptSegment(
+                start=19.0,
+                end=20.0,
+                text="This is context.",
+                words=[WordTimestamp(word="context.", start=19.5, end=20.0)],
+            ),
+            TranscriptSegment(
+                start=20.5,
+                end=56.2,
+                text="The key idea starts now and continues through the complete explanation.",
+                words=[
+                    WordTimestamp(word="The", start=20.5, end=20.8),
+                    WordTimestamp(word="payoff.", start=55.8, end=56.2),
+                ],
+            ),
+        ]
+        self.assertEqual(_normalize_clip_window(20.5, 55.5, segments), (20.0, 56.2))
+
     def test_ass_text_normalization_and_escaping(self):
         self.assertEqual(
             normalize_caption_text("C++ 100% café 🚀\n$5"),
@@ -189,6 +211,61 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertNotIn("BEFORE", content)
         self.assertNotIn("AFTER", content)
         created.unlink()
+
+    def test_subtitle_groups_words_into_short_phrases(self):
+        words = [
+            WordTimestamp(word="One", start=0.0, end=1.0),
+            WordTimestamp(word="Two", start=1.0, end=2.0),
+            WordTimestamp(word="Three", start=2.0, end=3.0),
+            WordTimestamp(word="Four", start=3.0, end=4.0),
+        ]
+        out_ass = Path("subtitles/test_phrase_grouping.ass")
+        create_styled_ass_subtitles(
+            segments=[TranscriptSegment(0.0, 4.0, "One Two Three Four", words)],
+            clip_start=0.0,
+            clip_end=4.0,
+            output_ass_path=out_ass,
+        )
+        lines = out_ass.read_text(encoding="utf-8").splitlines()
+        self.assertTrue(any("ONE" in line and "TWO" in line for line in lines))
+        self.assertTrue(any("THREE" in line and "FOUR" in line for line in lines))
+        out_ass.unlink()
+
+    def test_local_transcript_alignment_replaces_estimated_timing(self):
+        from unittest.mock import patch
+        from src.transcriber import align_clip_transcript
+
+        fallback = [
+            TranscriptSegment(
+                start=10.0,
+                end=12.0,
+                text="Estimated words",
+                words=[WordTimestamp("Estimated", 10.0, 12.0, is_estimated=True)],
+            )
+        ]
+        aligned = [
+            TranscriptSegment(
+                start=0.0,
+                end=2.0,
+                text="Aligned words",
+                words=[
+                    WordTimestamp("Aligned", 0.0, 1.0),
+                    WordTimestamp("words", 1.0, 2.0),
+                ],
+            )
+        ]
+        with patch("src.transcriber.transcribe_audio_whisper", return_value=aligned) as transcribe:
+            result = align_clip_transcript(
+                clip_path=Path("clip.mp4"),
+                render_start=0.5,
+                output_start=10.0,
+                output_end=12.0,
+                fallback_segments=fallback,
+                model_size="base.en",
+            )
+        transcribe.assert_called_once()
+        self.assertEqual([(word.start, word.end) for word in result[0].words], [(10.0, 10.5), (10.5, 11.5)])
+        self.assertTrue(all(not word.is_estimated for word in result[0].words))
 
     def test_subtitle_segment_fallback_when_words_are_missing(self):
         segment = TranscriptSegment(start=0.0, end=1.0, text="Fallback text", words=[])

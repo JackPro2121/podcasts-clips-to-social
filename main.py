@@ -18,7 +18,13 @@ from src.downloader import (
     download_video, fetch_transcript_only, download_clip_segment, extract_youtube_id,
     get_video_dimensions, APIFY_API_TOKEN,
 )
-from src.transcriber import get_transcript, TranscriptSegment, WordTimestamp, transcribe_audio_whisper
+from src.transcriber import (
+    align_clip_transcript,
+    get_transcript,
+    TranscriptSegment,
+    WordTimestamp,
+    transcribe_audio_whisper,
+)
 from src.viral_detector import detect_viral_moments
 from src.face_tracker import analyze_faces_in_clip, FramingDecision
 from src.subtitle_generator import create_styled_ass_subtitles
@@ -205,10 +211,25 @@ def run_pipeline(
 
             burn_subtitles = subtitles_mode in ("auto", "burn")
             ass_path = None
+            clip_segments: List[TranscriptSegment] = segments or []
             if burn_subtitles and segments:
+                try:
+                    aligned_segments = align_clip_transcript(
+                        clip_path=Path(clip_path),
+                        render_start=render_start,
+                        output_start=moment.start_time,
+                        output_end=moment.end_time,
+                        fallback_segments=segments,
+                        model_size="base.en",
+                    )
+                    if aligned_segments is not segments:
+                        print(f"[+] Local Whisper alignment refreshed clip #{idx} caption timing.")
+                    clip_segments = aligned_segments
+                except Exception as alignment_error:
+                    print(f"[!] Local caption alignment unavailable for clip #{idx}: {alignment_error}")
                 ass_path = SUBTITLES_DIR / f"clip_{idx}_{subtitle_style}.ass"
                 create_styled_ass_subtitles(
-                    segments=segments,
+                    segments=clip_segments,
                     clip_start=moment.start_time,
                     clip_end=moment.end_time,
                     output_ass_path=ass_path,
@@ -241,9 +262,9 @@ def run_pipeline(
 
             # Detect and configure Pexels B-roll stock footage overlays
             broll_cues = []
-            if segments:
+            if clip_segments:
                 clip_words = []
-                for s in segments:
+                for s in clip_segments:
                     for w in getattr(s, "words", []):
                         if moment.start_time <= w.start <= moment.end_time:
                             clip_words.append(WordTimestamp(

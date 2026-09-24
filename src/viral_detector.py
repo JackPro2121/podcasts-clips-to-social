@@ -34,8 +34,8 @@ warnings.filterwarnings("ignore", message=".*Direct use of automatic function ca
 class ViralClipCandidate(BaseModel):
     title: str = Field(description="Catchy viral hook title (under 50 chars)")
     start_time: float = Field(description="Start time in seconds")
-    end_time: float = Field(description="End time in seconds (must be 30-60s after start_time)")
-    duration: float = Field(description="Duration in seconds (30.0 to 60.0)")
+    end_time: float = Field(description="End time in seconds (must be 30-140s after start_time)")
+    duration: float = Field(description="Duration in seconds (30.0 to 140.0)")
     viral_score: int = Field(description="Predicted virality score from 1 to 100")
     hook_reason: str = Field(description="Why this moment grabs immediate viewer attention")
     social_caption: str = Field(description="Ready-to-post engaging caption for TikTok/Reels/Shorts")
@@ -255,7 +255,47 @@ def strip_emojis(text: str) -> str:
 
 
 MIN_CLIP_DURATION = 30.0
-MAX_CLIP_DURATION = 60.0
+MAX_CLIP_DURATION = 140.0
+
+
+def _safe_start_boundary(segments: List[TranscriptSegment], requested: float, lookback: float = 8.0) -> float:
+    words = sorted((word for segment in segments for word in segment.words), key=lambda word: word.start)
+    boundary = requested
+    for index, word in enumerate(words):
+        if word.end > requested or word.end < requested - lookback:
+            continue
+        next_word = words[index + 1] if index + 1 < len(words) else None
+        gap = next_word.start - word.end if next_word else 0.0
+        if word.word.rstrip().endswith((".", "?", "!")) or gap >= 0.45:
+            boundary = word.end
+            break
+    if boundary != requested:
+        return boundary
+    for segment in segments:
+        if segment.start <= requested <= segment.end and requested - segment.start <= lookback:
+            return segment.start
+    return requested
+
+
+def _safe_end_boundary(segments: List[TranscriptSegment], requested: float, lookahead: float = 12.0) -> float:
+    words = sorted((word for segment in segments for word in segment.words), key=lambda word: word.start)
+    boundary = requested
+    for index, word in enumerate(words):
+        if word.start < requested:
+            continue
+        if word.start > requested + lookahead:
+            break
+        next_word = words[index + 1] if index + 1 < len(words) else None
+        gap = next_word.start - word.end if next_word else 0.0
+        if word.word.rstrip().endswith((".", "?", "!")) or gap >= 0.45:
+            boundary = word.end
+            break
+    if boundary != requested:
+        return boundary
+    for segment in segments:
+        if requested <= segment.end <= requested + lookahead and segment.text.rstrip().endswith((".", "?", "!")):
+            return segment.end
+    return requested
 
 
 def _normalize_clip_window(
@@ -272,7 +312,13 @@ def _normalize_clip_window(
     start = min(start, transcript_end - MIN_CLIP_DURATION)
     end = max(end, start + MIN_CLIP_DURATION)
     end = min(end, start + MAX_CLIP_DURATION, transcript_end)
+    start = min(_safe_start_boundary(segments, start), start)
+    end = max(_safe_end_boundary(segments, end), end)
     if end - start < MIN_CLIP_DURATION:
+        end = min(transcript_end, start + MIN_CLIP_DURATION)
+    if end - start > MAX_CLIP_DURATION:
+        return None
+    if end - start < MIN_CLIP_DURATION or end > transcript_end + 0.01:
         return None
     return round(start, 2), round(end, 2)
 
@@ -418,7 +464,7 @@ Your goal is to analyze the following podcast transcript and extract the top {nu
 1. **Immediate Hook (0-3s)**: The clip MUST start directly on an impactful sentence about {profile["focus"]}. Never start on pauses, host chitchat, or filler words ('um', 'uh', 'so', 'you know', 'yeah'). The first 3 seconds decide viral retention on TikTok, YouTube Shorts, and Reels. Start at the exact second the core argument begins.
 2. **High Emotional Intensity or Insight**: Heated debt arguments, shocking income numbers, millionaire habits, counter-intuitive financial advice, or psychological money breakdowns.
 3. **Standalone Cohesion**: The clip must make complete sense on its own without needing the rest of the 2-hour podcast.
-4. **Optimal Duration**: Each clip MUST be strictly between 30 and 60 seconds (target: 35-50s).
+4. **Optimal Duration**: Each clip MUST be between 30 and 140 seconds. Use the shortest coherent story that completes the thought; do not pad with repetition.
 5. **Exact Timestamps**: Use the provided transcript timestamps to specify precise start_time and end_time.
 6. **Punchy Curiosity-Gap Title**: Give each clip an engaging, high-CTR hook title in ALL CAPS (e.g., "THE $100,000 CREDIT CARD MISTAKE", "WHY YOU WILL NEVER RETIRE RICH", "THE 3 MONEY RULES OF MILLIONAIRES"). Max 5-7 words. Never include filler words ("um", "uh", "yeah"), and strictly DO NOT include emojis or special symbols.
 7. **STRICTLY NO EMOJIS IN METADATA**: Under NO circumstances use emojis in titles, social captions, or hashtags. Maintain an elite, clean broadcast aesthetic.
