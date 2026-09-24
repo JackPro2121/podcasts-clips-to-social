@@ -254,15 +254,12 @@ class BufferClient:
                 metadata = {
                     "pinterest": {
                         "title": clean_title[:95],
-                        "boardServiceId": board_service_id
+                        "boardServiceId": board_service_id,
+                        "thumbnailOffset": 1500
                     }
                 }
                 if source_url:
                     channel_text = f"{channel_text}\n\n👉 Watch the full episode: {source_url}"
-
-            video_asset = {"url": video_url}
-            if thumbnail_url:
-                video_asset["thumbnail"] = thumbnail_url
 
             post_input = {
                 "channelId": channel_id,
@@ -272,7 +269,9 @@ class BufferClient:
                 "needsApproval": False,
                 "assets": [
                     {
-                        "video": video_asset
+                        "video": {
+                            "url": video_url
+                        }
                     }
                 ]
             }
