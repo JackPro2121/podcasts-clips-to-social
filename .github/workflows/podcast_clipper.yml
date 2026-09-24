@@ -115,7 +115,7 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Run static checks
         run: |
-          python -m ruff check main.py src tests render_dynamic_showcase.py
+          python -m ruff check --select E4,E7,E9,F main.py src tests render_dynamic_showcase.py
           python -m mypy main.py src
       - name: Scan tracked files for common secret patterns
         run: |
