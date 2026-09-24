@@ -302,7 +302,7 @@ class BufferClient:
             if metadata:
                 post_input["metadata"] = metadata
 
-            payload = {
+            payload: Dict[str, Any] = {
                 "query": mutation,
                 "variables": {
                     "input": post_input

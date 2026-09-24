@@ -317,7 +317,7 @@ def download_via_apify(
     endpoint = f"https://api.apify.com/v2/acts/{actor_path}/runs"
     
     # Payload for full download vs targeted clip
-    payload = {
+    payload: Dict[str, Any] = {
         "videos": [{"url": video_url}],
         "preferredQuality": f"{quality}p",
         "storeInKVStore": True,
@@ -432,7 +432,7 @@ def download_segment_via_apify(
     if int_end <= int_start:
         int_end = int_start + 1
 
-    payload = {
+    payload: Dict[str, Any] = {
         "url": video_url,
         "format": str(quality),
         "startTime": int_start,
@@ -1117,7 +1117,7 @@ def fetch_transcript_via_apify(video_url: str, api_token: Optional[str] = None) 
         return None
     actor_path = quote(APIFY_TRANSCRIPT_ACTOR_ID.replace("/", "~"), safe="~")
     endpoint = f"https://api.apify.com/v2/acts/{actor_path}/run-sync-get-dataset-items"
-    payload = {"videos": [video_url], "language": "en", "includeSegments": True}
+    payload: Dict[str, Any] = {"videos": [video_url], "language": "en", "includeSegments": True}
     try:
         response = requests.post(
             endpoint,

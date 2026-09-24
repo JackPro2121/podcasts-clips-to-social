@@ -3,7 +3,7 @@ import uuid
 from pathlib import Path
 from datetime import datetime, timezone
 from urllib.parse import quote
-from typing import Optional
+from typing import Any, Dict, Optional
 from src.config import GITHUB_TOKEN, GITHUB_REPOSITORY
 
 # Network timeouts (connect, read). The upload gets a long read timeout because a
@@ -52,7 +52,7 @@ def upload_clip_to_github_release(
             release_data = get_res.json()
         else:
             # Create new release
-            create_payload = {
+            create_payload: Dict[str, Any] = {
                 "tag_name": tag,
                 "target_commitish": "main",
                 "name": f"Podcast Social Clips - {_utc_now().strftime('%Y-%m-%d')}",

@@ -1,9 +1,10 @@
+import importlib
 import json
 import re
 import time
 import requests
 import warnings
-from typing import List, Optional, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
 
 # Support both google.genai (new official SDK) and google.generativeai
@@ -17,7 +18,7 @@ except ImportError:
         warnings.simplefilter("ignore", category=FutureWarning)
         legacy_genai: Any = None
         try:
-            import google.generativeai as legacy_genai
+            legacy_genai = importlib.import_module("google.generativeai")
         except ImportError:
             legacy_genai = None
 
@@ -144,7 +145,7 @@ def query_groq_free_models(prompt: str, key: str) -> Optional[str]:
     for m in models:
         print(f"[*] Trying Groq Free Model ({m})...")
         try:
-            payload = {
+            payload: Dict[str, Any] = {
                 "model": m,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.3,
@@ -174,7 +175,7 @@ def query_openrouter_free_models(prompt: str, key: str) -> Optional[str]:
     for m in models:
         print(f"[*] Trying OpenRouter Free Model ({m})...")
         try:
-            payload = {
+            payload: Dict[str, Any] = {
                 "model": m,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.3,
@@ -205,7 +206,7 @@ def query_ollama_cloud_models(
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json"
     }
-    payload = {
+    payload: Dict[str, Any] = {
         "model": model_name,
         "messages": [{"role": "user", "content": prompt}],
         "stream": False
