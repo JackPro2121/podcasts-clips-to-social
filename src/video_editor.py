@@ -89,7 +89,8 @@ def _measured_loudnorm_filter(measurement: Dict[str, float]) -> str:
         f"measured_TP={measurement['input_tp']}:"
         f"measured_LRA={measurement['input_lra']}:"
         f"measured_thresh={measurement['input_thresh']}:"
-        f"offset={measurement['target_offset']}:linear=true"
+        f"offset={measurement['target_offset']}:linear=true,"
+        f"alimiter=limit=0.80:attack=5:release=50:level=0"
     )
 
 
