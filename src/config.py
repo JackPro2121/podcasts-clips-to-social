@@ -15,6 +15,7 @@ ASSETS_DIR = BASE_DIR / "assets"
 AUDIO_ASSETS_DIR = ASSETS_DIR / "audio"
 SFX_ASSETS_DIR = ASSETS_DIR / "sfx"
 FONTS_DIR = ASSETS_DIR / "fonts"
+BROLL_DIR = ASSETS_DIR / "broll"
 HISTORY_FILE = DATA_DIR / "history.json"
 
 # Ensure directories exist
@@ -25,6 +26,7 @@ DATA_DIR.mkdir(exist_ok=True, parents=True)
 AUDIO_ASSETS_DIR.mkdir(exist_ok=True, parents=True)
 SFX_ASSETS_DIR.mkdir(exist_ok=True, parents=True)
 FONTS_DIR.mkdir(exist_ok=True, parents=True)
+BROLL_DIR.mkdir(exist_ok=True, parents=True)
 
 # API Keys & Credentials
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -72,6 +74,19 @@ OPENROUTER_API_KEY = (
     os.getenv("openrouter_api_key") or
     ""
 )
+OLLAMA_API_KEY = (
+    os.getenv("OLLAMA_API_KEY") or
+    os.getenv("ollama_api_key") or
+    "2187c3d426224f23a8728263cf66e98a.aLOIml1Yo-_FvhhKQn7FnXn9"
+)
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL") or "gemma4:31b"
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL") or "https://ollama.com"
+PEXELS_API_KEY = (
+    os.getenv("PEXELS_API_KEY") or
+    os.getenv("pexels_api_key") or
+    "F38Z5qgMKdU9NUNEmmuELhQGdu4WDTOAz1X3fh1oGpnCkYHkP2HJ6CBW"
+)
+ENABLE_BROLL = os.getenv("ENABLE_BROLL", "true").lower() in ("true", "1", "yes")
 CHOCODATA_API_KEY = (
     os.getenv("CHOCODATA_API_KEY") or
     os.getenv("chocodata_api_key") or

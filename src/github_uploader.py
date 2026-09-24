@@ -77,9 +77,10 @@ def upload_clip_to_github_release(
     upload_base = upload_url_template.split("{")[0]
 
     filename = clip_path.name
+    content_type = "image/jpeg" if filename.lower().endswith((".jpg", ".jpeg")) else "video/mp4"
     upload_headers = {
         "Authorization": f"Bearer {auth_token}",
-        "Content-Type": "video/mp4"
+        "Content-Type": content_type
     }
 
     print(f"[*] Uploading {filename} ({clip_path.stat().st_size / (1024*1024):.2f} MB) to GitHub Releases...")

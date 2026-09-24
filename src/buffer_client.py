@@ -157,7 +157,8 @@ class BufferClient:
         title: Optional[str] = None,
         channel_ids: Optional[List[str]] = None,
         due_at: Optional[str] = None,
-        source_url: Optional[str] = None
+        source_url: Optional[str] = None,
+        thumbnail_url: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Schedules video clip on specified or all connected Buffer channels.
@@ -259,6 +260,10 @@ class BufferClient:
                 if source_url:
                     channel_text = f"{channel_text}\n\n👉 Watch the full episode: {source_url}"
 
+            video_asset = {"url": video_url}
+            if thumbnail_url:
+                video_asset["thumbnail"] = thumbnail_url
+
             post_input = {
                 "channelId": channel_id,
                 "text": channel_text,
@@ -267,9 +272,7 @@ class BufferClient:
                 "needsApproval": False,
                 "assets": [
                     {
-                        "video": {
-                            "url": video_url
-                        }
+                        "video": video_asset
                     }
                 ]
             }

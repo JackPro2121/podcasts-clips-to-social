@@ -25,7 +25,8 @@ def build_video_filtergraph(
     framing: FramingDecision,
     peak_intensity_segments: List[Tuple[float, float]] = [],
     ass_subtitle_path: Optional[Path] = None,
-    burn_subtitles: bool = True
+    burn_subtitles: bool = True,
+    broll_inputs: List[Tuple[int, float, float]] = []
 ) -> str:
     """
     Constructs the complete FFmpeg video filtergraph with professional upgrades:
@@ -206,6 +207,15 @@ def build_video_filtergraph(
     else:
         base_label = "[base]"
 
+    # Overlay Pexels B-roll clips (underneath subtitles, on top of host/guest video)
+    if broll_inputs:
+        for idx_b, (b_in_idx, b_start, b_end) in enumerate(broll_inputs):
+            b_prep = f"broll_prep_{idx_b}"
+            b_out = f"broll_out_{idx_b}"
+            broll_scale_f = f"[{b_in_idx}:v]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},setsar=1:1,fps={FPS}[{b_prep}]"
+            broll_overlay_f = f"{base_label}[{b_prep}]overlay=enable='between(t,{b_start:.2f},{b_end:.2f})'[{b_out}]"
+            filters.append(f"{broll_scale_f};{broll_overlay_f}")
+            base_label = f"[{b_out}]"
 
     if burn_subtitles and ass_subtitle_path and ass_subtitle_path.exists():
         escaped_ass = sanitize_ffmpeg_path(ass_subtitle_path)
@@ -244,16 +254,30 @@ def render_viral_clip(
     ass_subtitle_path: Optional[Path] = None,
     burn_subtitles: bool = True,
     bgm_path: Optional[Path] = None,
-    sfx_cues: List[Tuple[float, str]] = []
+    sfx_cues: List[Tuple[float, str]] = [],
+    broll_cues: List[Tuple[float, float, Path, str]] = []
 ) -> Path:
     duration = end_time - start_time
     output_clip_path.parent.mkdir(parents=True, exist_ok=True)
+
+    current_input_idx = 0
+    input_args = ["-ss", f"{start_time:.2f}", "-t", f"{duration:.2f}", "-i", str(source_video_path)]
+
+    # Process B-roll stock footage overlays
+    broll_inputs: List[Tuple[int, float, float]] = []
+    if broll_cues:
+        for b_start, b_end, b_path, _kw in broll_cues:
+            if b_path and b_path.exists() and (b_end > b_start):
+                current_input_idx += 1
+                input_args.extend(["-stream_loop", "-1", "-i", str(b_path)])
+                broll_inputs.append((current_input_idx, b_start, b_end))
 
     video_filters = build_video_filtergraph(
         framing=framing,
         peak_intensity_segments=peak_intensity_segments,
         ass_subtitle_path=ass_subtitle_path,
-        burn_subtitles=burn_subtitles
+        burn_subtitles=burn_subtitles,
+        broll_inputs=broll_inputs
     )
     audio_filters = build_audio_filtergraph()
 
@@ -268,9 +292,6 @@ def render_viral_clip(
     active_bgm = bgm_path or (AUDIO_ASSETS_DIR / "ambient_lofi_loop.mp3")
     use_bgm = ENABLE_BGM and active_bgm and active_bgm.exists()
 
-    current_input_idx = 0
-    input_args = ["-ss", f"{start_time:.2f}", "-t", f"{duration:.2f}", "-i", str(source_video_path)]
-    
     bgm_input_idx = None
     if use_bgm:
         current_input_idx += 1

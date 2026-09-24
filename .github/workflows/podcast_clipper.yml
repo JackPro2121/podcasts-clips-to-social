@@ -174,6 +174,10 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY || secrets.groq_api_key }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY || secrets.openrouter_api_key }}
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY || '2187c3d426224f23a8728263cf66e98a.aLOIml1Yo-_FvhhKQn7FnXn9' }}
+          OLLAMA_MODEL: ${{ vars.OLLAMA_MODEL || 'gemma4:31b' }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY || 'F38Z5qgMKdU9NUNEmmuELhQGdu4WDTOAz1X3fh1oGpnCkYHkP2HJ6CBW' }}
+          ENABLE_BROLL: 'true'
           BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN || secrets.BUFFER_API_KEY }}
           BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY || secrets.BUFFER_ACCESS_TOKEN }}
           BUFFER_CHANNEL_IDS: ${{ secrets.BUFFER_CHANNEL_IDS }}

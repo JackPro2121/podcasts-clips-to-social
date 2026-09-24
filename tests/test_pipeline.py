@@ -306,7 +306,8 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         """fetch_transcript_only must return None when youtube_transcript_api finds nothing."""
         from unittest.mock import patch
         from src.downloader import fetch_transcript_only
-        with patch("src.downloader.fetch_youtube_transcript", return_value=None):
+        with patch("src.downloader.fetch_youtube_transcript", return_value=None), \
+             patch("src.transcriber.fetch_transcript_chocodata", return_value=None):
             result = fetch_transcript_only("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
         self.assertIsNone(result)
 

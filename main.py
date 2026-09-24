@@ -23,6 +23,8 @@ from src.viral_detector import detect_viral_moments
 from src.face_tracker import analyze_faces_in_clip, FramingDecision
 from src.subtitle_generator import create_styled_ass_subtitles
 from src.video_editor import render_viral_clip
+from src.thumbnail_generator import generate_clip_thumbnail
+from src.broll_manager import find_broll_cues_for_clip
 from src.github_uploader import upload_clip_to_github_release
 from src.buffer_client import BufferClient
 from src.slack_notifier import SlackNotifier
@@ -182,6 +184,17 @@ def run_pipeline(
             safe_title = safe_title.replace(" ", "_")[:30]
             out_clip_path = CLIPS_DIR / f"clip_{idx}_{safe_title}.mp4"
 
+            # Detect and configure Pexels B-roll stock footage overlays
+            broll_cues = []
+            if segments:
+                clip_words = []
+                for s in segments:
+                    for w in getattr(s, "words", []):
+                        if moment.start_time <= w.start <= moment.end_time:
+                            clip_words.append(w)
+                if clip_words:
+                    broll_cues = find_broll_cues_for_clip(clip_words, clip_duration=clip_duration)
+
             try:
                 rendered_path = render_viral_clip(
                     source_video_path=clip_path,
@@ -192,9 +205,20 @@ def run_pipeline(
                     peak_intensity_segments=getattr(moment, "peak_intensity_segments", []),
                     ass_subtitle_path=ass_path,
                     burn_subtitles=burn_subtitles,
-                    sfx_cues=getattr(moment, "sfx_cues", [])
+                    sfx_cues=getattr(moment, "sfx_cues", []),
+                    broll_cues=broll_cues
                 )
-                rendered_clips.append({"path": rendered_path, "moment": moment})
+                thumb_path = generate_clip_thumbnail(
+                    clip_path=rendered_path,
+                    title=moment.title,
+                    badge_text="MUST WATCH",
+                    watermark=watermark
+                )
+                rendered_clips.append({
+                    "path": rendered_path,
+                    "thumbnail": thumb_path,
+                    "moment": moment
+                })
             except Exception as e:
                 print(f"[-] Rendering failed for clip #{idx} ('{moment.title}'): {e}")
                 continue
@@ -405,9 +429,11 @@ def run_pipeline(
     clips_report = []
     for item in rendered_clips:
         clip_path = item["path"]
+        thumb_path = item.get("thumbnail")
         moment = item["moment"]
 
         direct_url = upload_clip_to_github_release(clip_path)
+        thumb_url = upload_clip_to_github_release(thumb_path) if thumb_path and thumb_path.exists() else None
 
         buffer_status = "Local Only"
         if post_to_buffer and direct_url:
@@ -416,7 +442,8 @@ def run_pipeline(
                 video_url=direct_url,
                 text=caption_text,
                 title=moment.title,
-                source_url=active_source_url
+                source_url=active_source_url,
+                thumbnail_url=thumb_url
             )
             buffer_status = "Scheduled" if schedule_results else "Failed"
         elif post_to_buffer and not direct_url:
@@ -428,6 +455,7 @@ def run_pipeline(
             "virality_score": getattr(moment, "viral_score", 85),
             "duration": moment.end_time - moment.start_time,
             "download_url": direct_url or "",
+            "thumbnail_url": thumb_url or "",
             "buffer_status": buffer_status
         })
 

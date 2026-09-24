@@ -1160,7 +1160,7 @@ def download_clip_segment(
 
     # yt-dlp --download-sections takes "*START-END" notation (seconds)
     section_spec = f"*{start_time:.2f}-{end_time:.2f}"
-    print(f"[*] Targeted clip download: segment {section_spec} (~{clip_duration:.0f}s) → {out_file.name}")
+    print(f"[*] Targeted clip download: segment {section_spec} (~{clip_duration:.0f}s) -> {out_file.name}")
 
     # -------------------------------------------------------------------------
     # STRATEGY 1: Apify Segment Actor (Primary — bypasses datacenter bot detection)

@@ -20,7 +20,10 @@ except ImportError:
         except ImportError:
             legacy_genai = None
 
-from src.config import GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY
+from src.config import (
+    GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY,
+    OLLAMA_API_KEY, OLLAMA_MODEL, OLLAMA_BASE_URL
+)
 from src.transcriber import TranscriptSegment
 
 # Suppress the non-blocking AFC function-calling advisory notice from google.genai
@@ -185,6 +188,38 @@ def query_openrouter_free_models(prompt: str, key: str) -> Optional[str]:
                 print(f"[-] OpenRouter {m} returned status {r.status_code}")
         except Exception as e:
             print(f"[-] OpenRouter {m} error: {e}")
+    return None
+
+def query_ollama_cloud_models(
+    prompt: str,
+    key: str,
+    model_name: str = OLLAMA_MODEL,
+    base_url: str = OLLAMA_BASE_URL
+) -> Optional[str]:
+    """Queries Ollama Cloud endpoint (e.g., gemma4:31b) with bearer auth."""
+    print(f"[*] Trying Ollama Cloud Model ({model_name})...")
+    url = f"{base_url.rstrip('/')}/api/chat"
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": model_name,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False
+    }
+    try:
+        r = requests.post(url, headers=headers, json=payload, timeout=60)
+        if r.status_code == 200:
+            data = r.json()
+            content = data.get("message", {}).get("content", "").strip()
+            if content and len(content) > 20:
+                print(f"[+] Ollama Cloud model ({model_name}) returned viral moments successfully!")
+                return content
+        else:
+            print(f"[-] Ollama Cloud ({model_name}) returned status {r.status_code}: {r.text[:200]}")
+    except Exception as e:
+        print(f"[-] Ollama Cloud ({model_name}) error: {e}")
     return None
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -357,14 +392,19 @@ Do not include markdown backticks or commentary outside the JSON.
         print("[*] Tier 1: Sending transcript to Google Gemini Flash...")
         raw_text = query_gemini_models(prompt, gemini_key)
 
-    # Tier 2: Groq Free Tier
+    # Tier 2: Ollama Cloud (gemma4:31b)
+    if not raw_text and OLLAMA_API_KEY:
+        print(f"[*] Tier 2: Falling back to Ollama Cloud ({OLLAMA_MODEL})...")
+        raw_text = query_ollama_cloud_models(prompt, OLLAMA_API_KEY, OLLAMA_MODEL, OLLAMA_BASE_URL)
+
+    # Tier 3: Groq Free Tier
     if not raw_text and GROQ_API_KEY:
-        print("[*] Tier 2: Falling back to Groq free models...")
+        print("[*] Tier 3: Falling back to Groq free models...")
         raw_text = query_groq_free_models(prompt, GROQ_API_KEY)
 
-    # Tier 3: OpenRouter Free Tier
+    # Tier 4: OpenRouter Free Tier
     if not raw_text and OPENROUTER_API_KEY:
-        print("[*] Tier 3: Falling back to OpenRouter free models...")
+        print("[*] Tier 4: Falling back to OpenRouter free models...")
         raw_text = query_openrouter_free_models(prompt, OPENROUTER_API_KEY)
 
     # Parse JSON if any LLM responded
