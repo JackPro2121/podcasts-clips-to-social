@@ -467,10 +467,10 @@ def download_segment_via_apify(
             return None
 
         if not direct_url and poll_url:
-            if not _is_trusted_apify_url(poll_url) or not _is_public_https_url(poll_url):
-                print("[-] Apify returned an unsafe polling URL.")
+            if not _is_public_https_url(poll_url):
+                print(f"[-] Apify returned an unsafe polling URL for host '{urlparse(poll_url).hostname or 'invalid'}'.")
                 return None
-            poll_headers = {"Authorization": f"Bearer {token}"}
+            poll_headers = {"Authorization": f"Bearer {token}"} if _is_trusted_apify_url(poll_url) else {}
             completed = None
             for attempt in range(75):
                 time.sleep(3)
