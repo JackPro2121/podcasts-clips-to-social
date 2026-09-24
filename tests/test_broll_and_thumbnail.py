@@ -233,7 +233,7 @@ class TestBrollAndThumbnail(unittest.TestCase):
         self.assertIn("measured_TP=-1.5", filter_text)
         self.assertIn("linear=true", filter_text)
 
-    def test_render_clamps_to_actual_source_duration(self):
+    def test_render_rejects_underlength_source_duration(self):
         import tempfile
         from unittest.mock import MagicMock, patch
         from src.face_tracker import FramingDecision
@@ -242,52 +242,32 @@ class TestBrollAndThumbnail(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
             source_path = tmp_path / "source.mp4"
-            broll_path = tmp_path / "broll.mp4"
             output_path = tmp_path / "output.mp4"
             source_path.write_bytes(b"source")
-            broll_path.write_bytes(b"broll")
 
             def fake_run(cmd, *args, **kwargs):
-                if cmd[0] == "ffprobe":
-                    if "format=duration" in cmd:
-                        return MagicMock(returncode=0, stdout="1.50\n", stderr="")
-                    return MagicMock(returncode=0, stdout="audio\n", stderr="")
-                Path(cmd[-1]).write_bytes(b"rendered")
+                if cmd[0] == "ffprobe" and "format=duration" in cmd:
+                    return MagicMock(returncode=0, stdout="1.50\n", stderr="")
                 return MagicMock(returncode=0, stdout="", stderr="")
 
-            with patch("subprocess.run", side_effect=fake_run) as mock_run, \
-                 patch("src.video_editor._measure_loudness", return_value=fake_loudness_measurement()), \
-                 patch("src.video_editor._apply_measured_loudness", side_effect=copy_normalized_output), \
-                 patch("src.video_editor._validate_rendered_output"):
-                render_viral_clip(
-                    source_video_path=source_path,
-                    start_time=0.0,
-                    end_time=5.0,
-                    output_clip_path=output_path,
-                    framing=FramingDecision(
-                        mode="single_smooth",
-                        face_count=0,
-                        video_width=320,
-                        video_height=240,
-                        active_w=320,
-                        active_h=240,
-                        smoothed_center_x=160,
-                    ),
-                    burn_subtitles=False,
-                    broll_cues=[(1.0, 4.0, broll_path, "money")],
-                )
-
-            ffmpeg_call = next(
-                call for call in mock_run.call_args_list
-                if call[0][0][0] == "ffmpeg"
-            )
-            cmd = ffmpeg_call[0][0]
-            self.assertEqual(cmd[cmd.index("-t") + 1], "1.50")
-            output_t_index = cmd.index("-t", cmd.index("-filter_complex"))
-            self.assertEqual(cmd[output_t_index + 1], "1.50")
-            filter_graph = cmd[cmd.index("-filter_complex") + 1]
-            self.assertIn("trim=start=1.00:end=1.50", filter_graph)
-            self.assertIn("between(t,1.00,1.50)", filter_graph)
+            with patch("subprocess.run", side_effect=fake_run):
+                with self.assertRaisesRegex(RuntimeError, "does not cover requested clip"):
+                    render_viral_clip(
+                        source_video_path=source_path,
+                        start_time=0.0,
+                        end_time=5.0,
+                        output_clip_path=output_path,
+                        framing=FramingDecision(
+                            mode="single_smooth",
+                            face_count=0,
+                            video_width=320,
+                            video_height=240,
+                            active_w=320,
+                            active_h=240,
+                            smoothed_center_x=160,
+                        ),
+                        burn_subtitles=False,
+                    )
 
     def test_render_adds_silent_voice_bed_for_confirmed_no_audio(self):
         import tempfile

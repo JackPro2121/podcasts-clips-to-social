@@ -152,7 +152,7 @@ def _validate_rendered_output(path: Path, expected_duration: float) -> None:
         measured_duration = float(video.get("duration") or format_info.get("duration") or 0.0)
     except (KeyError, StopIteration, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"Rendered output metadata is invalid for {path.name}") from exc
-    if abs(measured_duration - expected_duration) > max(0.5, expected_duration * 0.1):
+    if abs(measured_duration - expected_duration) > max(0.5, 2.0 / FPS):
         raise RuntimeError("Rendered output duration is outside the allowed tolerance")
 
 
@@ -462,6 +462,11 @@ def render_viral_clip(
         available_duration = max(0.0, source_duration - start_time)
         if available_duration <= 0:
             raise RuntimeError(f"Requested clip starts after source EOF for {output_clip_path.name}")
+        if available_duration + 0.5 < requested_duration:
+            raise RuntimeError(
+                f"Source does not cover requested clip for {output_clip_path.name}: "
+                f"available={available_duration:.2f}s requested={requested_duration:.2f}s"
+            )
         duration = min(requested_duration, available_duration)
     else:
         duration = requested_duration

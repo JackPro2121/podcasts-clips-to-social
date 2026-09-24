@@ -16,7 +16,7 @@ from src.config import (
 )
 from src.downloader import (
     download_video, fetch_transcript_only, download_clip_segment, extract_youtube_id,
-    get_video_dimensions, APIFY_API_TOKEN,
+    get_video_dimensions, get_video_duration, APIFY_API_TOKEN,
 )
 from src.transcriber import (
     align_clip_transcript,
@@ -201,6 +201,10 @@ def run_pipeline(
 
             render_start = float(clip_info.get("segment_start", 0.0))
             render_end = render_start + clip_duration
+            downloaded_duration = get_video_duration(Path(clip_path))
+            if downloaded_duration > 0 and downloaded_duration + 0.5 < render_end:
+                print(f"[-] Downloaded segment #{idx} is short ({downloaded_duration:.2f}s < {render_end:.2f}s). Skipping before render.")
+                continue
 
             if framing_mode == "auto":
                 print("[*] Running AI Face Detection & Speaker Tracking on segment...")

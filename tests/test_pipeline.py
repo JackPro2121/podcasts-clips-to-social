@@ -155,6 +155,47 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         ]
         self.assertEqual(_normalize_clip_window(20.5, 55.5, segments), (20.0, 56.2))
 
+    def test_clip_window_rejects_incomplete_endpoint_without_sentence_boundary(self):
+        from src.viral_detector import _normalize_clip_window
+
+        segments = [
+            TranscriptSegment(
+                start=0.0,
+                end=100.0,
+                text="An incomplete thought that never closes",
+                words=[
+                    WordTimestamp(word="An", start=0.0, end=1.0),
+                    WordTimestamp(word="incomplete", start=10.0, end=11.0),
+                    WordTimestamp(word="what's-", start=20.0, end=21.0),
+                ],
+            )
+        ]
+        self.assertIsNone(_normalize_clip_window(0.0, 40.0, segments))
+
+    def test_clip_window_repairs_incomplete_endpoint_to_next_sentence(self):
+        from src.viral_detector import _normalize_clip_window
+
+        segments = [
+            TranscriptSegment(
+                start=0.0,
+                end=50.0,
+                text="A complete thought",
+                words=[
+                    WordTimestamp(word="A", start=0.0, end=1.0),
+                    WordTimestamp(word="complete.", start=10.0, end=11.0),
+                    WordTimestamp(word="But", start=20.0, end=21.0),
+                    WordTimestamp(word="it's", start=21.0, end=22.0),
+                    WordTimestamp(word="those", start=22.0, end=23.0),
+                    WordTimestamp(word="micro", start=23.0, end=24.0),
+                    WordTimestamp(word="purchases,", start=24.0, end=25.0),
+                    WordTimestamp(word="what's-", start=25.0, end=26.0),
+                    WordTimestamp(word="the", start=26.0, end=27.0),
+                    WordTimestamp(word="problem.", start=40.0, end=41.0),
+                ],
+            )
+        ]
+        self.assertEqual(_normalize_clip_window(0.0, 26.5, segments), (0.0, 41.0))
+
     def test_ass_text_normalization_and_escaping(self):
         self.assertEqual(
             normalize_caption_text("C++ 100% café 🚀\n$5"),
@@ -212,6 +253,18 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertNotIn("AFTER", content)
         created.unlink()
 
+    def test_subtitle_drops_word_crossing_complete_endpoint(self):
+        out_ass = Path("subtitles/test_cross_boundary_word.ass")
+        create_styled_ass_subtitles(
+            segments=[TranscriptSegment(0.0, 1.0, "what's-", [WordTimestamp("what's-", 0.8, 1.1)])],
+            clip_start=0.0,
+            clip_end=1.0,
+            output_ass_path=out_ass,
+        )
+        content = out_ass.read_text(encoding="utf-8")
+        self.assertNotIn("WHAT", content)
+        out_ass.unlink()
+
     def test_subtitle_groups_words_into_short_phrases(self):
         words = [
             WordTimestamp(word="One", start=0.0, end=1.0),
@@ -229,6 +282,27 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         lines = out_ass.read_text(encoding="utf-8").splitlines()
         self.assertTrue(any("ONE" in line and "TWO" in line for line in lines))
         self.assertTrue(any("THREE" in line and "FOUR" in line for line in lines))
+        out_ass.unlink()
+
+    def test_subtitle_groups_words_across_native_caption_gaps(self):
+        words = [
+            WordTimestamp(word="One", start=0.0, end=0.4),
+            WordTimestamp(word="Two", start=0.9, end=1.3),
+            WordTimestamp(word="Three", start=1.8, end=2.2),
+            WordTimestamp(word="Four", start=2.7, end=3.1),
+        ]
+        out_ass = Path("subtitles/test_phrase_gap_grouping.ass")
+        create_styled_ass_subtitles(
+            segments=[TranscriptSegment(0.0, 3.1, "One Two Three Four", words)],
+            clip_start=0.0,
+            clip_end=3.1,
+            output_ass_path=out_ass,
+        )
+        content = out_ass.read_text(encoding="utf-8")
+        dialogue_lines = [line for line in content.splitlines() if line.startswith("Dialogue: 0,")]
+        self.assertEqual(len(dialogue_lines), 2)
+        self.assertTrue(any("ONE" in line and "TWO" in line for line in dialogue_lines))
+        self.assertTrue(any("THREE" in line and "FOUR" in line for line in dialogue_lines))
         out_ass.unlink()
 
     def test_local_transcript_alignment_replaces_estimated_timing(self):

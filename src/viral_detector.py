@@ -258,44 +258,35 @@ MIN_CLIP_DURATION = 30.0
 MAX_CLIP_DURATION = 140.0
 
 
+def _complete_boundary_ends(segments: List[TranscriptSegment]) -> List[float]:
+    words = sorted((word for segment in segments for word in segment.words), key=lambda word: word.start)
+    boundaries: List[float] = []
+    for index, word in enumerate(words):
+        clean_word = word.word.rstrip("\"')]} ").lower()
+        next_word = words[index + 1] if index + 1 < len(words) else None
+        gap = next_word.start - word.end if next_word else 0.0
+        if clean_word.endswith((".", "?", "!")) or gap >= 1.2:
+            boundaries.append(word.end)
+    return boundaries
+
+
 def _safe_start_boundary(segments: List[TranscriptSegment], requested: float, lookback: float = 8.0) -> float:
-    words = sorted((word for segment in segments for word in segment.words), key=lambda word: word.start)
-    boundary = requested
-    for index, word in enumerate(words):
-        if word.end > requested or word.end < requested - lookback:
-            continue
-        next_word = words[index + 1] if index + 1 < len(words) else None
-        gap = next_word.start - word.end if next_word else 0.0
-        if word.word.rstrip().endswith((".", "?", "!")) or gap >= 0.45:
-            boundary = word.end
-            break
-    if boundary != requested:
-        return boundary
-    for segment in segments:
-        if segment.start <= requested <= segment.end and requested - segment.start <= lookback:
-            return segment.start
-    return requested
+    boundaries = [end for end in _complete_boundary_ends(segments) if requested - lookback <= end <= requested]
+    return boundaries[-1] if boundaries else requested
 
 
-def _safe_end_boundary(segments: List[TranscriptSegment], requested: float, lookahead: float = 12.0) -> float:
-    words = sorted((word for segment in segments for word in segment.words), key=lambda word: word.start)
-    boundary = requested
-    for index, word in enumerate(words):
-        if word.start < requested:
-            continue
-        if word.start > requested + lookahead:
-            break
-        next_word = words[index + 1] if index + 1 < len(words) else None
-        gap = next_word.start - word.end if next_word else 0.0
-        if word.word.rstrip().endswith((".", "?", "!")) or gap >= 0.45:
-            boundary = word.end
-            break
-    if boundary != requested:
-        return boundary
-    for segment in segments:
-        if requested <= segment.end <= requested + lookahead and segment.text.rstrip().endswith((".", "?", "!")):
-            return segment.end
-    return requested
+def _safe_end_boundary(
+    segments: List[TranscriptSegment],
+    requested: float,
+    start: float,
+    max_end: float,
+) -> Optional[float]:
+    boundaries = _complete_boundary_ends(segments)
+    future = [end for end in boundaries if requested - 0.05 <= end <= max_end]
+    if future:
+        return future[0]
+    prior = [end for end in boundaries if start + MIN_CLIP_DURATION <= end < requested]
+    return prior[-1] if prior else None
 
 
 def _normalize_clip_window(
@@ -312,15 +303,22 @@ def _normalize_clip_window(
     start = min(start, transcript_end - MIN_CLIP_DURATION)
     end = max(end, start + MIN_CLIP_DURATION)
     end = min(end, start + MAX_CLIP_DURATION, transcript_end)
-    start = min(_safe_start_boundary(segments, start), start)
-    end = max(_safe_end_boundary(segments, end), end)
-    if end - start < MIN_CLIP_DURATION:
-        end = min(transcript_end, start + MIN_CLIP_DURATION)
-    if end - start > MAX_CLIP_DURATION:
+    if any(segment.words for segment in segments):
+        start = min(_safe_start_boundary(segments, start), start)
+        safe_end = _safe_end_boundary(
+            segments,
+            requested=end,
+            start=start,
+            max_end=start + MAX_CLIP_DURATION,
+        )
+        if safe_end is None:
+            return None
+        end = safe_end
+    if end - start < MIN_CLIP_DURATION or end - start > MAX_CLIP_DURATION:
         return None
-    if end - start < MIN_CLIP_DURATION or end > transcript_end + 0.01:
+    if end > transcript_end + 0.01:
         return None
-    return round(start, 2), round(end, 2)
+    return round(float(start), 2), round(float(end), 2)
 
 
 NICHE_PROFILES = {
@@ -465,10 +463,11 @@ Your goal is to analyze the following podcast transcript and extract the top {nu
 2. **High Emotional Intensity or Insight**: Heated debt arguments, shocking income numbers, millionaire habits, counter-intuitive financial advice, or psychological money breakdowns.
 3. **Standalone Cohesion**: The clip must make complete sense on its own without needing the rest of the 2-hour podcast.
 4. **Optimal Duration**: Each clip MUST be between 30 and 140 seconds. Use the shortest coherent story that completes the thought; do not pad with repetition.
-5. **Exact Timestamps**: Use the provided transcript timestamps to specify precise start_time and end_time.
-6. **Punchy Curiosity-Gap Title**: Give each clip an engaging, high-CTR hook title in ALL CAPS (e.g., "THE $100,000 CREDIT CARD MISTAKE", "WHY YOU WILL NEVER RETIRE RICH", "THE 3 MONEY RULES OF MILLIONAIRES"). Max 5-7 words. Never include filler words ("um", "uh", "yeah"), and strictly DO NOT include emojis or special symbols.
-7. **STRICTLY NO EMOJIS IN METADATA**: Under NO circumstances use emojis in titles, social captions, or hashtags. Maintain an elite, clean broadcast aesthetic.
-8. **Director Cues**:
+5. **Complete Boundaries**: The start must begin at a complete thought and the end must land after a complete sentence or question. Never end on a partial word, a dangling conjunction, or a sentence fragment.
+6. **Exact Timestamps**: Use the provided transcript timestamps to specify precise start_time and end_time.
+7. **Punchy Curiosity-Gap Title**: Give each clip an engaging, high-CTR hook title in ALL CAPS (e.g., "THE $100,000 CREDIT CARD MISTAKE", "WHY YOU WILL NEVER RETIRE RICH", "THE 3 MONEY RULES OF MILLIONAIRES"). Max 5-7 words. Never include filler words ("um", "uh", "yeah"), and strictly DO NOT include emojis or special symbols.
+8. **STRICTLY NO EMOJIS IN METADATA**: Under NO circumstances use emojis in titles, social captions, or hashtags. Maintain an elite, clean broadcast aesthetic.
+9. **Director Cues**:
    - Identify 1-3 "Peak Intensity" segments for automatic 1.2x zoom. Provide relative start and end seconds.
    - Suggest sound effect triggers in "sfx_cues": e.g. [[0.1, "whoosh"], [15.2, "pop"], [32.0, "ding"]].
    - Select 2-5 high-impact keywords for "keyword_emojis" (e.g. {{"money": "💰", "focus": "🎯"}}).

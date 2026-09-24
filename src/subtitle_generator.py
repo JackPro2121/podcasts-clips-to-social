@@ -134,14 +134,14 @@ def create_styled_ass_subtitles(
     max_words = max(2, min(4, int(theme.get("max_words_per_line", 3))))
     uppercase = theme.get("uppercase", True)
     highlight_color = theme.get("highlight_color", "&H0000E6FF")
-    primary_color = theme.get("primary_color", "&H00FFFFFF")
 
     # Filter words strictly within the clip duration and offset timestamps to 0.0s
     clip_duration = max(0.0, clip_end - clip_start)
     clip_words: List[WordTimestamp] = []
+    has_word_timestamps = any(segment.words for segment in segments)
     for seg in segments:
         for w in seg.words:
-            if w.end <= clip_start or w.start >= clip_end:
+            if w.end <= clip_start or w.start >= clip_end or w.end > clip_end + 0.05:
                 continue
             rel_start = max(0.0, min(clip_duration, w.start - clip_start))
             rel_end = max(rel_start, min(clip_duration, w.end - clip_start))
@@ -151,7 +151,7 @@ def create_styled_ass_subtitles(
                 rel_end = min(clip_duration, rel_start + 0.1)
             if rel_end <= rel_start:
                 continue
-            clean_word = normalize_caption_text(w.word).strip(" \t.,!?;:'\"()[]{}")
+            clean_word = normalize_caption_text(w.word).strip(" \t.,!?;:'\"()[]{}-")
             if not clean_word or not any(c.isalnum() for c in clean_word):
                 continue
             clean_text = clean_word.upper() if uppercase else clean_word
@@ -162,7 +162,7 @@ def create_styled_ass_subtitles(
                 is_estimated=bool(getattr(w, "is_estimated", False)),
             ))
 
-    if not clip_words:
+    if not clip_words and not has_word_timestamps:
         for seg in segments:
             rel_start = max(0.0, min(clip_duration, seg.start - clip_start))
             rel_end = max(rel_start, min(clip_duration, seg.end - clip_start))
@@ -202,7 +202,6 @@ def create_styled_ass_subtitles(
     effective_max_words = max_words
     if wpm > 190 and len(clip_words) > 10:
         effective_max_words = min(4, effective_max_words + 1)
-    single_word_font_size = None
 
     base_margin_v = default_margin_v(layout_mode)
 
@@ -219,59 +218,49 @@ def create_styled_ass_subtitles(
                     return margin, int(getattr(s, "subtitle_alignment", 2)), placement
         return base_margin_v, 2, "lower_third"
 
+    def word_color(word: WordTimestamp) -> str:
+        clean_lower = re.sub(r'[^a-z0-9]', '', word.word.lower())
+        if clean_lower in MONEY_KEYWORDS or any(c.isdigit() for c in word.word) or '$' in word.word:
+            return "&H0033FF22"
+        if clean_lower in DANGER_KEYWORDS:
+            return "&H003333FF"
+        if clean_lower in POWER_KEYWORDS:
+            return "&H0000D7FF"
+        return highlight_color
+
     lines: List[str] = []
     i = 0
-
     while i < len(clip_words):
         chunk: List[WordTimestamp] = []
         while i < len(clip_words) and len(chunk) < effective_max_words:
             candidate = clip_words[i]
-            if chunk and candidate.start - chunk[-1].end >= 0.45:
+            if chunk and candidate.start - chunk[-1].end >= 1.2:
                 break
             chunk.append(candidate)
             i += 1
         if not chunk:
             continue
 
-        for active_idx, target_word in enumerate(chunk):
-            w_start = target_word.start
-            if active_idx + 1 < len(chunk):
-                w_end = chunk[active_idx + 1].start
-            else:
-                w_end = target_word.end
-
-            animation_end_ms = max(70, min(140, int(round((w_end - w_start) * 1000))))
-            animation_mid_ms = max(35, animation_end_ms // 2)
-            word_elements = []
-            for idx, w in enumerate(chunk):
-                if idx == active_idx:
-                    # Semantic word coloring: Money/Numbers = Lime Green, Danger = Red, Power = Gold
-                    clean_lower = re.sub(r'[^a-z0-9]', '', w.word.lower())
-                    if clean_lower in MONEY_KEYWORDS or any(c.isdigit() for c in w.word) or '$' in w.word:
-                        active_color = "&H0033FF22"  # Neon Lime Green
-                    elif clean_lower in DANGER_KEYWORDS:
-                        active_color = "&H003333FF"  # Fire Red
-                    elif clean_lower in POWER_KEYWORDS:
-                        active_color = "&H0000D7FF"  # Warm Gold
-                    else:
-                        active_color = highlight_color
-
-                    # High-energy kinetic bounce pop: 118% scale punch settling to 100%
-                    # Clean bold typography without unrenderable emoji tofu boxes
-                    safe_word = escape_ass_text(w.word)
-                    word_elements.append(
-                        f"{{\\c{active_color}\\t(0,{animation_mid_ms},\\fscx118\\fscy118)\\t({animation_mid_ms},{animation_end_ms},\\fscx100\\fscy100)}}{safe_word}{{\\c{primary_color}\\fscx100\\fscy100}}"
-                    )
-                else:
-                    word_elements.append(escape_ass_text(w.word))
-
-            dialogue_text = " ".join(word_elements)
-            w_mid = (w_start + w_end) / 2
-            active_margin_v, active_alignment, placement = get_shot_style(w_mid)
-            placement_prefix = f"{{\\an{active_alignment}}}" if placement == "divider" else ""
-            event_name = "estimated" if getattr(target_word, "is_estimated", False) else ""
-            ass_line = f"Dialogue: 0,{format_ass_timestamp(w_start)},{format_ass_timestamp(w_end)},Default,{event_name},0,0,{active_margin_v},,{placement_prefix}{dialogue_text}"
-            lines.append(ass_line)
+        w_start = chunk[0].start
+        w_end = chunk[-1].end
+        animation_end_ms = max(70, min(140, int(round((w_end - w_start) * 1000))))
+        animation_mid_ms = max(35, animation_end_ms // 2)
+        word_elements = [
+            f"{{\\c{word_color(word)}}}{escape_ass_text(word.word)}"
+            for word in chunk
+        ]
+        dialogue_text = " ".join(word_elements)
+        animation_prefix = (
+            f"{{\\fad(0,100)\\bord3\\shad2"
+            f"\\t(0,{animation_mid_ms},\\fscx118\\fscy118)"
+            f"\\t({animation_mid_ms},{animation_end_ms},\\fscx100\\fscy100)}}"
+        )
+        w_mid = (w_start + w_end) / 2
+        active_margin_v, active_alignment, placement = get_shot_style(w_mid)
+        placement_prefix = f"{{\\an{active_alignment}}}" if placement == "divider" else ""
+        event_name = "estimated" if any(getattr(word, "is_estimated", False) for word in chunk) else ""
+        ass_line = f"Dialogue: 0,{format_ass_timestamp(w_start)},{format_ass_timestamp(w_end)},Default,{event_name},0,0,{active_margin_v},,{placement_prefix}{animation_prefix}{dialogue_text}"
+        lines.append(ass_line)
 
     has_badge = bool(header_title and ENABLE_TOP_HOOK_BADGE)
     if has_badge:
@@ -285,7 +274,7 @@ def create_styled_ass_subtitles(
         theme_key=theme_key,
         layout_mode=layout_mode,
         watermark_margin_v=w_margin_v,
-        font_size_override=single_word_font_size
+        font_size_override=None
     )
     dur_str = format_ass_timestamp(clip_end - clip_start)
 
