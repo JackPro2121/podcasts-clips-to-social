@@ -559,6 +559,7 @@ def analyze_faces_in_clip(
                     center_y=int(active_y + active_h * 0.35),
                     margin_v=460
                 ))
+                continue
             # If Speaker 2 is speaking dominantly (> 2.8x higher activity than Speaker 1)
             elif avg_m2 > 5.5 and avg_m2 > 2.8 * max(1.0, avg_m1):
                 s2_cx = int(np.median([f[1].center_x for f in two_speaker_samples]))
@@ -574,6 +575,7 @@ def analyze_faces_in_clip(
                     center_y=int(active_y + active_h * 0.35),
                     margin_v=460
                 ))
+                continue
             else:
                 s1_cx = int(np.median([f[0].center_x for f in two_speaker_samples]))
                 s2_cx = int(np.median([f[1].center_x for f in two_speaker_samples]))

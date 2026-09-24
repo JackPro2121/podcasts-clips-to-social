@@ -143,6 +143,44 @@ class TestFramingAndAspect(unittest.TestCase):
         self.assertEqual(len(decision.shots), 1)
         self.assertGreater(decision.shots[0].zoom_factor, 1.01)
 
+    def test_dominant_speaker_branches_return_portrait_shots(self):
+        from unittest.mock import patch
+        from src.face_tracker import FaceBox
+
+        temp_dir = tempfile.mkdtemp()
+        vid_path = Path(temp_dir) / "test_dominant_speaker.mp4"
+        writer = cv2.VideoWriter(str(vid_path), cv2.VideoWriter_fourcc(*'mp4v'), 10.0, (320, 240))
+        for _ in range(10):
+            writer.write(np.ones((240, 320, 3), dtype=np.uint8) * 128)
+        writer.release()
+        faces = [
+            FaceBox(x=40, y=50, w=40, h=40, center_x=60, center_y=70),
+            FaceBox(x=240, y=50, w=40, h=40, center_x=260, center_y=70),
+        ]
+
+        for dominant_index in (0, 1):
+            motion_values = [
+                (20.0, None) if index == dominant_index else (0.0, None)
+                for index in range(6)
+            ]
+            with patch("src.face_tracker.detect_clip_shots", return_value=[(0.0, 1.0)]), \
+                 patch("src.face_tracker.get_face_detector", return_value=object()), \
+                 patch("src.face_tracker.detect_faces_in_frame", return_value=faces), \
+                 patch("src.face_tracker.classify_frame_scene", return_value={"is_presentation": False}), \
+                 patch("src.face_tracker._estimate_mouth_motion", side_effect=motion_values):
+                decision = analyze_faces_in_clip(vid_path, 0.0, 1.0, sample_fps=2.5)
+            self.assertIn(decision.mode, ("single_smooth", "multi_shot_dynamic"))
+            if decision.mode == "multi_shot_dynamic":
+                self.assertEqual(len(decision.shots), 1)
+                self.assertEqual(decision.shots[0].mode, "portrait_face")
+
+        if vid_path.exists():
+            vid_path.unlink()
+        try:
+            os.rmdir(temp_dir)
+        except Exception:
+            pass
+
     def test_manual_framing_uses_probed_dimensions(self):
         from unittest.mock import patch
         import main
