@@ -56,5 +56,20 @@ class TestBrollAndThumbnail(unittest.TestCase):
             self.assertEqual(cues[0][3], "money")
             self.assertEqual(cues[0][0], 6.0)
 
+    def test_video_filtergraph_with_cover_overlay(self):
+        """Filtergraph should properly overlay 0.25s cover thumbnail frame."""
+        from src.video_editor import build_video_filtergraph
+        from src.face_tracker import FramingDecision
+
+        framing = FramingDecision(mode="single_smooth", face_count=1, smoothed_center_x=960)
+        fg = build_video_filtergraph(
+            framing=framing,
+            cover_input_idx=1,
+            cover_duration=0.25,
+            burn_subtitles=False
+        )
+        self.assertIn("[1:v]scale=1080:1920", fg)
+        self.assertIn("overlay=enable='between(t,0,0.25)'[outv]", fg)
+
 if __name__ == "__main__":
     unittest.main()

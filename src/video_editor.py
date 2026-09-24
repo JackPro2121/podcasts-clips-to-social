@@ -26,7 +26,9 @@ def build_video_filtergraph(
     peak_intensity_segments: List[Tuple[float, float]] = [],
     ass_subtitle_path: Optional[Path] = None,
     burn_subtitles: bool = True,
-    broll_inputs: List[Tuple[int, float, float]] = []
+    broll_inputs: List[Tuple[int, float, float]] = [],
+    cover_input_idx: Optional[int] = None,
+    cover_duration: float = 0.25
 ) -> str:
     """
     Constructs the complete FFmpeg video filtergraph with professional upgrades:
@@ -222,12 +224,28 @@ def build_video_filtergraph(
         from src.config import FONTS_DIR
         if FONTS_DIR.exists():
             escaped_fonts = sanitize_ffmpeg_path(FONTS_DIR)
-            sub_filter = f"{base_label}subtitles='{escaped_ass}':fontsdir='{escaped_fonts}'[outv]"
+            sub_filter = f"{base_label}subtitles='{escaped_ass}':fontsdir='{escaped_fonts}'"
         else:
-            sub_filter = f"{base_label}subtitles='{escaped_ass}'[outv]"
-        filters.append(sub_filter)
+            sub_filter = f"{base_label}subtitles='{escaped_ass}'"
+        
+        if cover_input_idx is not None:
+            sub_filter += "[subs_out]"
+            filters.append(sub_filter)
+            base_label = "[subs_out]"
+        else:
+            sub_filter += "[outv]"
+            filters.append(sub_filter)
+            base_label = "[outv]"
     else:
-        filters.append(f"{base_label}null[outv]")
+        if cover_input_idx is None:
+            filters.append(f"{base_label}null[outv]")
+
+    # Overlay high-CTR cover frame for first 0.25s as auto video thumbnail for TikTok/Reels/Shorts
+    if cover_input_idx is not None:
+        cover_prep = "cover_prep"
+        cover_scale_f = f"[{cover_input_idx}:v]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},setsar=1:1,fps={FPS}[{cover_prep}]"
+        cover_overlay_f = f"{base_label}[{cover_prep}]overlay=enable='between(t,0,{cover_duration:.2f})'[outv]"
+        filters.append(f"{cover_scale_f};{cover_overlay_f}")
 
     return ";".join(filters)
 
@@ -255,13 +273,22 @@ def render_viral_clip(
     burn_subtitles: bool = True,
     bgm_path: Optional[Path] = None,
     sfx_cues: List[Tuple[float, str]] = [],
-    broll_cues: List[Tuple[float, float, Path, str]] = []
+    broll_cues: List[Tuple[float, float, Path, str]] = [],
+    cover_image_path: Optional[Path] = None,
+    cover_duration: float = 0.25
 ) -> Path:
     duration = end_time - start_time
     output_clip_path.parent.mkdir(parents=True, exist_ok=True)
 
     current_input_idx = 0
     input_args = ["-ss", f"{start_time:.2f}", "-t", f"{duration:.2f}", "-i", str(source_video_path)]
+
+    # Cover image overlay input (embed 0.25s flash thumbnail at start of video)
+    cover_input_idx = None
+    if cover_image_path and cover_image_path.exists():
+        current_input_idx += 1
+        cover_input_idx = current_input_idx
+        input_args.extend(["-loop", "1", "-t", f"{cover_duration:.2f}", "-i", str(cover_image_path)])
 
     # Process B-roll stock footage overlays
     broll_inputs: List[Tuple[int, float, float]] = []
@@ -277,7 +304,9 @@ def render_viral_clip(
         peak_intensity_segments=peak_intensity_segments,
         ass_subtitle_path=ass_subtitle_path,
         burn_subtitles=burn_subtitles,
-        broll_inputs=broll_inputs
+        broll_inputs=broll_inputs,
+        cover_input_idx=cover_input_idx,
+        cover_duration=cover_duration
     )
     audio_filters = build_audio_filtergraph()
 

@@ -184,6 +184,21 @@ def run_pipeline(
             safe_title = safe_title.replace(" ", "_")[:30]
             out_clip_path = CLIPS_DIR / f"clip_{idx}_{safe_title}.mp4"
 
+            # Pre-generate viral high-CTR thumbnail to embed as 0.25s opening flash cover
+            thumb_path = None
+            try:
+                thumb_target = CLIPS_DIR / f"{out_clip_path.stem}_thumb.jpg"
+                thumb_path = generate_clip_thumbnail(
+                    clip_path=clip_path,
+                    title=moment.title,
+                    output_path=thumb_target,
+                    extract_time=render_start + min(1.5, clip_duration / 2),
+                    badge_text="MUST WATCH",
+                    watermark=watermark
+                )
+            except Exception as te:
+                print(f"[!] Thumbnail generation notice for clip #{idx}: {te}")
+
             # Detect and configure Pexels B-roll stock footage overlays
             broll_cues = []
             if segments:
@@ -206,13 +221,8 @@ def run_pipeline(
                     ass_subtitle_path=ass_path,
                     burn_subtitles=burn_subtitles,
                     sfx_cues=getattr(moment, "sfx_cues", []),
-                    broll_cues=broll_cues
-                )
-                thumb_path = generate_clip_thumbnail(
-                    clip_path=rendered_path,
-                    title=moment.title,
-                    badge_text="MUST WATCH",
-                    watermark=watermark
+                    broll_cues=broll_cues,
+                    cover_image_path=thumb_path
                 )
                 rendered_clips.append({
                     "path": rendered_path,
@@ -295,6 +305,21 @@ def run_pipeline(
                                 safe_title = "".join(c for c in moment.title if c.isalnum() or c in (" ", "_", "-")).rstrip()
                                 safe_title = safe_title.replace(" ", "_")[:30]
                                 out_clip_path = CLIPS_DIR / f"clip_{idx}_{safe_title}.mp4"
+
+                                thumb_path = None
+                                try:
+                                    thumb_target = CLIPS_DIR / f"{out_clip_path.stem}_thumb.jpg"
+                                    thumb_path = generate_clip_thumbnail(
+                                        clip_path=clip_path,
+                                        title=moment.title,
+                                        output_path=thumb_target,
+                                        extract_time=1.5,
+                                        badge_text="MUST WATCH",
+                                        watermark=watermark
+                                    )
+                                except Exception as te:
+                                    print(f"[!] Thumbnail generation notice for probe clip #{idx}: {te}")
+
                                 rendered_path = render_viral_clip(
                                     source_video_path=clip_path,
                                     start_time=render_start,
@@ -304,9 +329,10 @@ def run_pipeline(
                                     peak_intensity_segments=getattr(moment, "peak_intensity_segments", []),
                                     ass_subtitle_path=ass_path,
                                     burn_subtitles=burn_subtitles,
-                                    sfx_cues=getattr(moment, "sfx_cues", [])
+                                    sfx_cues=getattr(moment, "sfx_cues", []),
+                                    cover_image_path=thumb_path
                                 )
-                                rendered_clips.append({"path": rendered_path, "moment": moment})
+                                rendered_clips.append({"path": rendered_path, "thumbnail": thumb_path, "moment": moment})
                             except Exception as e:
                                 print(f"[-] Probe clip #{idx} failed: {e}")
                                 continue
@@ -405,6 +431,20 @@ def run_pipeline(
             safe_title = safe_title.replace(" ", "_")[:30]
             out_clip_path = CLIPS_DIR / f"clip_{idx}_{safe_title}.mp4"
 
+            thumb_path = None
+            try:
+                thumb_target = CLIPS_DIR / f"{out_clip_path.stem}_thumb.jpg"
+                thumb_path = generate_clip_thumbnail(
+                    clip_path=video_path,
+                    title=moment.title,
+                    output_path=thumb_target,
+                    extract_time=moment.start_time + 1.5,
+                    badge_text="MUST WATCH",
+                    watermark=watermark
+                )
+            except Exception as te:
+                print(f"[!] Thumbnail generation notice for clip #{idx}: {te}")
+
             rendered_path = render_viral_clip(
                 source_video_path=video_path,
                 start_time=moment.start_time,
@@ -414,9 +454,10 @@ def run_pipeline(
                 peak_intensity_segments=getattr(moment, "peak_intensity_segments", []),
                 ass_subtitle_path=ass_path,
                 burn_subtitles=burn_subtitles,
-                sfx_cues=getattr(moment, "sfx_cues", [])
+                sfx_cues=getattr(moment, "sfx_cues", []),
+                cover_image_path=thumb_path
             )
-            rendered_clips.append({"path": rendered_path, "moment": moment})
+            rendered_clips.append({"path": rendered_path, "thumbnail": thumb_path, "moment": moment})
 
     if not rendered_clips:
         raise RuntimeError(
