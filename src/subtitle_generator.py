@@ -1,19 +1,13 @@
 import re
+import unicodedata
 from pathlib import Path
-from typing import List, Optional, Any, Dict
+from typing import List, Optional, Any, Dict, Tuple
 from src.config import (
     SUBTITLE_THEMES, OUTPUT_WIDTH, OUTPUT_HEIGHT, CHANNEL_WATERMARK,
-    ENABLE_TOP_HOOK_BADGE, HOOK_BADGE_DURATION, HOOK_BADGE_MARGIN_V
+    ENABLE_TOP_HOOK_BADGE, HOOK_BADGE_DURATION, HOOK_BADGE_MARGIN_V,
+    get_subtitle_margin_v
 )
 from src.transcriber import TranscriptSegment, WordTimestamp
-
-# Default lower-third safe-zone margins per layout (must match generate_ass_header).
-_SAFE_MARGIN_V = {
-    "split_screen": 880,  # \an2 (bottom-center): MarginV=880 → text baseline at Y≈1000 (center divider)
-    "blur_stack": 400,    # Just below the centered 16:9 panel
-    "single_smooth": 460, # Golden sweet spot: Y≈1460 (safely above TikTok drawer, below speaker)
-}
-_DEFAULT_MARGIN_V = 460
 
 MONEY_KEYWORDS = {
     "money", "cash", "dollar", "dollars", "wealth", "invest", "investing", "saving", "savings",
@@ -32,9 +26,36 @@ POWER_KEYWORDS = {
 }
 
 
+def normalize_caption_text(text: Any) -> str:
+    normalized = unicodedata.normalize("NFC", str(text))
+    cleaned: List[str] = []
+    for char in normalized:
+        codepoint = ord(char)
+        if char in "\r\n\t":
+            cleaned.append(" ")
+            continue
+        if codepoint in (0x200D, 0xFE0F, 0xFE0E):
+            continue
+        if 0x1F000 <= codepoint <= 0x1FAFF or 0x2600 <= codepoint <= 0x27BF:
+            continue
+        if unicodedata.category(char).startswith("C"):
+            continue
+        cleaned.append(char)
+    return " ".join("".join(cleaned).split())
+
+
+def escape_ass_text(text: Any) -> str:
+    normalized = normalize_caption_text(text)
+    return normalized.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+
+
+def sanitize_watermark(text: Any) -> str:
+    return escape_ass_text(text).strip()
+
+
 def default_margin_v(layout_mode: str) -> int:
     """Safe-zone MarginV for a layout when no per-shot override applies."""
-    return _SAFE_MARGIN_V.get(layout_mode, _DEFAULT_MARGIN_V)
+    return get_subtitle_margin_v(layout_mode)
 
 
 def format_ass_timestamp(seconds: float) -> str:
@@ -69,20 +90,8 @@ def generate_ass_header(
     shadow_col = theme["shadow_color"]
     shadow_d = theme["shadow_depth"]
 
-    # Safe Zone Placement:
-    # In split_screen: captions placed at the center divider — \an2 + MarginV=880 puts the
-    #   text baseline at Y≈1000px (just below the 960px midpoint), clearly over both panes
-    #   and well above TikTok's bottom 20% UI zone.
-    # In single_smooth, dynamic_cut, or blur_stack: placed strictly in the lower-third safe zone
-    if layout_mode == "split_screen":
-        alignment = 2  # Bottom Center
-        margin_v = 880  # baseline at Y≈1000, straddles the center divider
-    elif layout_mode == "blur_stack":
-        alignment = 2  # Bottom Center
-        margin_v = 400  # Perfectly below the 16:9 centered diagram (which ends at Y=1264)
-    else:
-        alignment = 2  # Bottom Center
-        margin_v = 460  # Y ≈ 1460px (sweet spot: clear of bottom drawer, below mouth)
+    alignment = 2
+    margin_v = get_subtitle_margin_v(layout_mode)
 
     # Watermark MarginV: dynamically position @allinonepodcastsss right below the purple capsule
     header = f"""[Script Info]
@@ -128,21 +137,42 @@ def create_styled_ass_subtitles(
     primary_color = theme.get("primary_color", "&H00FFFFFF")
 
     # Filter words strictly within the clip duration and offset timestamps to 0.0s
+    clip_duration = max(0.0, clip_end - clip_start)
     clip_words: List[WordTimestamp] = []
     for seg in segments:
         for w in seg.words:
-            if w.end >= clip_start and w.start <= clip_end:
-                rel_start = max(0.0, w.start - clip_start)
-                rel_end = max(rel_start + 0.1, min(clip_end - clip_start, w.end - clip_start))
-                clean_word = re.sub(r'^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$', '', w.word.strip())
-                # Strictly filter out empty or non-alphanumeric ghost artifacts (e.g. '__', '--', '—')
-                if not clean_word or not any(c.isalnum() for c in clean_word):
-                    continue
-                clean_text = clean_word.upper() if uppercase else clean_word
+            if w.end <= clip_start or w.start >= clip_end:
+                continue
+            rel_start = max(0.0, min(clip_duration, w.start - clip_start))
+            rel_end = max(rel_start, min(clip_duration, w.end - clip_start))
+            if rel_end <= rel_start:
+                continue
+            if rel_end - rel_start < 0.1:
+                rel_end = min(clip_duration, rel_start + 0.1)
+            if rel_end <= rel_start:
+                continue
+            clean_word = normalize_caption_text(w.word).strip(" \t.,!?;:'\"()[]{}")
+            if not clean_word or not any(c.isalnum() for c in clean_word):
+                continue
+            clean_text = clean_word.upper() if uppercase else clean_word
+            clip_words.append(WordTimestamp(
+                word=clean_text,
+                start=rel_start,
+                end=rel_end,
+                is_estimated=bool(getattr(w, "is_estimated", False)),
+            ))
+
+    if not clip_words:
+        for seg in segments:
+            rel_start = max(0.0, min(clip_duration, seg.start - clip_start))
+            rel_end = max(rel_start, min(clip_duration, seg.end - clip_start))
+            text = normalize_caption_text(seg.text)
+            if text and rel_end > rel_start:
                 clip_words.append(WordTimestamp(
-                    word=clean_text,
+                    word=text.upper() if uppercase else text,
                     start=rel_start,
-                    end=rel_end
+                    end=rel_end,
+                    is_estimated=True,
                 ))
 
     # Sort words by start time and enforce strictly monotonic, non-overlapping timestamps
@@ -150,9 +180,20 @@ def create_styled_ass_subtitles(
     monotonic_words: List[WordTimestamp] = []
     last_end = 0.0
     for w in clip_words:
-        w_start = max(last_end, w.start)
-        w_end = max(w_start + 0.12, w.end)
-        monotonic_words.append(WordTimestamp(word=w.word, start=w_start, end=w_end))
+        w_start = max(last_end, min(clip_duration, w.start))
+        if w_start >= clip_duration:
+            break
+        w_end = min(clip_duration, max(w_start, w.end))
+        if w_end - w_start < 0.12:
+            w_end = min(clip_duration, w_start + 0.12)
+        if w_end <= w_start:
+            continue
+        monotonic_words.append(WordTimestamp(
+            word=w.word,
+            start=w_start,
+            end=w_end,
+            is_estimated=bool(getattr(w, "is_estimated", False)),
+        ))
         last_end = w_end
     clip_words = monotonic_words
 
@@ -165,17 +206,18 @@ def create_styled_ass_subtitles(
 
     base_margin_v = default_margin_v(layout_mode)
 
-    def get_shot_margin_v(t: float) -> int:
-        # Per-shot override wins; otherwise fall back to the layout's safe-zone
-        # default (NOT 0 -- a 0 here overrode the style and pinned captions to the
-        # very bottom of the frame, under the TikTok/Reels UI).
+    def get_shot_style(t: float) -> Tuple[int, int, str]:
         if shots:
             for s in shots:
                 s_start = getattr(s, "start", 0.0)
                 s_end = getattr(s, "end", 9999.0)
                 if s_start <= t <= s_end:
-                    return getattr(s, "margin_v", None) or base_margin_v
-        return base_margin_v
+                    placement = getattr(s, "subtitle_placement", "lower_third")
+                    if placement == "divider":
+                        return 0, int(getattr(s, "subtitle_alignment", 5)), placement
+                    margin = get_subtitle_margin_v(layout_mode, getattr(s, "margin_v", None))
+                    return margin, int(getattr(s, "subtitle_alignment", 2)), placement
+        return base_margin_v, 2, "lower_third"
 
     # Group words into short punchy batches of 1-3 words
     lines: List[str] = []
@@ -194,6 +236,8 @@ def create_styled_ass_subtitles(
             else:
                 w_end = target_word.end
 
+            animation_end_ms = max(70, min(140, int(round((w_end - w_start) * 1000))))
+            animation_mid_ms = max(35, animation_end_ms // 2)
             word_elements = []
             for idx, w in enumerate(chunk):
                 if idx == active_idx:
@@ -210,21 +254,24 @@ def create_styled_ass_subtitles(
 
                     # High-energy kinetic bounce pop: 118% scale punch settling to 100%
                     # Clean bold typography without unrenderable emoji tofu boxes
+                    safe_word = escape_ass_text(w.word)
                     word_elements.append(
-                        f"{{\\c{active_color}\\t(0,70,\\fscx118\\fscy118)\\t(70,140,\\fscx100\\fscy100)}}{w.word}{{\\c{primary_color}\\fscx100\\fscy100}}"
+                        f"{{\\c{active_color}\\t(0,{animation_mid_ms},\\fscx118\\fscy118)\\t({animation_mid_ms},{animation_end_ms},\\fscx100\\fscy100)}}{safe_word}{{\\c{primary_color}\\fscx100\\fscy100}}"
                     )
                 else:
-                    word_elements.append(w.word)
+                    word_elements.append(escape_ass_text(w.word))
 
             dialogue_text = " ".join(word_elements)
             w_mid = (w_start + w_end) / 2
-            active_margin_v = get_shot_margin_v(w_mid)
-            ass_line = f"Dialogue: 0,{format_ass_timestamp(w_start)},{format_ass_timestamp(w_end)},Default,,0,0,{active_margin_v},,{dialogue_text}"
+            active_margin_v, active_alignment, placement = get_shot_style(w_mid)
+            placement_prefix = f"{{\\an{active_alignment}}}" if placement == "divider" else ""
+            event_name = "estimated" if getattr(target_word, "is_estimated", False) else ""
+            ass_line = f"Dialogue: 0,{format_ass_timestamp(w_start)},{format_ass_timestamp(w_end)},Default,{event_name},0,0,{active_margin_v},,{placement_prefix}{dialogue_text}"
             lines.append(ass_line)
 
     has_badge = bool(header_title and ENABLE_TOP_HOOK_BADGE)
     if has_badge:
-        clean_words = re.sub(r'[^\w\s\-\'\,\.\?]', '', (header_title or "").strip().upper()).split()
+        clean_words = normalize_caption_text(header_title or "").upper().split()
         num_lines = 2 if len(clean_words) >= 2 else 1
         w_margin_v = HOOK_BADGE_MARGIN_V + (95 if num_lines == 2 else 55)
     else:
@@ -241,19 +288,18 @@ def create_styled_ass_subtitles(
     # Watermark (if configured)
     active_watermark = watermark if watermark is not None else CHANNEL_WATERMARK
     if active_watermark:
-        lines.insert(0, f"Dialogue: 2,0:00:00.00,{dur_str},Watermark,,0,0,0,,{active_watermark.strip()}")
+        lines.insert(0, f"Dialogue: 2,0:00:00.00,{dur_str},Watermark,,0,0,0,,{sanitize_watermark(active_watermark)}")
 
     # Hook title capsule badge: initial hook retention, smooth fade out, clean typography
     if header_title and ENABLE_TOP_HOOK_BADGE:
-        clean_title = header_title.strip().upper()
-        clean_title = re.sub(r'[^\w\s\-\'\,\.\?]', '', clean_title).strip()
-        clean_title = re.sub(r'\s+', ' ', clean_title)
-
+        clean_title = normalize_caption_text(header_title).upper()
         words = clean_title.split()
         if len(words) >= 2:
             mid = (len(words) + 1) // 2
-            clean_title = " ".join(words[:mid]) + "\\N" + " ".join(words[mid:])
-        
+            clean_title = escape_ass_text(" ".join(words[:mid])) + "\\N" + escape_ass_text(" ".join(words[mid:]))
+        else:
+            clean_title = escape_ass_text(clean_title)
+
         hook_dur = format_ass_timestamp(min(HOOK_BADGE_DURATION, clip_end - clip_start))
         lines.insert(0, f"Dialogue: 1,0:00:00.00,{hook_dur},TopHeader,,0,0,0,,{{\\fad(150,350)}}{clean_title}")
 

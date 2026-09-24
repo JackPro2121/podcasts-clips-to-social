@@ -46,6 +46,10 @@ def _manual_framing(video_path: Path, framing_mode: str) -> FramingDecision:
             speaker2_box=(left_x + panel_width, 0, panel_width, panel_height),
             video_width=width,
             video_height=height,
+            active_x=0,
+            active_y=0,
+            active_w=width,
+            active_h=height,
         )
     if framing_mode == "crop":
         return FramingDecision(
@@ -54,12 +58,20 @@ def _manual_framing(video_path: Path, framing_mode: str) -> FramingDecision:
             smoothed_center_x=width // 2,
             video_width=width,
             video_height=height,
+            active_x=0,
+            active_y=0,
+            active_w=width,
+            active_h=height,
         )
     return FramingDecision(
         mode="blur_stack",
         face_count=0,
         video_width=width,
         video_height=height,
+        active_x=0,
+        active_y=0,
+        active_w=width,
+        active_h=height,
     )
 
 

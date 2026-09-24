@@ -1,7 +1,9 @@
 import cv2
+import math
 import numpy as np
 import os
 import requests
+import uuid
 from pathlib import Path
 from typing import List, Tuple, Optional
 from dataclasses import dataclass, field
@@ -37,6 +39,8 @@ class ShotPlan:
     speaker1_box: Optional[Tuple[int, int, int, int]] = None
     speaker2_box: Optional[Tuple[int, int, int, int]] = None
     margin_v: int = 460
+    subtitle_placement: str = "lower_third"
+    subtitle_alignment: int = 2
 
 @dataclass
 class FramingDecision:
@@ -109,45 +113,78 @@ def detect_letterbox_margins(cap: cv2.VideoCapture, start_frame: int, end_frame:
     active_h = max(100, h - med_top - med_bot)
     return 0, active_y, w, active_h
 
+def _download_model_atomically(url: str, destination: Path, minimum_bytes: int) -> bool:
+    temp_path = destination.with_name(
+        f".{destination.name}.{uuid.uuid4().hex}.part"
+    )
+    try:
+        response = requests.get(url, allow_redirects=True, timeout=15)
+        if response.status_code != 200 or len(response.content) < minimum_bytes:
+            return False
+        temp_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(temp_path, "wb") as file_handle:
+            file_handle.write(response.content)
+        os.replace(temp_path, destination)
+        return True
+    except Exception:
+        return False
+    finally:
+        if temp_path.exists():
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+
+
 _yunet_attempted = False
 _yunet_detector = None
+_mediapipe_detector = None
+_haar_detector = None
 
 def get_face_detector():
     """Initializes Face Detection with robust multi-tiered fallbacks (YuNet -> MediaPipe -> Haar Cascade)."""
-    global _yunet_attempted, _yunet_detector
-    
-    # 1. Primary: OpenCV YuNet Face Detector (High-accuracy, profile faces, light-weight 232KB)
+    global _yunet_attempted, _yunet_detector, _mediapipe_detector, _haar_detector
+
+    if _yunet_detector is not None:
+        return _yunet_detector
+
     if not _yunet_attempted:
         _yunet_attempted = True
         try:
             if not YUNET_MODEL_PATH.exists():
                 MODEL_DIR.mkdir(parents=True, exist_ok=True)
                 print("[*] Downloading high-precision YuNet face detector model...")
-                r = requests.get(YUNET_URL, allow_redirects=True, timeout=15)
-                if r.status_code == 200 and len(r.content) > 100000:
-                    with open(YUNET_MODEL_PATH, "wb") as f:
-                        f.write(r.content)
-                    print(f"[+] YuNet model downloaded successfully ({len(r.content)/1024:.1f} KB).")
+                if not _download_model_atomically(YUNET_URL, YUNET_MODEL_PATH, 100000):
+                    raise RuntimeError("YuNet model download failed")
+                print(f"[+] YuNet model downloaded successfully ({YUNET_MODEL_PATH.stat().st_size / 1024:.1f} KB).")
             if YUNET_MODEL_PATH.exists() and hasattr(cv2, 'FaceDetectorYN'):
                 _yunet_detector = cv2.FaceDetectorYN.create(
                     str(YUNET_MODEL_PATH), "", (320, 320), 0.5, 0.3, 5000
                 )
                 print("[+] Initialized OpenCV YuNet multi-angle face detector.")
         except Exception as e:
+            _yunet_attempted = False
             print(f"[-] YuNet initialization warning: {e}. Trying MediaPipe...")
 
     if _yunet_detector is not None:
         return _yunet_detector
 
-    # 2. Secondary: MediaPipe Solutions (if available in environment)
+    if _mediapipe_detector is not None:
+        return _mediapipe_detector
+
     try:
         import mediapipe as mp
         if hasattr(mp, 'solutions') and hasattr(mp.solutions, 'face_detection'):
-            return mp.solutions.face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.55)
+            _mediapipe_detector = mp.solutions.face_detection.FaceDetection(
+                model_selection=1, min_detection_confidence=0.55
+            )
+            return _mediapipe_detector
     except Exception:
         pass
 
-    # 3. Tertiary: OpenCV Haar Cascade fallback
+    if _haar_detector is not None:
+        return _haar_detector
+
     try:
         local_cascade = 'haarcascade_frontalface_default.xml'
         if os.path.exists(local_cascade):
@@ -155,7 +192,8 @@ def get_face_detector():
         else:
             cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
         if os.path.exists(cascade_path):
-            return cv2.CascadeClassifier(cascade_path)
+            _haar_detector = cv2.CascadeClassifier(cascade_path)
+            return _haar_detector
     except Exception as e:
         print(f"[-] All face detectors failed: {e}.")
     return None
@@ -338,6 +376,29 @@ def _apply_autoflip_smoothing(timeline: List[Tuple[float, int]], dead_zone_px: i
     return smoothed
 
 
+def _frame_window(start_time: float, end_time: float, fps: float) -> Tuple[int, int]:
+    safe_fps = max(1.0, float(fps))
+    start_frame = max(0, int(math.ceil(start_time * safe_fps)))
+    end_frame = max(start_frame + 1, int(math.ceil(end_time * safe_fps)))
+    return start_frame, end_frame
+
+
+def _relative_frame_timestamp(
+    cap: cv2.VideoCapture,
+    start_time: float,
+    current_frame: int,
+    start_frame: int,
+    fps: float,
+    clip_duration: float
+) -> float:
+    frame_time_ms = float(cap.get(cv2.CAP_PROP_POS_MSEC))
+    if math.isfinite(frame_time_ms) and frame_time_ms > 0:
+        rel_t = frame_time_ms / 1000.0 - start_time
+    else:
+        rel_t = (current_frame - start_frame) / max(1.0, float(fps))
+    return max(0.0, min(float(clip_duration), rel_t))
+
+
 def analyze_faces_in_clip(
     video_path: Path,
     start_time: float,
@@ -349,13 +410,12 @@ def analyze_faces_in_clip(
         print(f"[-] Could not open video {video_path}. Defaulting to blur_stack.")
         return FramingDecision(mode='blur_stack', face_count=0)
 
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 1920
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 1080
-
-    start_frame = int(start_time * fps)
-    end_frame = int(end_time * fps)
-    frame_step = max(1, int(fps / sample_fps))
+    clip_duration = max(0.0, end_time - start_time)
+    start_frame, end_frame = _frame_window(start_time, end_time, fps)
+    frame_step = max(1, int(round(fps / sample_fps)))
 
     # Detect letterbox active content area
     active_x, active_y, active_w, active_h = detect_letterbox_margins(cap, start_frame, end_frame)
@@ -375,13 +435,15 @@ def analyze_faces_in_clip(
     
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
     current_frame = start_frame
-    while current_frame <= end_frame:
+    while current_frame < end_frame:
         ret, frame = cap.read()
         if not ret or frame is None:
             break
 
         if (current_frame - start_frame) % frame_step == 0:
-            rel_t = (current_frame - start_frame) / fps
+            rel_t = _relative_frame_timestamp(
+                cap, start_time, current_frame, start_frame, fps, clip_duration
+            )
             faces: List[FaceBox] = []
             is_slide = False
 
@@ -443,7 +505,6 @@ def analyze_faces_in_clip(
             area2 >= min_face_area
         )
 
-    clip_duration = round(end_time - start_time, 2)
     shot_plans: List[ShotPlan] = []
     last_known_cx = None
 
@@ -555,7 +616,9 @@ def analyze_faces_in_clip(
                 mode='split_screen',
                 speaker1_box=(s1_x, s1_y, s1_pane_w, s1_pane_h),
                 speaker2_box=(s2_x, s2_y, s2_pane_w, s2_pane_h),
-                margin_v=0  # Centered right on middle divider with \an5
+                margin_v=0,
+                subtitle_placement="divider",
+                subtitle_alignment=5
             ))
         # 3. Portrait Solo Face (with temporal anchor memory + skin-tone fallback)
         else:
@@ -638,7 +701,15 @@ def analyze_faces_in_clip(
             shot_plans[idx].end = shot_plans[idx + 1].start
 
     modes = set(s.mode for s in shot_plans)
-    if len(shot_plans) > 1 and (len(modes) > 1 or len(set(s.crop_x for s in shot_plans if s.mode == 'portrait_face')) > 1):
+    has_dynamic_shot_data = any(
+        s.zoom_factor > 1.01
+        or (
+            len(s.face_centers_timeline) >= 2
+            and abs(s.face_centers_timeline[-1][1] - s.face_centers_timeline[0][1]) > 40
+        )
+        for s in shot_plans
+    )
+    if len(shot_plans) > 1 or has_dynamic_shot_data:
         return FramingDecision(
             mode='multi_shot_dynamic',
             face_count=len(shot_plans),

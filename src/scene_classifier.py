@@ -1,5 +1,7 @@
 import cv2
 import numpy as np
+import os
+import uuid
 from pathlib import Path
 from typing import Tuple, Dict, Any, List, Optional
 import requests
@@ -24,6 +26,29 @@ COCO_CLASSES = [
 # Classes that signify a presentation, slide, screen-share, or document
 PRESENTATION_CLASSES = {"tv", "laptop", "book", "cell phone"}
 
+def _download_yolo_model_atomically() -> bool:
+    temp_path = YOLO_MODEL_PATH.with_name(
+        f".{YOLO_MODEL_PATH.name}.{uuid.uuid4().hex}.part"
+    )
+    try:
+        response = requests.get(YOLO_URL, allow_redirects=True, timeout=15)
+        if response.status_code != 200 or len(response.content) < 1000000:
+            return False
+        temp_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(temp_path, "wb") as file_handle:
+            file_handle.write(response.content)
+        os.replace(temp_path, YOLO_MODEL_PATH)
+        return True
+    except Exception:
+        return False
+    finally:
+        if temp_path.exists():
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+
+
 _yolo_net = None
 _yolo_attempted = False
 
@@ -38,11 +63,10 @@ def get_yolo_net() -> Optional[Any]:
         try:
             MODEL_DIR.mkdir(parents=True, exist_ok=True)
             print(f"[*] Downloading pre-trained YOLOv8-Nano ONNX model ({YOLO_URL})...")
-            r = requests.get(YOLO_URL, allow_redirects=True, timeout=15)
-            if r.status_code == 200 and len(r.content) > 1000000:
-                with open(YOLO_MODEL_PATH, "wb") as f:
-                    f.write(r.content)
-                print(f"[+] YOLOv8-Nano ONNX downloaded successfully ({len(r.content)/(1024*1024):.2f} MB).")
+            if not _download_yolo_model_atomically():
+                print("[-] Could not download YOLOv8 model. Using high-precision visual document analyzer.")
+                return None
+            print(f"[+] YOLOv8-Nano ONNX downloaded successfully ({YOLO_MODEL_PATH.stat().st_size / (1024 * 1024):.2f} MB).")
         except Exception as e:
             print(f"[-] Could not download YOLOv8 model: {e}. Using high-precision visual document analyzer.")
             return None
@@ -55,6 +79,10 @@ def get_yolo_net() -> Optional[Any]:
             return _yolo_net
         except Exception as e:
             print(f"[-] Error loading YOLOv8 ONNX: {e}")
+            try:
+                YOLO_MODEL_PATH.unlink()
+            except OSError:
+                pass
             return None
     return None
 
@@ -157,34 +185,33 @@ def analyze_clip_presentation_ratio(video_path: Path, start_sec: float, end_sec:
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         return 0.0
-        
-    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-    start_frame = int(start_sec * fps)
-    end_frame = int(end_sec * fps)
-    
-    # Sample every 1.0s
-    step = max(1, int(fps * 1.0))
-    
-    presentation_frames = 0
-    total_sampled = 0
-    
-    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-    cur = start_frame
-    while cur <= end_frame:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        if (cur - start_frame) % step == 0:
-            total_sampled += 1
-            info = classify_frame_scene(frame)
-            if info["is_presentation"]:
-                presentation_frames += 1
-        cur += 1
-        
-    cap.release()
-    if total_sampled == 0:
-        return 0.0
-    return presentation_frames / total_sampled
+
+    try:
+        fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+        start_frame = int(start_sec * fps)
+        end_frame = int(end_sec * fps)
+        step = max(1, int(fps * 1.0))
+        presentation_frames = 0
+        total_sampled = 0
+
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+        cur = start_frame
+        while cur <= end_frame:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            if (cur - start_frame) % step == 0:
+                total_sampled += 1
+                info = classify_frame_scene(frame)
+                if info["is_presentation"]:
+                    presentation_frames += 1
+            cur += 1
+
+        if total_sampled == 0:
+            return 0.0
+        return presentation_frames / total_sampled
+    finally:
+        cap.release()
 
 def detect_clip_shots(
     video_path: Path,

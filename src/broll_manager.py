@@ -1,5 +1,9 @@
+import hashlib
+import os
 import re
 import requests
+import subprocess
+import uuid
 from pathlib import Path
 from urllib.parse import quote
 from typing import List, Optional, Tuple, Dict, Any
@@ -100,6 +104,33 @@ def select_best_video_file(video_entry: Dict[str, Any]) -> Optional[str]:
     mp4_files.sort(key=quality_score, reverse=True)
     return mp4_files[0].get("link")
 
+MAX_BROLL_BYTES = 200 * 1024 * 1024
+
+
+def _broll_cache_path(video_url: str, keyword: str, out_dir: Path) -> Path:
+    safe_name = re.sub(r'[^a-zA-Z0-9_]', '_', keyword).lower()
+    cache_id = hashlib.sha256(video_url.encode("utf-8")).hexdigest()[:20]
+    return out_dir / f"broll_{safe_name}_{cache_id}.mp4"
+
+
+def _is_valid_broll_file(path: Path) -> bool:
+    if not path.exists() or path.stat().st_size <= 10000:
+        return False
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except Exception:
+        return False
+    return result.returncode == 0 and "video" in result.stdout
+
+
 def download_broll_clip(
     video_url: str,
     keyword: str,
@@ -108,35 +139,51 @@ def download_broll_clip(
     """Downloads B-roll video clip and caches locally to prevent redundant downloads."""
     out_dir = output_dir or BROLL_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
+    dest_path = _broll_cache_path(video_url, keyword, out_dir)
 
-    safe_name = re.sub(r'[^a-zA-Z0-9_]', '_', keyword).lower()
-    # Unique filename based on url hash/id
-    url_id = video_url.split("/")[-1].split("?")[0]
-    if not url_id.endswith(".mp4"):
-        url_id = f"pexels_{abs(hash(video_url)) % 1000000}.mp4"
-    dest_path = out_dir / f"broll_{safe_name}_{url_id}"
-
-    if dest_path.exists() and dest_path.stat().st_size > 10000:
+    if _is_valid_broll_file(dest_path):
         return dest_path
+    if dest_path.exists():
+        dest_path.unlink()
 
+    temp_path = dest_path.with_name(
+        f".{dest_path.stem}.{uuid.uuid4().hex}.part{dest_path.suffix}"
+    )
+    response = None
     try:
         print(f"[*] Downloading B-roll clip for '{keyword}'...")
-        r = requests.get(video_url, stream=True, timeout=20)
-        if r.status_code == 200:
-            with open(dest_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=65536):
-                    if chunk:
-                        f.write(chunk)
-            print(f"[+] B-roll downloaded: {dest_path.name} ({dest_path.stat().st_size / (1024*1024):.1f} MB)")
-            return dest_path
+        response = requests.get(video_url, stream=True, timeout=20)
+        if response.status_code != 200:
+            return None
+
+        downloaded_bytes = 0
+        with open(temp_path, "wb") as file_handle:
+            for chunk in response.iter_content(chunk_size=65536):
+                if not chunk:
+                    continue
+                downloaded_bytes += len(chunk)
+                if downloaded_bytes > MAX_BROLL_BYTES:
+                    raise RuntimeError("B-roll download exceeded the byte limit")
+                file_handle.write(chunk)
+
+        if not _is_valid_broll_file(temp_path):
+            raise RuntimeError("Downloaded B-roll failed video validation")
+        os.replace(temp_path, dest_path)
+        print(f"[+] B-roll downloaded: {dest_path.name} ({dest_path.stat().st_size / (1024*1024):.1f} MB)")
+        return dest_path
     except Exception as e:
         print(f"[-] B-roll download failed: {e}")
-        if dest_path.exists():
+        return None
+    finally:
+        if response is not None:
+            close = getattr(response, "close", None)
+            if close:
+                close()
+        if temp_path.exists():
             try:
-                dest_path.unlink()
-            except Exception:
+                temp_path.unlink()
+            except OSError:
                 pass
-    return None
 
 def find_broll_cues_for_clip(
     words: List[Any],

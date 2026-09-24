@@ -11,6 +11,7 @@ class WordTimestamp:
     word: str
     start: float
     end: float
+    is_estimated: bool = False
 
 @dataclass
 class TranscriptSegment:
@@ -66,7 +67,7 @@ def parse_native_transcript(raw_transcript: List[Dict[str, Any]]) -> List[Transc
             for idx, w in enumerate(words_list):
                 w_start = start + idx * word_duration
                 w_end = w_start + word_duration
-                word_objs.append(WordTimestamp(word=w, start=w_start, end=w_end))
+                word_objs.append(WordTimestamp(word=w, start=w_start, end=w_end, is_estimated=True))
         
         segments.append(TranscriptSegment(
             start=start,
@@ -128,7 +129,8 @@ def transcribe_audio_whisper(
                     words.append(WordTimestamp(
                         word=w,
                         start=seg.start + i * dur,
-                        end=seg.start + (i + 1) * dur
+                        end=seg.start + (i + 1) * dur,
+                        is_estimated=True
                     ))
 
         results.append(TranscriptSegment(

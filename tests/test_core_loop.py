@@ -20,7 +20,8 @@ from src.downloader import (
 )
 from src.channel_discovery import classify_candidate_entry
 from src.viral_detector import _safe_int, strip_emojis
-from src.subtitle_generator import format_ass_timestamp, default_margin_v
+from src.subtitle_generator import format_ass_timestamp, default_margin_v, get_subtitle_margin_v
+from src.config import SUBTITLE_MARGIN_MIN_V, SUBTITLE_MARGIN_MAX_V
 
 
 class TestDownloaderClassification(unittest.TestCase):
@@ -231,6 +232,16 @@ class TestSubtitleFormatting(unittest.TestCase):
         self.assertEqual(default_margin_v("split_screen"), 880)   # \an2 bottom-center at Y≈1000 (center divider)
         self.assertEqual(default_margin_v("multi_shot_dynamic"), 460)  # fallback default
 
+    def test_safe_zone_margin_overrides_are_clamped(self):
+        self.assertEqual(
+            get_subtitle_margin_v("multi_shot_dynamic", 0),
+            SUBTITLE_MARGIN_MIN_V,
+        )
+        self.assertEqual(
+            get_subtitle_margin_v("multi_shot_dynamic", 9999),
+            SUBTITLE_MARGIN_MAX_V,
+        )
+
 
 @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg not installed")
 class TestFiltergraphValidity(unittest.TestCase):
@@ -248,6 +259,185 @@ class TestFiltergraphValidity(unittest.TestCase):
         ]
         p = subprocess.run(cmd, capture_output=True, text=True)
         self.assertEqual(p.returncode, 0, p.stderr[-600:])
+
+    def test_broll_render_terminates_at_clip_duration(self):
+        import tempfile
+        from src.face_tracker import FramingDecision
+        from src.video_editor import render_viral_clip
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            source_path = tmp_path / "source.mp4"
+            broll_path = tmp_path / "broll.mp4"
+            output_path = tmp_path / "output.mp4"
+
+            for path, pattern, media_duration in (
+                (source_path, "testsrc=size=320x240:rate=10", 3.0),
+                (broll_path, "testsrc2=size=320x240:rate=10", 1.0),
+            ):
+                create = subprocess.run(
+                    [
+                        "ffmpeg", "-y", "-f", "lavfi", "-i", pattern,
+                        "-t", f"{media_duration:.2f}", "-c:v", "libx264",
+                        "-pix_fmt", "yuv420p", str(path),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                self.assertEqual(create.returncode, 0, create.stderr[-600:])
+
+            render_viral_clip(
+                source_video_path=source_path,
+                start_time=0.0,
+                end_time=2.0,
+                output_clip_path=output_path,
+                framing=FramingDecision(
+                    mode="single_smooth",
+                    face_count=0,
+                    video_width=320,
+                    video_height=240,
+                    active_w=320,
+                    active_h=240,
+                    smoothed_center_x=160,
+                ),
+                burn_subtitles=False,
+                broll_cues=[(0.5, 1.5, broll_path, "money")],
+            )
+
+            probe = subprocess.run(
+                [
+                    "ffprobe", "-v", "error", "-show_entries",
+                    "format=duration", "-of", "default=noprint_wrappers=1:nokey=1",
+                    str(output_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            self.assertEqual(probe.returncode, 0, probe.stderr[-600:])
+            self.assertLess(abs(float(probe.stdout.strip()) - 2.0), 0.3)
+
+    def test_no_audio_render_produces_audio_stream(self):
+        import json
+        import tempfile
+        from src.face_tracker import FramingDecision
+        from src.video_editor import render_viral_clip
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            source_path = tmp_path / "source.mp4"
+            output_path = tmp_path / "output.mp4"
+            create = subprocess.run(
+                [
+                    "ffmpeg", "-y", "-f", "lavfi", "-i",
+                    "testsrc=size=320x240:rate=10", "-t", "1.00",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(create.returncode, 0, create.stderr[-600:])
+
+            render_viral_clip(
+                source_video_path=source_path,
+                start_time=0.0,
+                end_time=1.0,
+                output_clip_path=output_path,
+                framing=FramingDecision(
+                    mode="single_smooth",
+                    face_count=0,
+                    video_width=320,
+                    video_height=240,
+                    active_w=320,
+                    active_h=240,
+                    smoothed_center_x=160,
+                ),
+                burn_subtitles=False,
+            )
+
+            probe = subprocess.run(
+                [
+                    "ffprobe", "-v", "error", "-show_entries",
+                    "stream=codec_type,duration", "-of", "json", str(output_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            self.assertEqual(probe.returncode, 0, probe.stderr[-600:])
+            streams = json.loads(probe.stdout).get("streams", [])
+            video_stream = next(stream for stream in streams if stream.get("codec_type") == "video")
+            audio_stream = next(stream for stream in streams if stream.get("codec_type") == "audio")
+            self.assertLess(
+                abs(float(audio_stream["duration"]) - float(video_stream["duration"])),
+                0.1,
+            )
+
+    def test_real_ass_burn_in_produces_subtitle_pixels(self):
+        import tempfile
+        from PIL import Image
+        from src.face_tracker import FramingDecision
+        from src.video_editor import build_video_filtergraph
+        from src.subtitle_generator import create_styled_ass_subtitles
+        from src.transcriber import TranscriptSegment, WordTimestamp
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            ass_path = tmp_path / "burn.ass"
+            frame_path = tmp_path / "frame.png"
+            segment = TranscriptSegment(
+                start=0.0,
+                end=0.8,
+                text="Visible subtitle",
+                words=[WordTimestamp(word="Visible", start=0.0, end=0.8)],
+            )
+            create_styled_ass_subtitles(
+                segments=[segment],
+                clip_start=0.0,
+                clip_end=0.8,
+                output_ass_path=ass_path,
+                watermark="",
+            )
+            graph = build_video_filtergraph(
+                FramingDecision(
+                    mode="single_smooth",
+                    face_count=0,
+                    video_width=320,
+                    video_height=240,
+                    active_w=320,
+                    active_h=240,
+                    smoothed_center_x=160,
+                ),
+                ass_subtitle_path=ass_path,
+                burn_subtitles=True,
+            )
+            result = subprocess.run(
+                [
+                    "ffmpeg", "-y", "-f", "lavfi", "-i",
+                    "color=c=black:s=320x240:r=10", "-filter_complex", graph,
+                    "-map", "[outv]", "-frames:v", "1", str(frame_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr[-600:])
+            image = Image.open(frame_path).convert("RGB")
+            bright_pixels = sum(1 for pixel in image.getdata() if max(pixel) > 180)
+            self.assertGreater(bright_pixels, 10)
+
+    def test_requested_missing_ass_file_fails_before_render(self):
+        from src.face_tracker import FramingDecision
+        from src.video_editor import build_video_filtergraph
+
+        with self.assertRaises(FileNotFoundError):
+            build_video_filtergraph(
+                FramingDecision(mode="single_smooth", face_count=0),
+                ass_subtitle_path=Path("missing-subtitle.ass"),
+                burn_subtitles=True,
+            )
 
     def test_single_smooth(self):
         from src.face_tracker import FramingDecision

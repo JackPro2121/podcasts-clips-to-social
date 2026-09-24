@@ -8,7 +8,10 @@ from src.face_tracker import FramingDecision
 from src.subtitle_generator import (
     format_ass_timestamp,
     generate_ass_header,
-    create_styled_ass_subtitles
+    create_styled_ass_subtitles,
+    normalize_caption_text,
+    escape_ass_text,
+    sanitize_watermark
 )
 from src.video_editor import (
     build_video_filtergraph,
@@ -39,6 +42,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertEqual(len(segments[0].words), 2)
         self.assertAlmostEqual(segments[0].words[0].start, 10.0)
         self.assertAlmostEqual(segments[0].words[1].end, 12.0)
+        self.assertTrue(segments[0].words[0].is_estimated)
 
     def test_fallback_viral_detector(self):
         segments = [
@@ -129,6 +133,14 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertEqual(format_ass_timestamp(65.25), "0:01:05.25")
         self.assertEqual(format_ass_timestamp(3661.5), "1:01:01.50")
 
+    def test_ass_text_normalization_and_escaping(self):
+        self.assertEqual(
+            normalize_caption_text("C++ 100% café 🚀\n$5"),
+            "C++ 100% café $5",
+        )
+        self.assertEqual(escape_ass_text("{bad}\\N"), r"\{bad\}\\N")
+        self.assertEqual(sanitize_watermark("@{test}\\n"), r"@\{test\}\\n")
+
     def test_ass_file_generation(self):
         words = [
             WordTimestamp(word="Fine.", start=10.0, end=10.4),
@@ -156,6 +168,55 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         # Clean up test file
         if created.exists():
             created.unlink()
+
+    def test_subtitle_boundaries_and_estimated_marker(self):
+        words = [
+            WordTimestamp(word="Before", start=0.0, end=0.5),
+            WordTimestamp(word="Inside", start=0.5, end=1.5, is_estimated=True),
+            WordTimestamp(word="After", start=1.5, end=2.0),
+        ]
+        segment = TranscriptSegment(start=0.0, end=2.0, text="Before Inside After", words=words)
+        out_ass = Path("subtitles/test_boundaries.ass")
+        created = create_styled_ass_subtitles(
+            segments=[segment],
+            clip_start=0.5,
+            clip_end=1.5,
+            output_ass_path=out_ass,
+        )
+        content = created.read_text(encoding="utf-8")
+        self.assertIn("Default,estimated,0,0,460", content)
+        self.assertIn("INSIDE", content)
+        self.assertNotIn("BEFORE", content)
+        self.assertNotIn("AFTER", content)
+        created.unlink()
+
+    def test_subtitle_segment_fallback_when_words_are_missing(self):
+        segment = TranscriptSegment(start=0.0, end=1.0, text="Fallback text", words=[])
+        out_ass = Path("subtitles/test_segment_fallback.ass")
+        created = create_styled_ass_subtitles(
+            segments=[segment],
+            clip_start=0.0,
+            clip_end=1.0,
+            output_ass_path=out_ass,
+        )
+        content = created.read_text(encoding="utf-8")
+        self.assertIn("FALLBACK TEXT", content)
+        self.assertIn("Default,estimated,0,0,460", content)
+        created.unlink()
+
+    def test_short_subtitle_event_uses_shorter_bounce_animation(self):
+        words = [WordTimestamp(word="Hi", start=0.0, end=0.12)]
+        segment = TranscriptSegment(start=0.0, end=0.12, text="Hi", words=words)
+        out_ass = Path("subtitles/test_short_animation.ass")
+        created = create_styled_ass_subtitles(
+            segments=[segment],
+            clip_start=0.0,
+            clip_end=0.12,
+            output_ass_path=out_ass,
+        )
+        content = created.read_text(encoding="utf-8")
+        self.assertIn(r"\t(0,60,\fscx118\fscy118)\t(60,120,\fscx100\fscy100)", content)
+        created.unlink()
 
     def test_video_filtergraph_modes(self):
         # 1. Single smooth crop
@@ -300,12 +361,35 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         )
         self.assertTrue(created.exists())
         content = created.read_text(encoding="utf-8")
-        # Line 1 (t=2.0s during slide) must have margin_v=420
-        # Line 2 (t=6.0s during speaker) must have margin_v=220
         self.assertIn(",0,0,420,,", content)
-        self.assertIn(",0,0,220,,", content)
+        self.assertIn(",0,0,380,,", content)
         if created.exists():
             created.unlink()
+
+    def test_dynamic_split_shot_uses_divider_alignment(self):
+        from src.face_tracker import ShotPlan
+        words = [WordTimestamp(word="Both", start=2.0, end=2.5)]
+        seg = TranscriptSegment(start=2.0, end=3.0, text="Both", words=words)
+        shot = ShotPlan(
+            start=0.0,
+            end=5.0,
+            mode="split_screen",
+            margin_v=0,
+            subtitle_placement="divider",
+            subtitle_alignment=5,
+        )
+        out_ass = Path("subtitles/test_split_divider.ass")
+        created = create_styled_ass_subtitles(
+            segments=[seg],
+            clip_start=0.0,
+            clip_end=5.0,
+            output_ass_path=out_ass,
+            layout_mode="multi_shot_dynamic",
+            shots=[shot],
+        )
+        content = created.read_text(encoding="utf-8")
+        self.assertIn(",0,0,0,,{\\an5}", content)
+        created.unlink()
 
     def test_sanitize_ffmpeg_path(self):
         p = Path("C:/videos/clip 1.ass")
@@ -513,7 +597,21 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         from src.face_tracker import FramingDecision
         from src.video_editor import render_viral_clip
 
-        with patch("subprocess.run") as mock_run:
+        measurement = {
+            "input_i": -14.0,
+            "input_tp": -1.5,
+            "input_lra": 1.0,
+            "input_thresh": -24.0,
+            "target_offset": 0.0,
+        }
+
+        def copy_normalized_output(source_path, destination_path, measured):
+            Path(destination_path).write_bytes(Path(source_path).read_bytes())
+
+        with patch("subprocess.run") as mock_run, \
+             patch("src.video_editor._measure_loudness", return_value=measurement), \
+             patch("src.video_editor._apply_measured_loudness", side_effect=copy_normalized_output), \
+             patch("src.video_editor._validate_rendered_output"):
             mock_res = MagicMock()
             mock_res.returncode = 0
             mock_res.stdout = "audio"

@@ -1,5 +1,7 @@
+import os
 import re
 import subprocess
+import uuid
 from pathlib import Path
 from typing import Any, Optional, List
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance
@@ -25,6 +27,24 @@ def extract_frame_at_time(video_path: Path, timestamp: float = 2.0) -> Optional[
     except Exception as e:
         print(f"[-] Frame extraction error: {e}")
     return None
+
+def _probe_video_duration(video_path: Path) -> float:
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", str(video_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode == 0:
+            return max(0.0, float(result.stdout.strip()))
+    except (OSError, TypeError, ValueError, subprocess.SubprocessError):
+        pass
+    return 0.0
+
 
 def find_best_font(size: int = 72) -> Any:
     """Finds best available font from assets/fonts or falls back to default."""
@@ -81,11 +101,16 @@ def generate_clip_thumbnail(
     - Adds vibrant top pill badge and channel watermark.
     """
     out_path = output_path or (clip_path.parent / f"{clip_path.stem}_thumb.jpg")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = out_path.with_name(
+        f".{out_path.stem}.{uuid.uuid4().hex}.part{out_path.suffix or '.jpg'}"
+    )
 
     frame = extract_frame_at_time(clip_path, timestamp=extract_time)
     if not frame:
-        # Fallback to middle frame
-        frame = extract_frame_at_time(clip_path, timestamp=0.5)
+        duration = _probe_video_duration(clip_path)
+        fallback_time = duration / 2 if duration > 0 else 0.5
+        frame = extract_frame_at_time(clip_path, timestamp=fallback_time)
 
     if not frame:
         # Create gradient canvas if frame extract fails
@@ -124,9 +149,9 @@ def generate_clip_thumbnail(
         bh = b_bbox[3] - b_bbox[1]
         
         pad_x, pad_y = 35, 16
-        pill_w = bw + pad_x * 2
+        pill_w = min(OUTPUT_WIDTH - 40, bw + pad_x * 2)
         pill_h = bh + pad_y * 2
-        pill_x = (OUTPUT_WIDTH - pill_w) // 2
+        pill_x = max(20, (OUTPUT_WIDTH - pill_w) // 2)
         pill_y = 140
 
         # Draw red/orange vibrant pill capsule
@@ -148,12 +173,12 @@ def generate_clip_thumbnail(
     clean_title = re.sub(r'[^\w\s\-\'\,\.\?]', '', title).strip().upper()
     title_font = find_best_font(76)
     max_title_width = OUTPUT_WIDTH - 160
-    lines = wrap_text(clean_title, title_font, max_title_width, draw)
+    lines = wrap_text(clean_title, title_font, max_title_width, draw)[:5]
 
     # Position title in the middle-lower region (Y: ~1150px)
     line_height = 92
     total_text_h = len(lines) * line_height
-    start_y = 1200 - (total_text_h // 2)
+    start_y = max(80, min(1200 - (total_text_h // 2), OUTPUT_HEIGHT - 220 - total_text_h))
 
     colors = [(255, 230, 0), (255, 255, 255)]  # Alternating Gold / White
 
@@ -184,6 +209,17 @@ def generate_clip_thumbnail(
         draw.text(((OUTPUT_WIDTH - wm_w) // 2, OUTPUT_HEIGHT - 120), wm_text, font=wm_font, fill=(220, 220, 220, 200))
 
     final_img = canvas.convert("RGB")
-    final_img.save(out_path, "JPEG", quality=95, optimize=True)
+    try:
+        final_img.save(temp_path, "JPEG", quality=95, optimize=True)
+        with Image.open(temp_path) as verification_image:
+            verification_image.verify()
+        os.replace(temp_path, out_path)
+    except Exception:
+        if temp_path.exists():
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+        raise
     print(f"[+] Auto-generated viral thumbnail: {out_path.name}")
     return out_path

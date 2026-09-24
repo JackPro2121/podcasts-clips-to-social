@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -155,6 +155,23 @@ else:
 SAFE_ZONE_TOP = 240       # Reserved for header/search
 SAFE_ZONE_BOTTOM = 380    # Reserved for creator handle, captions, audio disc
 SAFE_ZONE_RIGHT = 120     # Reserved for like, comment, share icons
+
+SUBTITLE_MARGIN_MIN_V = SAFE_ZONE_BOTTOM
+SUBTITLE_MARGIN_MAX_V = OUTPUT_HEIGHT - SAFE_ZONE_TOP - 120
+SUBTITLE_LAYOUT_MARGINS = {
+    "split_screen": 880,
+    "blur_stack": 400,
+    "single_smooth": 460,
+    "multi_shot_dynamic": 460,
+    "dynamic_cut": 460,
+}
+
+
+def get_subtitle_margin_v(layout_mode: str, margin_v: Optional[int] = None) -> int:
+    base_margin = SUBTITLE_LAYOUT_MARGINS.get(layout_mode, 460)
+    candidate = base_margin if margin_v is None else int(margin_v)
+    return max(SUBTITLE_MARGIN_MIN_V, min(SUBTITLE_MARGIN_MAX_V, candidate))
+
 
 # Audio Mastering (Social Broadcast Standard)
 TARGET_LUFS = -14.0       # EBU R128 standard for Instagram/TikTok/Shorts
