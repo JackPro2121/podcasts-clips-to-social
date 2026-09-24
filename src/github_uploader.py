@@ -1,9 +1,9 @@
-import os
 import requests
+import uuid
 from pathlib import Path
 from datetime import datetime, timezone
 from urllib.parse import quote
-from typing import Optional, Dict, Any
+from typing import Optional
 from src.config import GITHUB_TOKEN, GITHUB_REPOSITORY
 
 # Network timeouts (connect, read). The upload gets a long read timeout because a
@@ -23,8 +23,8 @@ def upload_clip_to_github_release(
     token: Optional[str] = None
 ) -> Optional[str]:
     """
-    Uploads an MP4 clip as a GitHub Release asset for $0 permanent public hosting.
-    Returns direct public URL: https://github.com/{repo}/releases/download/{tag}/{filename}
+    Uploads an MP4 clip as a GitHub Release asset for temporary public hosting.
+    Returns the direct public release URL: https://github.com/{repo}/releases/download/{tag}/{filename}
     """
     auth_token = token or GITHUB_TOKEN
     target_repo = repo or GITHUB_REPOSITORY
@@ -40,7 +40,7 @@ def upload_clip_to_github_release(
     }
 
     # Generate or reuse release tag
-    tag = tag_name or f"clips-{_utc_now().strftime('%Y%m%d-%H%M%S')}"
+    tag = tag_name or f"clips-{_utc_now().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
 
     print(f"[*] Creating/Fetching GitHub Release '{tag}' in {target_repo}...")
     release_url = f"https://api.github.com/repos/{target_repo}/releases"

@@ -5,7 +5,7 @@ import tempfile
 import os
 from pathlib import Path
 from src.face_tracker import (
-    FaceBox, ShotPlan, FramingDecision,
+    ShotPlan, FramingDecision,
     detect_letterbox_margins, analyze_faces_in_clip
 )
 from src.config import HOOK_BADGE_MARGIN_V

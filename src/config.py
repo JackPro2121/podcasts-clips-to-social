@@ -4,7 +4,7 @@ from typing import Dict, Any
 from dotenv import load_dotenv
 
 # Load environment variables
-load_dotenv(override=True)
+load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DOWNLOADS_DIR = BASE_DIR / "downloads"
@@ -77,16 +77,16 @@ OPENROUTER_API_KEY = (
 OLLAMA_API_KEY = (
     os.getenv("OLLAMA_API_KEY") or
     os.getenv("ollama_api_key") or
-    "2187c3d426224f23a8728263cf66e98a.aLOIml1Yo-_FvhhKQn7FnXn9"
+    ""
 )
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL") or "gemma4:31b"
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL") or "https://ollama.com"
 PEXELS_API_KEY = (
     os.getenv("PEXELS_API_KEY") or
     os.getenv("pexels_api_key") or
-    "F38Z5qgMKdU9NUNEmmuELhQGdu4WDTOAz1X3fh1oGpnCkYHkP2HJ6CBW"
+    ""
 )
-ENABLE_BROLL = os.getenv("ENABLE_BROLL", "true").lower() in ("true", "1", "yes")
+ENABLE_BROLL = os.getenv("ENABLE_BROLL", "false").lower() in ("true", "1", "yes")
 CHOCODATA_API_KEY = (
     os.getenv("CHOCODATA_API_KEY") or
     os.getenv("chocodata_api_key") or

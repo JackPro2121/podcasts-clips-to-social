@@ -3,7 +3,7 @@ import numpy as np
 import os
 import requests
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Tuple, Optional
 from dataclasses import dataclass, field
 from src.scene_classifier import classify_frame_scene, detect_clip_shots
 from src.config import ENABLE_PUNCH_ZOOM
@@ -122,7 +122,7 @@ def get_face_detector():
         try:
             if not YUNET_MODEL_PATH.exists():
                 MODEL_DIR.mkdir(parents=True, exist_ok=True)
-                print(f"[*] Downloading high-precision YuNet face detector model...")
+                print("[*] Downloading high-precision YuNet face detector model...")
                 r = requests.get(YUNET_URL, allow_redirects=True, timeout=15)
                 if r.status_code == 200 and len(r.content) > 100000:
                     with open(YUNET_MODEL_PATH, "wb") as f:
@@ -371,7 +371,7 @@ def analyze_faces_in_clip(
     print(f"[*] Visual Shot Segmentation: Detected {len(detected_cuts)} distinct camera cuts.")
 
     timeline_samples: List[Tuple[float, List[FaceBox], bool, List[float]]] = []
-    prev_mouth_patches = [None, None]
+    prev_mouth_patches: List[Optional[np.ndarray]] = [None, None]
     
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
     current_frame = start_frame

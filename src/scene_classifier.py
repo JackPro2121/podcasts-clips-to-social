@@ -93,7 +93,7 @@ def detect_slide_heuristics(frame: np.ndarray) -> bool:
     hist = cv2.calcHist([gray], [0], None, [16], [0, 256])
     dominant_luminance_ratio = hist.max() / hist.sum()
     
-    is_slide = (text_line_count >= 5 and dominant_luminance_ratio >= 0.25) or (text_line_count >= 8)
+    is_slide = bool((text_line_count >= 5 and dominant_luminance_ratio >= 0.25) or (text_line_count >= 8))
     return is_slide
 
 def classify_frame_scene(frame: np.ndarray) -> Dict[str, Any]:
@@ -123,12 +123,13 @@ def classify_frame_scene(frame: np.ndarray) -> Dict[str, Any]:
     if not person_detected:
         try:
             import os
-            cascade_path = getattr(cv2.data, 'haarcascades', '') + 'haarcascade_frontalface_default.xml'
+            cascade_dir = getattr(getattr(cv2, "data", None), "haarcascades", "")
+            cascade_path = str(cascade_dir) + "haarcascade_frontalface_default.xml"
             if os.path.isfile(cascade_path):
                 cascade = cv2.CascadeClassifier(cascade_path)
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                faces = cascade.detectMultiScale(gray, 1.2, 3, minSize=(30, 30))
-                if len(faces) > 0:
+                haar_faces: Any = cascade.detectMultiScale(gray, 1.2, 3, minSize=(30, 30))
+                if len(haar_faces) > 0:
                     person_detected = True
         except Exception:
             pass

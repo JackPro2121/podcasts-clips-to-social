@@ -15,7 +15,8 @@ def clean_old_releases(
     repo: Optional[str] = None,
     token: Optional[str] = None,
     dry_run: bool = False,
-    buffer_client: Any = None
+    buffer_client: Any = None,
+    release_prefix: str = "clips-",
 ) -> Dict[str, Any]:
     """
     Deletes GitHub Releases and assets that are older than `days` (default: 5 days),
@@ -31,6 +32,9 @@ def clean_old_releases(
     if buffer_client:
         print("[*] Querying Buffer for active video URLs to prevent premature deletion...")
         active_buffer_urls = buffer_client.get_active_video_urls()
+        if getattr(buffer_client, "last_error", None):
+            print(f"[-] Buffer lookup failed; preserving all releases: {buffer_client.last_error}")
+            return {"deleted": 0, "preserved": 0, "freed_bytes": 0, "skipped": True}
         print(f"[+] Found {len(active_buffer_urls)} active posts in Buffer queue.")
 
     if not auth_token or not target_repo:
@@ -81,6 +85,10 @@ def clean_old_releases(
         for rel in releases:
             rel_id = rel.get("id")
             tag_name = rel.get("tag_name")
+            if release_prefix and not str(tag_name or "").startswith(release_prefix):
+                print(f"[+] Preserving unrelated release '{tag_name}' (expected tag prefix '{release_prefix}').")
+                preserved_count += 1
+                continue
             created_str = rel.get("created_at")
             # One malformed/missing timestamp must not abort the whole cleanup.
             if not created_str:
@@ -169,9 +177,23 @@ def main():
         action="store_true",
         help="Simulate cleanup without actually deleting releases."
     )
+    parser.add_argument(
+        "--release-prefix",
+        default="clips-",
+        help="Only clean releases whose tag starts with this prefix."
+    )
 
     args = parser.parse_args()
-    clean_old_releases(days=args.days, dry_run=args.dry_run)
+    buffer_client = None
+    if os.getenv("BUFFER_ACCESS_TOKEN") or os.getenv("BUFFER_API_KEY"):
+        from src.buffer_client import BufferClient
+        buffer_client = BufferClient()
+    clean_old_releases(
+        days=args.days,
+        dry_run=args.dry_run,
+        buffer_client=buffer_client,
+        release_prefix=args.release_prefix,
+    )
 
 if __name__ == "__main__":
     main()

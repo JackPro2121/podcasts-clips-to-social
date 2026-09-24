@@ -1,11 +1,10 @@
-import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Optional, List
-from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter
+from typing import Any, Optional, List
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 
-from src.config import FONTS_DIR, OUTPUT_WIDTH, OUTPUT_HEIGHT, CLIPS_DIR
+from src.config import FONTS_DIR, OUTPUT_WIDTH, OUTPUT_HEIGHT
 
 def extract_frame_at_time(video_path: Path, timestamp: float = 2.0) -> Optional[Image.Image]:
     """Extracts a crisp frame from the video at specified timestamp using FFmpeg."""
@@ -19,7 +18,7 @@ def extract_frame_at_time(video_path: Path, timestamp: float = 2.0) -> Optional[
         "-"
     ]
     try:
-        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=30)
         if proc.returncode == 0 and len(proc.stdout) > 1000:
             import io
             return Image.open(io.BytesIO(proc.stdout)).convert("RGBA")
@@ -27,7 +26,7 @@ def extract_frame_at_time(video_path: Path, timestamp: float = 2.0) -> Optional[
         print(f"[-] Frame extraction error: {e}")
     return None
 
-def find_best_font(size: int = 72) -> ImageFont.FreeTypeFont:
+def find_best_font(size: int = 72) -> Any:
     """Finds best available font from assets/fonts or falls back to default."""
     candidates = [
         FONTS_DIR / "Montserrat-Black.ttf",
@@ -44,11 +43,11 @@ def find_best_font(size: int = 72) -> ImageFont.FreeTypeFont:
                 continue
     return ImageFont.load_default()
 
-def wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int, draw: ImageDraw.ImageDraw) -> List[str]:
+def wrap_text(text: str, font: Any, max_width: int, draw: ImageDraw.ImageDraw) -> List[str]:
     """Wraps text into lines that fit within max_width."""
     words = text.split()
     lines = []
-    current_line = []
+    current_line: List[str] = []
 
     for word in words:
         test_line = " ".join(current_line + [word])
@@ -62,7 +61,6 @@ def wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int, draw: Ima
                 current_line = [word]
             else:
                 lines.append(word)
-                current_line = []
     if current_line:
         lines.append(" ".join(current_line))
     return lines
@@ -95,10 +93,10 @@ def generate_clip_thumbnail(
     else:
         frame = frame.resize((OUTPUT_WIDTH, OUTPUT_HEIGHT), Image.Resampling.LANCZOS)
         # Enhance visual pop
-        enhancer = ImageEnhance.Contrast(frame.convert("RGB"))
-        frame = enhancer.enhance(1.15).convert("RGBA")
-        enhancer = ImageEnhance.Color(frame.convert("RGB"))
-        frame = enhancer.enhance(1.20).convert("RGBA")
+        contrast_enhancer = ImageEnhance.Contrast(frame.convert("RGB"))
+        frame = contrast_enhancer.enhance(1.15).convert("RGBA")
+        color_enhancer = ImageEnhance.Color(frame.convert("RGB"))
+        frame = color_enhancer.enhance(1.20).convert("RGBA")
 
     # Dark gradient overlays at top and bottom for ultra-readable text
     overlay = Image.new("RGBA", (OUTPUT_WIDTH, OUTPUT_HEIGHT), (0, 0, 0, 0))

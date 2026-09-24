@@ -78,8 +78,21 @@ on:
         default: '@allinonepodcastsss'
         type: string
 
+  pull_request:
+    paths:
+      - '**/*.py'
+      - '**/*.yml'
+      - '**/*.yaml'
+      - '**/*.ini'
+      - 'requirements.txt'
+      - 'tests/**'
+
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: podcast-clipper-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   verify:
@@ -100,9 +113,22 @@ jobs:
           python -m pip install -r requirements.txt
       - name: Run regression suite
         run: python -m unittest discover -s tests -v
+      - name: Run static checks
+        run: |
+          python -m ruff check main.py src tests render_dynamic_showcase.py
+          python -m mypy main.py src
+      - name: Scan tracked files for common secret patterns
+        run: |
+          if git grep -nE '(ghp_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{20,})' -- .; then
+            echo 'Potential secret pattern found in tracked files.'
+            exit 1
+          fi
 
   clip-and-publish:
     name: Detect Viral Clips, Enhance & Publish
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: write
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -165,19 +191,17 @@ jobs:
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install opencv-python-headless
           pip install -r requirements.txt
-          pip install mediapipe
 
       - name: Run AI Podcast Clipper & Publisher
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY || secrets.groq_api_key }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY || secrets.openrouter_api_key }}
-          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY || '2187c3d426224f23a8728263cf66e98a.aLOIml1Yo-_FvhhKQn7FnXn9' }}
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
           OLLAMA_MODEL: ${{ vars.OLLAMA_MODEL || 'gemma4:31b' }}
-          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY || 'F38Z5qgMKdU9NUNEmmuELhQGdu4WDTOAz1X3fh1oGpnCkYHkP2HJ6CBW' }}
-          ENABLE_BROLL: 'true'
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          ENABLE_BROLL: ${{ vars.ENABLE_BROLL || 'false' }}
           BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN || secrets.BUFFER_API_KEY }}
           BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY || secrets.BUFFER_ACCESS_TOKEN }}
           BUFFER_CHANNEL_IDS: ${{ secrets.BUFFER_CHANNEL_IDS }}
@@ -254,11 +278,19 @@ jobs:
 
       - name: Job Summary Report
         if: always()
+        env:
+          INPUT_VIDEO_URL: ${{ github.event.inputs.video_url }}
+          INPUT_NUM_CLIPS: ${{ github.event.inputs.num_clips }}
+          INPUT_FRAMING: ${{ github.event.inputs.framing }}
+          INPUT_SUBTITLE_STYLE: ${{ github.event.inputs.subtitle_style }}
+          INPUT_POST_TO_BUFFER: ${{ github.event.inputs.post_to_buffer }}
         run: |
-          echo "## 🎬 Viral Clips Processing Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- **Source Video:** ${{ github.event.inputs.video_url }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Clips Requested:** ${{ github.event.inputs.num_clips }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Framing Strategy:** ${{ github.event.inputs.framing }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Subtitle Theme:** ${{ github.event.inputs.subtitle_style }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Posted to Buffer:** ${{ github.event.inputs.post_to_buffer }}" >> $GITHUB_STEP_SUMMARY
-          echo "Clips have been archived as release assets and workflow artifacts." >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## 🎬 Viral Clips Processing Summary"
+            printf '%s\n' "- **Source Video:** ${INPUT_VIDEO_URL:-Auto-discovered}"
+            printf '%s\n' "- **Clips Requested:** ${INPUT_NUM_CLIPS:-3}"
+            printf '%s\n' "- **Framing Strategy:** ${INPUT_FRAMING:-auto}"
+            printf '%s\n' "- **Subtitle Theme:** ${INPUT_SUBTITLE_STYLE:-hormozi}"
+            printf '%s\n' "- **Posted to Buffer:** ${INPUT_POST_TO_BUFFER:-false}"
+            echo "Clips have been archived as release assets and workflow artifacts."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,15 +1,14 @@
 import os
 import subprocess
-import re
+import uuid
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, List, Tuple
 from src.config import (
     OUTPUT_WIDTH, OUTPUT_HEIGHT, FPS, VIDEO_CRF, AUDIO_BITRATE,
-    TARGET_LUFS, TARGET_TRUE_PEAK, HIGHPASS_FREQ, VOCAL_PRESENCE_FREQ, VOCAL_AIR_FREQ, CLIPS_DIR,
-    ENABLE_PUNCH_ZOOM, ENABLE_BGM, AUDIO_ASSETS_DIR, ENABLE_FILM_GRAIN, IS_CI,
+    TARGET_LUFS, TARGET_TRUE_PEAK, HIGHPASS_FREQ, VOCAL_PRESENCE_FREQ, VOCAL_AIR_FREQ, ENABLE_BGM, AUDIO_ASSETS_DIR, ENABLE_FILM_GRAIN, IS_CI,
     SFX_ASSETS_DIR, ENABLE_SFX, ENABLE_DYNAMIC_DUCKING
 )
-from src.face_tracker import FramingDecision, ShotPlan
+from src.face_tracker import FramingDecision
 
 def sanitize_ffmpeg_path(path: Path) -> str:
     """Escapes path for FFmpeg filter arguments across Windows and Unix."""
@@ -55,18 +54,6 @@ def build_video_filtergraph(
 
     if ENABLE_FILM_GRAIN:
         studio_grade += ",noise=alls=1.2:allf=t"
-
-    # Dynamic Zoom Logic (1.2x zoom during peaks)
-    # We use the 'zoompan' filter. Since zoompan is complex, we apply it as a 
-    # pre-crop effect or a layered effect. For simplicity and stability in 
-    # the $0 GH Action environment, we'll implement it via an expression in the crop filter
-    # where possible, or a separate zoompan filter.
-    
-    zoom_expr = "1.0"
-    if peak_intensity_segments:
-        # Create a conditional zoom expression: if time is within any peak, zoom=1.2, else 1.0
-        segments_logic = " || ".join([f"(between(t,{s[0]},{s[1]}))" for s in peak_intensity_segments])
-        zoom_expr = f"if({segments_logic},1.2,1.0)"
 
     active_x = getattr(framing, "active_x", 0)
     active_y = getattr(framing, "active_y", 0)
@@ -308,12 +295,10 @@ def render_viral_clip(
         cover_input_idx=cover_input_idx,
         cover_duration=cover_duration
     )
-    audio_filters = build_audio_filtergraph()
-
     has_audio = True
     try:
         probe_cmd = ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(source_video_path)]
-        probe_res = subprocess.run(probe_cmd, capture_output=True, text=True)
+        probe_res = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=15)
         has_audio = "audio" in probe_res.stdout
     except Exception:
         has_audio = True
@@ -328,7 +313,7 @@ def render_viral_clip(
         input_args.extend(["-stream_loop", "-1", "-i", str(active_bgm)])
 
     # Collect valid SFX cues
-    valid_sfx = []
+    valid_sfx: List[Tuple[float, Path, str]] = []
     if ENABLE_SFX and sfx_cues:
         for cue_t, s_type in sfx_cues:
             if 0.0 <= cue_t < duration:
@@ -391,6 +376,10 @@ def render_viral_clip(
         combined_filter = video_filters
         map_args = ["-map", "[outv]"]
 
+    temp_output = output_clip_path.with_name(
+        f".{output_clip_path.stem}.{uuid.uuid4().hex}.part{output_clip_path.suffix or '.mp4'}"
+    )
+    output_clip_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         "ffmpeg", "-y",
         *input_args,
@@ -408,21 +397,33 @@ def render_viral_clip(
         "-b:a", AUDIO_BITRATE,
         "-ar", "48000",
         "-movflags", "+faststart",
-        str(output_clip_path)
+        str(temp_output)
     ]
 
     print(f"[*] Rendering viral clip with FFmpeg: {output_clip_path.name} (Framing: {framing.mode})...")
-    result = subprocess.run(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=900,
+        )
 
-    if result.returncode != 0:
-        print(f"[-] FFmpeg error:\n{result.stderr[-1500:]}")
-        print(f"[-] FFmpeg complex filter was:\n{combined_filter}")
-        raise RuntimeError(f"FFmpeg failed to render clip {output_clip_path.name}")
+        if result.returncode != 0:
+            print(f"[-] FFmpeg error:\n{result.stderr[-1500:]}")
+            print(f"[-] FFmpeg complex filter was:\n{combined_filter}")
+            raise RuntimeError(f"FFmpeg failed to render clip {output_clip_path.name}")
+        if not temp_output.exists() or temp_output.stat().st_size <= 0:
+            raise RuntimeError(f"FFmpeg produced no output for clip {output_clip_path.name}")
+        os.replace(temp_output, output_clip_path)
+    except Exception:
+        if temp_output.exists():
+            try:
+                temp_output.unlink()
+            except OSError:
+                pass
+        raise
 
     size_mb = (output_clip_path.stat().st_size / (1024 * 1024)) if output_clip_path.exists() else 0.0
     print(f"[+] Clip rendered successfully: {output_clip_path} (Size: {size_mb:.2f} MB)")

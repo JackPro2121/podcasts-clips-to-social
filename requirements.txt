@@ -11,6 +11,8 @@ youtube-transcript-api>=0.6.2
 faster-whisper>=1.0.0
 mediapipe>=0.10.14
 opencv-python-headless>=4.8.0.76,<5.0.0.0
+numpy>=1.24.0
+Pillow>=10.0.0
 scenedetect>=0.6.4
 
 # API & Networking
@@ -21,3 +23,5 @@ pydantic>=2.7.0
 # Utility & CLI
 tqdm>=4.66.0
 click>=8.1.7
+mypy>=1.10.0
+ruff>=0.6.0

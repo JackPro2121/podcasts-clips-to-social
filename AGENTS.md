@@ -8,11 +8,11 @@ Welcome agent / developer. This document establishes the operational rules, tech
 
 This repository provides a **$0-budget, automated, broadcast-grade pipeline** that:
 1. **Hyper-Focuses on Finance & Wealth**: Locks channel auto-discovery, Gemini prompts, and hashtags to top-earning personal finance, debt drama, and wealth creation podcasts (Caleb Hammer, Ramsey, Graham Stephan, Humphrey Yang, My First Million).
-2. **Zero Full-Video Download**: Ingests transcripts first (0 video bytes), identifies high-retention 30–60s windows, and streams *only* the targeted snippet (~15–25MB) via Apify residential proxy actors (`vidkraken/youtube-video-audio-downloader-reliable`), eliminating datacenter bot-blocks (`Sign in to confirm you're not a bot`).
+2. **Targeted Segment Extraction**: YouTube inputs with usable transcripts avoid full-video downloads and stream only the selected 30–60s window; other inputs may use a full-download fallback.
 3. **Studio Sound Design & Sidechain Ducking**: Mixes vocal presence (+2.5dB at 3kHz), 80Hz rumble cut, dynamic voice sidechain ducking on BGM (`sidechaincompress`), millisecond-accurate SFX cues (`whoosh`, `pop`, `ding`), and EBU R128 (-14 LUFS / -1.5 dBTP) normalization.
-4. **Kinetic Subtitles & Emoji Hook Caps**: Burns word-by-word spring-bounce subtitles (`\t(0,70,\fscx118\fscy118)`) with contextual finance emojis (💰, 💸, 📈, 🏦) placed strictly within mobile UI safe zones.
+4. **Kinetic Subtitles & Hook Caps**: Burns word-by-word spring-bounce subtitles (`\t(0,70,\fscx118\fscy118)`) with layout-specific safe-zone placement.
 5. **AI Active Speaker Tracking**: Employs OpenCV YuNet on CPU to detect active speaker mouth motion, dynamically choosing between solo 9:16 portrait and dual-speaker split screen.
-6. **Free Release Hosting & Buffer Posting**: Uploads clips permanently for $0 to GitHub Releases and dispatches direct public video URLs across TikTok, Instagram Reels, YouTube Shorts, and X via Buffer GraphQL API.
+6. **Release Hosting & Buffer Posting**: Uploads clips to public GitHub Releases for the configured retention period and dispatches direct video URLs across connected social accounts via Buffer GraphQL API.
 7. **Storage Hygiene**: Automatically deletes releases and assets older than 5 days.
 
 ---
@@ -32,7 +32,7 @@ PODCASTS-CLIPS-TO-SOCIAL/
 │   ├── face_tracker.py              # OpenCV face tracking & split-screen decisions
 │   ├── subtitle_generator.py        # Word-by-word karaoke ASS subtitle engine
 │   ├── video_editor.py              # FFmpeg filtergraph, loudness normalization
-│   ├── github_uploader.py           # GitHub Releases permanent public asset uploader
+│   ├── github_uploader.py           # GitHub Releases public asset uploader
 │   ├── buffer_client.py             # Buffer GraphQL social media publishing client
 │   ├── channel_discovery.py         # Apify scraper for high-CPM podcast discovery
 │   └── release_cleaner.py           # Auto-deletes releases older than N days
@@ -111,7 +111,7 @@ python -m unittest discover -s tests
 2. **Safe-Zone Compliance**: Never place subtitles outside the safe zone (Y: 60–72% or center divider on split screen). UI buttons on TikTok/Reels will obscure anything in the lower 20% or right 15%.
 3. **Audio Integrity & Sidechain Balancing**: Always master audio to EBU R128 (-14 LUFS, -1.5 dBTP) with 80Hz highpass rumble cut. Ensure background music is dynamically ducked when voice is present and maintain stereo stream formatting across all mixed inputs.
 4. **Deterministic FFmpeg Stream Indexing**: Never compute `-filter_complex` stream indices with heuristic division. Maintain an integer counter that increments with each `-i` flag to strictly match FFmpeg's 0-indexed input stream references (`[0:a]`, `[1:a]`, `[2:a]`, ...).
-5. **Targeted Segment Extraction**: Never attempt to download full multi-gigabyte podcast videos on GitHub Actions. Evaluate captions first and extract only the 30–60s clip window via Apify or range-limited yt-dlp.
+5. **Targeted Segment Extraction**: Evaluate transcripts first for YouTube inputs and extract only the 30–60s clip window via Apify or range-limited yt-dlp. Use a documented full-download fallback for unsupported sources.
 6. **Isolated Per-Clip Failure Recovery**: Always wrap clip rendering in isolated `try/except` handlers so a failure in a single clip does not abort the entire batch of clips.
-7. **Permanent Direct Video URLs**: Buffer's API requires a publicly accessible video URL. Video assets uploaded to GitHub Releases provide permanent, high-bandwidth public direct URLs.
+7. **Temporary Direct Video URLs**: Buffer requires a publicly accessible video URL. GitHub Release assets must be in a public repository and are removed by the retention cleanup workflow.
 8. **Storage Hygiene**: Always ensure the 5-day release cleanup routine is active to avoid accumulation of multi-gigabyte video files in GitHub Releases.

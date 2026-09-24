@@ -1,6 +1,5 @@
 import unittest
 from pathlib import Path
-import json
 import tempfile
 from src.slack_notifier import SlackNotifier
 from src.channel_discovery import extract_youtube_id, load_history, record_history

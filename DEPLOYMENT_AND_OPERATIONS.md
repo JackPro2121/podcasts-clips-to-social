@@ -11,10 +11,18 @@ Navigate to your GitHub repository:
 
 | Secret Name | Required? | How to Obtain for $0 |
 | :--- | :--- | :--- |
-| `APIFY_API_TOKEN` | **Yes** | Sign up at [Apify](https://console.apify.com) $\rightarrow$ Settings $\rightarrow$ Integrations $\rightarrow$ Copy API Token. Bypasses datacenter IP blocks. |
-| `GEMINI_API_KEY` | **Yes** | Sign up at [Google AI Studio](https://aistudio.google.com/app/apikey) $\rightarrow$ Create API Key (Free tier: 15 RPM / 1M tokens/min). |
-| `BUFFER_ACCESS_TOKEN` | Optional* | From [Buffer Developer Portal](https://developers.buffer.com) or Settings. *(Required only if posting to socials)*. |
-| `BUFFER_CHANNEL_IDS` | Optional | Comma-separated list of target channel IDs. Leave blank to auto-post to all connected channels. |
+| `APIFY_API_TOKEN` | **Yes for targeted YouTube ingestion** | Apify account integrations. |
+| `GEMINI_API_KEY` | **Yes for AI clip detection** | Google AI Studio API key. |
+| `BUFFER_ACCESS_TOKEN` | Optional* | Buffer developer/settings access token. Required for publishing. |
+| `BUFFER_CHANNEL_IDS` | Optional | Comma-separated Buffer channel IDs. Leave blank to auto-discover. |
+| `CHOCODATA_API_KEY` | Optional | Chocodata transcript fallback. |
+| `GROQ_API_KEY` | Optional | Groq LLM fallback. |
+| `OPENROUTER_API_KEY` | Optional | OpenRouter LLM fallback. |
+| `OLLAMA_API_KEY` | Optional | Ollama Cloud fallback. |
+| `PEXELS_API_KEY` | Optional | Pexels B-roll; disabled by default. |
+| `RAPIDAPI_KEY` | Optional | RapidAPI downloader fallback. |
+| `SLACK_WEBHOOK_URL` | Optional | Slack run/error notifications. |
+| `YOUTUBE_COOKIES` | Optional | Store only if a fresh Netscape cookie file is explicitly required. |
 
 > **Note**: `GITHUB_TOKEN` is automatically provisioned by GitHub Actions with `contents: write` permissions.
 
@@ -41,7 +49,7 @@ Navigate to your GitHub repository:
    - **Subtitles Mode**: `auto` (burn captions), `skip` (if video already has captions baked-in).
    - **Niche**: `finance` (Default, locked for maximum CPM/RPM), or specify another category.
    - **Post to Buffer**: Check `true` to auto-schedule across your social channels.
-> ⚡ **Zero Full-Video Download**: The workflow only fetches captions first and then streams only the 30–50s segment (~15–25MB) using Apify rotating proxies, running in under 2 minutes per clip with zero bot blocks!
+> **Targeted segment path:** YouTube inputs with usable transcripts download only the selected clip range. Other source types or transcript failures may use the full-download fallback.
 4. Click **Run workflow**.
 
 ---
@@ -51,7 +59,7 @@ Navigate to your GitHub repository:
 To prevent video files from hoarding space on GitHub Releases:
 
 1. **Automatic Inline Cleanup**:
-   - Every time `main.py` finishes, it automatically scans your releases and deletes any release and asset older than **5 days**.
+   - Every time `main.py` finishes, it automatically scans releases tagged `clips-*` and deletes matching releases/assets older than **5 days**, while preserving active Buffer posts.
 2. **Automated Daily Cron Workflow (`cleanup_old_releases.yml`)**:
    - Runs automatically every single day at **03:00 UTC**.
    - Identifies any video releases older than 5 days and deletes them via GitHub REST API.
@@ -74,8 +82,8 @@ python -m src.channel_discovery --niche business
 # Discover AI & Tech podcasts:
 python -m src.channel_discovery --niche ai_tech
 
-# Scrape all 5 categories to JSON:
-python -m src.channel_discovery --niche all --output-json top_podcasts.json
+# Discover a category and print candidates:
+python -m src.channel_discovery --niche finance
 ```
 
 ---
@@ -105,7 +113,7 @@ cd podcasts-clips-to-social
 pip install -r requirements.txt
 cp .env.example .env
 ```
-Fill in your `GEMINI_API_KEY`, `APIFY_API_TOKEN`, and `BUFFER_ACCESS_TOKEN` in `.env`.
+For local runs, copy `.env.example` to `.env` and provide only the integrations you use. Never commit `.env`; GitHub Actions must receive credentials through repository Secrets.
 
 ### Dry-Run Test (Zero Video Rendering):
 ```bash
@@ -132,8 +140,8 @@ python -m unittest discover -s tests
 
 ### Issue: "Buffer rejected video upload"
 - **Cause**: Video URL was unreachable or private.
-- **Solution**: The pipeline uploads clips to **GitHub Releases**, creating permanent public direct download links (`https://github.com/.../releases/download/.../clip.mp4`) that Buffer can fetch instantly without authentication.
+- **Solution**: The pipeline uploads clips to a public GitHub Release and passes the public asset URL to Buffer. Releases are temporary and are cleaned after the configured retention period.
 
 ### Issue: "Subtitles overlapping creator handle on TikTok"
 - **Cause**: Subtitles placed too low on the screen.
-- **Solution**: Our subtitle engine strictly enforces safe-zone margins (`MarginV = 420` out of 1920), keeping captions in the sweet-spot center-lower third well above all mobile platform interface buttons.
+- **Solution**: The subtitle engine applies layout-specific safe-zone margins and keeps captions above mobile platform controls.

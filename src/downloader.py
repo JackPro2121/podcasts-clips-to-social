@@ -4,15 +4,15 @@ import time
 import math
 import tempfile
 from pathlib import Path
+from urllib.parse import quote, urlparse
 from typing import Optional, Dict, Any, List, Tuple
 import subprocess
-from urllib.parse import quote
 import yt_dlp
 import requests
 from youtube_transcript_api import YouTubeTranscriptApi
 from src.config import (
     DOWNLOADS_DIR, APIFY_API_TOKEN, YOUTUBE_COOKIES, YTDLP_PROXY, RAPIDAPI_KEY,
-    COBALT_API_URL, COBALT_INSTANCES, MIN_VIDEO_HEIGHT, MAX_VIDEO_HEIGHT,
+    COBALT_API_URL, COBALT_INSTANCES, MIN_VIDEO_HEIGHT,
     YTDLP_POT_PROVIDER_URL,
     APIFY_FULL_DOWNLOAD_ACTOR_ID, APIFY_SEGMENT_ACTOR_ID,
     APIFY_TRANSCRIPT_ACTOR_ID,
@@ -25,6 +25,40 @@ from src.config import (
 # which meant a permanently-dead video (private/removed/geo-blocked) burned the
 # full 7-strategy x full-download budget before giving up. We now distinguish
 # permanent failures (abort immediately) from transient ones (rotate client).
+
+def _is_public_https_url(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme.lower() != "https" or not parsed.hostname:
+            return False
+        import ipaddress
+        try:
+            address = ipaddress.ip_address(parsed.hostname)
+        except ValueError:
+            return True
+        return not (
+            address.is_private
+            or address.is_loopback
+            or address.is_link_local
+            or address.is_reserved
+            or address.is_multicast
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def _is_trusted_apify_url(url: str) -> bool:
+    try:
+        hostname = (urlparse(url).hostname or "").lower()
+    except ValueError:
+        return False
+    return (
+        hostname == "apify.com"
+        or hostname.endswith(".apify.com")
+        or hostname == "apify.dev"
+        or hostname.endswith(".apify.dev")
+    )
+
 
 class VideoUnavailableError(Exception):
     """Raised when a video is permanently unfetchable (private/removed/geo/age).
@@ -125,6 +159,25 @@ def get_video_height(file_path: Path) -> int:
     except Exception:
         return 0
 
+def get_video_dimensions(file_path: Path) -> Tuple[int, int]:
+    try:
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height",
+            "-of", "csv=s=x:p=0",
+            str(file_path)
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        value = res.stdout.strip()
+        if "x" in value:
+            width, height = value.split("x", 1)
+            return int(width), int(height)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return 1920, 1080
+
+
 def get_video_duration(file_path: Path) -> float:
     """Probes video duration in seconds using ffprobe."""
     try:
@@ -160,7 +213,7 @@ def fetch_youtube_transcript(video_id: str) -> Optional[List[Dict[str, Any]]]:
     Compatible with both youtube-transcript-api 0.x and 1.x.
     Returns list of dicts: [{'text': str, 'start': float, 'duration': float}]
     """
-    raw_snippets = None
+    raw_snippets: Any = None
 
     # Strategy 1: youtube-transcript-api 1.x instance method
     try:
@@ -169,6 +222,7 @@ def fetch_youtube_transcript(video_id: str) -> Optional[List[Dict[str, Any]]]:
         if hasattr(api, "list"):
             try:
                 transcript_list = api.list(video_id)
+                t: Any = None
                 try:
                     t = transcript_list.find_transcript(['en', 'en-US', 'en-GB'])
                 except Exception:
@@ -328,15 +382,15 @@ def download_via_apify(
         vid_id = first_item.get("id") or extract_youtube_id(video_url) or "video"
         out_file = output_dir / f"{vid_id}.mp4"
 
-        # SECURITY: only attach the Apify bearer token when the download URL is
-        # actually on Apify's domain. The URL comes from the actor's dataset and
-        # could point anywhere (redirect/SSRF); we must not leak credentials.
+        if not _is_public_https_url(direct_url):
+            print("[-] Apify returned an unsafe or non-HTTPS download URL.")
+            return None
         stream_headers = {}
-        if "apify.com" in direct_url or "apify.dev" in direct_url:
+        if _is_trusted_apify_url(direct_url):
             stream_headers = {"Authorization": f"Bearer {token}"}
 
         print(f"[*] Streaming high-quality video from Apify storage ({out_file.name})...")
-        with requests.get(direct_url, headers=stream_headers, stream=True, timeout=180) as stream_res:
+        with requests.get(direct_url, headers=stream_headers, stream=True, timeout=180, allow_redirects=False) as stream_res:
             stream_res.raise_for_status()
             with open(out_file, "wb") as f:
                 for chunk in stream_res.iter_content(chunk_size=1024 * 1024):
@@ -397,16 +451,26 @@ def download_segment_via_apify(
         if not isinstance(first_item, dict):
             print("[-] Apify segment actor returned no job data.")
             return None
-        job = first_item.get("output") if isinstance(first_item.get("output"), dict) else first_item
-        direct_url = job.get("downloadUrl")
-        poll_url = job.get("pollUrl")
+        raw_output = first_item.get("output")
+        job: Dict[str, Any] = raw_output if isinstance(raw_output, dict) else first_item
+        direct_url_value = job.get("downloadUrl")
+        poll_url_value = job.get("pollUrl")
+        direct_url: Optional[str] = (
+            direct_url_value if isinstance(direct_url_value, str) else None
+        )
+        poll_url: Optional[str] = (
+            poll_url_value if isinstance(poll_url_value, str) else None
+        )
 
         if not direct_url and not poll_url:
             print("[-] Apify segment actor response did not include downloadUrl or pollUrl.")
             return None
 
         if not direct_url and poll_url:
-            poll_headers = {"Authorization": f"Bearer {token}"} if "apify.com" in poll_url else {}
+            if not _is_trusted_apify_url(poll_url) or not _is_public_https_url(poll_url):
+                print("[-] Apify returned an unsafe polling URL.")
+                return None
+            poll_headers = {"Authorization": f"Bearer {token}"}
             completed = None
             for attempt in range(75):
                 time.sleep(3)
@@ -430,16 +494,21 @@ def download_segment_via_apify(
             if not direct_url:
                 print("[-] Apify segment download timed out before completion.")
                 return None
+        if not direct_url:
+            print("[-] Apify segment response did not include a valid download URL.")
+            return None
         vid_id = extract_youtube_id(video_url) or "video"
         out_file = output_dir / f"clip_{vid_id}_{int_start}s_{int_end}s.mp4"
         print(f"[*] Streaming requested Apify segment to {out_file.name}...")
 
-        # Attach Apify bearer token if downloading from Apify storage/domains
+        if not _is_public_https_url(direct_url):
+            print("[-] Apify returned an unsafe or non-HTTPS segment URL.")
+            return None
         stream_headers = {}
-        if "apify.com" in direct_url or "apify.dev" in direct_url:
+        if _is_trusted_apify_url(direct_url):
             stream_headers = {"Authorization": f"Bearer {token}"}
 
-        with requests.get(direct_url, headers=stream_headers, stream=True, timeout=180) as stream_res:
+        with requests.get(direct_url, headers=stream_headers, stream=True, timeout=180, allow_redirects=False) as stream_res:
             stream_res.raise_for_status()
             with open(out_file, "wb") as f:
                 for chunk in stream_res.iter_content(chunk_size=1024 * 1024):
@@ -600,6 +669,8 @@ def download_via_ytdlp(
             'js_runtimes': {'node': {}},
             'outtmpl': str(target_dir / "%(id)s_%(title).50s.%(ext)s"),
             'merge_output_format': 'mp4',
+            'socket_timeout': 30,
+            'retries': 3,
             'quiet': True,
             'no_warnings': True,
         }
@@ -706,8 +777,11 @@ def download_via_cobalt(
 
             # Direct stream, tunnel, or redirect URL
             if status in ("tunnel", "redirect", "stream") and stream_url:
+                if not _is_public_https_url(stream_url):
+                    print(f"[-] Cobalt returned an unsafe or non-HTTPS stream URL: {inst_url}")
+                    continue
                 print(f"[*] Cobalt returned '{status}' stream. Downloading to disk ({out_file.name})...")
-                with requests.get(stream_url, headers={"User-Agent": ua}, stream=True, timeout=180) as stream_res:
+                with requests.get(stream_url, headers={"User-Agent": ua}, stream=True, timeout=180, allow_redirects=False) as stream_res:
                     stream_res.raise_for_status()
                     with open(out_file, "wb") as f:
                         for chunk in stream_res.iter_content(chunk_size=2 * 1024 * 1024):
@@ -727,7 +801,7 @@ def download_via_cobalt(
                         "is_local": False
                     }
                 else:
-                    print(f"[-] Cobalt stream produced empty or truncated file.")
+                    print("[-] Cobalt stream produced empty or truncated file.")
             elif status == "picker":
                 picker_items = data.get("picker", [])
                 best_url = None
@@ -736,8 +810,11 @@ def download_via_cobalt(
                         best_url = item["url"]
                         break
                 if best_url:
-                    print(f"[*] Cobalt returned picker items. Downloading stream to disk...")
-                    with requests.get(best_url, headers={"User-Agent": ua}, stream=True, timeout=180) as stream_res:
+                    if not _is_public_https_url(best_url):
+                        print(f"[-] Cobalt returned an unsafe or non-HTTPS picker URL: {inst_url}")
+                        continue
+                    print("[*] Cobalt returned picker items. Downloading stream to disk...")
+                    with requests.get(best_url, headers={"User-Agent": ua}, stream=True, timeout=180, allow_redirects=False) as stream_res:
                         stream_res.raise_for_status()
                         with open(out_file, "wb") as f:
                             for chunk in stream_res.iter_content(chunk_size=2 * 1024 * 1024):
@@ -879,7 +956,7 @@ def download_via_rapidapi(
                                         f_a.write(chunk)
 
                         if temp_v.exists() and temp_a.exists() and temp_v.stat().st_size > 512 * 1024:
-                            print(f"[*] Tracks saved locally. Combining with local FFmpeg...")
+                            print("[*] Tracks saved locally. Combining with local FFmpeg...")
                             cmd_local = [
                                 "ffmpeg", "-y",
                                 "-i", str(temp_v),
@@ -1070,8 +1147,8 @@ def fetch_transcript_via_apify(video_url: str, api_token: Optional[str] = None) 
         for segment in raw_segments:
             if not isinstance(segment, dict) or not str(segment.get("text", "")).strip():
                 continue
-            start = segment.get("start", segment.get("startMs", 0))
-            duration = segment.get("duration")
+            start: Any = segment.get("start", segment.get("startMs", 0))
+            duration: Any = segment.get("duration")
             if duration is None and segment.get("endMs") is not None:
                 duration = float(segment["endMs"]) - float(start)
             try:
@@ -1114,7 +1191,7 @@ def fetch_transcript_only(url: str, allow_apify_fallback: bool = False) -> Optio
     if not transcript:
         try:
             from src.config import CHOCODATA_API_KEY
-            from src.transcriber import fetch_transcript_chocodata, parse_native_transcript
+            from src.transcriber import fetch_transcript_chocodata
             if CHOCODATA_API_KEY:
                 print("[*] Trying Chocodata API as transcript fallback (tier 3)...")
                 choco_segments = fetch_transcript_chocodata(video_id)
@@ -1179,17 +1256,20 @@ def download_clip_segment(
                 h = get_video_height(out_path)
                 dur = get_video_duration(out_path)
                 print(f"  [+] Segment downloaded via Apify ({h}p, {out_path.stat().st_size / (1024*1024):.1f} MB)")
-                segment_start = float(apify_result.get("segment_start", 0.0))
-                return {
-                    'video_path': out_path.resolve(),
-                    'title': f"clip_{clip_index}",
-                    'duration': dur or clip_duration,
-                    'height': h,
-                    'is_low_res': (0 < h < MIN_VIDEO_HEIGHT),
-                    'segment_start': segment_start,
-                    'segment_duration': clip_duration,
-                    'is_local': False,
-                }
+                if h < MIN_VIDEO_HEIGHT or dur <= 0:
+                    print(f"  [-] Apify result failed the {MIN_VIDEO_HEIGHT}p/duration quality gate. Trying yt-dlp...")
+                else:
+                    segment_start = float(apify_result.get("segment_start", 0.0))
+                    return {
+                        'video_path': out_path.resolve(),
+                        'title': f"clip_{clip_index}",
+                        'duration': dur or clip_duration,
+                        'height': h,
+                        'is_low_res': (0 < h < MIN_VIDEO_HEIGHT),
+                        'segment_start': segment_start,
+                        'segment_duration': clip_duration,
+                        'is_local': False,
+                    }
         except Exception as e:
             print(f"  [-] Apify segment download failed: {e}. Falling back to yt-dlp...")
 
@@ -1210,9 +1290,10 @@ def download_clip_segment(
         base_opts['proxy'] = YTDLP_PROXY.strip()
 
     # Try each client variant in priority order (android_vr first = no BotGuard)
+    cookie_value = os.environ.get("YOUTUBE_COOKIES", "") or ""
     cookie_path = (
-        _write_cookiefile(os.environ.get("YOUTUBE_COOKIES", ""))
-        if (os.environ.get("YOUTUBE_COOKIES") and os.environ.get("YOUTUBE_COOKIES").strip())
+        _write_cookiefile(cookie_value)
+        if cookie_value.strip()
         else None
     )
     clients = _ytdlp_client_variants(cookie_path=cookie_path)
@@ -1240,6 +1321,9 @@ def download_clip_segment(
                 h = get_video_height(produced)
                 if not h or h <= 0:
                     print(f"  [-] Client '{label}' produced audio-only or non-video stream. Trying next client...")
+                    continue
+                if h < MIN_VIDEO_HEIGHT:
+                    print(f"  [-] Client '{label}' produced {h}p, below the {MIN_VIDEO_HEIGHT}p gate. Trying next client...")
                     continue
                 dur = get_video_duration(produced)
                 print(f"  [+] Segment downloaded ({h}p, {produced.stat().st_size / (1024*1024):.1f} MB) via '{label}'")

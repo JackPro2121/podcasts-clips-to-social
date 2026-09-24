@@ -1,6 +1,6 @@
 # 🎙️ Autonomous AI Podcast Viral Clipper & Buffer Social Publisher ($0 Budget)
 
-An automated, broadcast-grade pipeline that extracts high-retention viral moments from long-form podcasts, applies AI multi-speaker face tracking, dynamic 9:16 framing (TikTok/Reels/Shorts), studio audio mastering, and ultra-premium animated subtitles, hosts generated clips permanently on GitHub Releases for $0, and automatically publishes/schedules them to social media via **Buffer**.
+An automated, broadcast-grade pipeline that extracts high-retention viral moments from long-form podcasts, applies AI multi-speaker face tracking, dynamic 9:16 framing (TikTok/Reels/Shorts), studio audio mastering, and animated subtitles, hosts clips on public GitHub Releases for $0, and can publish/schedule them to social media via **Buffer**.
 
 ---
 
@@ -10,7 +10,7 @@ An automated, broadcast-grade pipeline that extracts high-retention viral moment
    - **Targeted Segment Extraction**: Never downloads entire 2GB–4GB long podcasts. Transcripts are evaluated first, and only the 30–50s viral snippet (~15–25MB) is streamed using rotating residential proxies via Apify (`vidkraken/youtube-video-audio-downloader-reliable`), bypassing datacenter bot blocks (`Sign in to confirm you're not a bot`).
    - **AI Brain**: Google Gemini 1.5/2.5 Flash Free Tier for hook detection and viral scoring.
    - **Face Tracking & Layouts**: Runs on lightweight CPU OpenCV / YuNet, zero GPU server costs.
-   - **Free Hosting for Buffer**: Uploads clips to **GitHub Releases** for permanent high-bandwidth public MP4 URLs.
+   - **Free Hosting for Buffer**: Uploads clips to public **GitHub Releases** for direct MP4 URLs during the configured retention period.
    - **Zero-Cost Cloud Runner**: Runs entirely on **GitHub Actions** (2,000 free minutes/month).
 
 2. **Studio-Grade Video Editing & Audio Mastering**:
@@ -18,9 +18,8 @@ An automated, broadcast-grade pipeline that extracts high-retention viral moment
    - **Precision SFX Sound Design**: Millisecond-accurate sound effects (`whoosh.wav`, `pop.wav`, `ding.wav`) synchronized with kinetic hooks and text pops.
    - **Broadcast Audio Standards**: 80Hz rumble highpass filter, +2.5dB vocal presence boost at 3kHz, and EBU R128 (-14 LUFS / -1.5 dBTP) normalization.
 
-3. **Kinetic Bounce Subtitles & Contextual Emojis**:
+3. **Kinetic Bounce Subtitles**:
    - **Kinetic Pop Animation**: High-energy spring scaling (`\t(0,70,\fscx118\fscy118)`) for maximum retention.
-   - **Dynamic Keyword Emojis**: High-CPM keywords trigger relevant emojis (`money` 💰, `debt` 💸, `invest` 📈, `bank` 🏦, `tax` 🏛️, `salary` 💼).
    - **Safe-Zone Compliance**: Formatted strictly within mobile UI safe boundaries (avoiding buttons and handles).
    - Themes: `hormozi` (Yellow & White), `neon_green`, `luxury_gold`, and `cyber_cyan`.
 
@@ -41,7 +40,7 @@ An automated, broadcast-grade pipeline that extracts high-retention viral moment
 You do **not** need to install anything on your personal machine to run this!
 
 ### Step 1: Fork or Push this Repository to GitHub
-Push this codebase to your own GitHub repository (public or private).
+Push this codebase to a public GitHub repository when using GitHub Release URLs with Buffer. Private repositories require authenticated asset access, which Buffer may not support.
 
 ### Step 2: Add Repository Secrets
 Navigate to your GitHub repository:
@@ -50,8 +49,9 @@ Navigate to your GitHub repository:
 | Secret Name | How to get it (100% Free) |
 | :--- | :--- |
 | `GEMINI_API_KEY` | Grab your free API key at [Google AI Studio](https://aistudio.google.com/app/apikey). |
-| `BUFFER_ACCESS_TOKEN` | Grab your access token from [Buffer Developer Portal](https://publish.buffer.com) or Buffer Settings. |
-| `BUFFER_CHANNEL_IDS` | *(Optional)* Comma-separated channel IDs. Leave empty to automatically broadcast to all connected channels! |
+| `APIFY_API_TOKEN` | Required for targeted YouTube transcript/segment ingestion. |
+| `BUFFER_ACCESS_TOKEN` | Required only when publishing to Buffer. |
+| `BUFFER_CHANNEL_IDS` | Optional comma-separated target channel IDs. |
 
 > Note: `GITHUB_TOKEN` is automatically provided by GitHub Actions with release write permissions.
 
@@ -81,7 +81,7 @@ cd podcasts-clips-to-social
 pip install -r requirements.txt
 cp .env.example .env
 ```
-Fill in your `GEMINI_API_KEY` and `BUFFER_ACCESS_TOKEN` in `.env`.
+For local runs, copy `.env.example` to `.env` and add only the integrations you use. Never commit `.env`; GitHub Actions credentials must be stored in repository Secrets.
 
 ### 3. Usage Examples
 

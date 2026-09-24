@@ -15,6 +15,7 @@ except ImportError:
     HAS_NEW_GENAI = False
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=FutureWarning)
+        legacy_genai: Any = None
         try:
             import google.generativeai as legacy_genai
         except ImportError:
@@ -90,6 +91,7 @@ def query_gemini_models(prompt: str, key: str) -> Optional[str]:
         print(f"[*] Trying Gemini Flash ({model_name})...")
         for attempt in range(3):
             try:
+                response: Any
                 if HAS_NEW_GENAI:
                     # 60s HTTP timeout so a hung Gemini call can't stall the whole
                     # pipeline (the requests-based fallbacks already time out).
@@ -250,7 +252,64 @@ def strip_emojis(text: str) -> str:
     )
     return emoji_pattern.sub(r"", text).strip()
 
-def parse_clips_json(raw_text: str, segments: List[TranscriptSegment], num_clips: int) -> List[ViralClipCandidate]:
+
+MIN_CLIP_DURATION = 30.0
+MAX_CLIP_DURATION = 60.0
+
+
+def _normalize_clip_window(
+    start: float,
+    end: float,
+    segments: List[TranscriptSegment],
+) -> Optional[tuple[float, float]]:
+    if not segments:
+        return None
+    transcript_end = max(segment.end for segment in segments)
+    if transcript_end < MIN_CLIP_DURATION:
+        return None
+    start = max(0.0, start)
+    start = min(start, transcript_end - MIN_CLIP_DURATION)
+    end = max(end, start + MIN_CLIP_DURATION)
+    end = min(end, start + MAX_CLIP_DURATION, transcript_end)
+    if end - start < MIN_CLIP_DURATION:
+        return None
+    return round(start, 2), round(end, 2)
+
+
+NICHE_PROFILES = {
+    "finance": {
+        "focus": "personal finance, wealth creation, debt, income, investing, and financial freedom",
+        "hashtags": ["#finance", "#money", "#wealth", "#investing", "#financialfreedom"],
+    },
+    "business": {
+        "focus": "business strategy, entrepreneurship, growth, sales, leadership, and ownership",
+        "hashtags": ["#business", "#entrepreneur", "#startup", "#growth", "#leadership"],
+    },
+    "ai_tech": {
+        "focus": "artificial intelligence, software, technology, automation, and the future of work",
+        "hashtags": ["#ai", "#technology", "#automation", "#startups", "#future"],
+    },
+    "health_longevity": {
+        "focus": "health, fitness, longevity, medical research, habits, and human performance",
+        "hashtags": ["#health", "#longevity", "#fitness", "#wellness", "#humanperformance"],
+    },
+    "real_estate": {
+        "focus": "real estate, housing, investing, property markets, and financial independence",
+        "hashtags": ["#realestate", "#property", "#investing", "#housing", "#wealth"],
+    },
+    "mindset": {
+        "focus": "mindset, behavior, motivation, discipline, decision-making, and personal growth",
+        "hashtags": ["#mindset", "#motivation", "#selfimprovement", "#discipline", "#growth"],
+    },
+}
+
+
+def parse_clips_json(
+    raw_text: str,
+    segments: List[TranscriptSegment],
+    num_clips: int,
+    default_hashtags: Optional[List[str]] = None,
+) -> List[ViralClipCandidate]:
     """Parses raw LLM JSON into validated ViralClipCandidate objects."""
     clean_text = raw_text.strip()
     if clean_text.startswith("```json"):
@@ -267,16 +326,11 @@ def parse_clips_json(raw_text: str, segments: List[TranscriptSegment], num_clips
     for c in clips_data:
         start = float(c.get("start_time", 0.0))
         end = float(c.get("end_time", start + 40.0))
-        if end <= start:
-            end = start + 40.0
-        
+        normalized = _normalize_clip_window(start, end, segments)
+        if normalized is None:
+            continue
+        start, end = normalized
         dur = end - start
-        if dur > 65.0:
-            end = start + 55.0
-            dur = 55.0
-        elif dur < 25.0:
-            end = min(start + 40.0, segments[-1].end if segments else start + 40.0)
-            dur = end - start
 
         candidate_title = strip_emojis(re.sub(r'[^\w\s\-\'\,\.\?]', '', str(c.get("title", "Viral Moment"))).strip().upper())
         clean_caption = strip_emojis(str(c.get("social_caption", "Wait until the end. #shorts")))
@@ -310,6 +364,16 @@ def parse_clips_json(raw_text: str, segments: List[TranscriptSegment], num_clips
         if isinstance(raw_kw_emojis, dict):
             merged_emojis.update({k.lower().strip(): str(v).strip() for k, v in raw_kw_emojis.items()})
 
+        raw_peaks = c.get("peak_intensity_segments", [])
+        peak_segments: List[Tuple[float, float]] = []
+        if isinstance(raw_peaks, list):
+            for peak in raw_peaks:
+                if isinstance(peak, (list, tuple)) and len(peak) >= 2:
+                    try:
+                        peak_segments.append((float(peak[0]), float(peak[1])))
+                    except (TypeError, ValueError):
+                        continue
+
         candidate = ViralClipCandidate(
             title=candidate_title or "VIRAL MOMENT",
             start_time=start,
@@ -318,8 +382,8 @@ def parse_clips_json(raw_text: str, segments: List[TranscriptSegment], num_clips
             viral_score=_safe_int(c.get("viral_score", 85), default=85),
             hook_reason=strip_emojis(str(c.get("hook_reason", "High engagement segment"))),
             social_caption=clean_caption,
-            hashtags=clean_hashtags or ["#finance", "#money", "#wealth", "#investing", "#financialfreedom"],
-            peak_intensity_segments=c.get("peak_intensity_segments", []),
+            hashtags=clean_hashtags or default_hashtags or ["#finance", "#money", "#wealth", "#investing", "#financialfreedom"],
+            peak_intensity_segments=peak_segments,
             sfx_cues=clean_sfx,
             keyword_emojis=merged_emojis
         )
@@ -331,7 +395,8 @@ def parse_clips_json(raw_text: str, segments: List[TranscriptSegment], num_clips
 def detect_viral_moments(
     segments: List[TranscriptSegment],
     num_clips: int = 3,
-    api_key: Optional[str] = None
+    api_key: Optional[str] = None,
+    niche: str = "finance",
 ) -> List[ViralClipCandidate]:
     """
     Multi-Tier Zero-Cost Autonomous AI Viral Detection:
@@ -341,13 +406,15 @@ def detect_viral_moments(
     4. Fallback 3: Semantic topic extraction from spoken dialogue
     """
     transcript_text = format_transcript_with_timestamps(segments)
+    profile = NICHE_PROFILES.get(niche, NICHE_PROFILES["finance"])
+    default_hashtags = list(profile["hashtags"])
 
     prompt = f"""
-You are the world's top viral short-form video editor and content strategist specializing in Personal Finance, Wealth Creation, Debt Drama, and Investing (on TikTok, Instagram Reels, and YouTube Shorts).
+You are the world's top viral short-form video editor and content strategist specializing in {profile["focus"]} (on TikTok, Instagram Reels, and YouTube Shorts).
 Your goal is to analyze the following podcast transcript and extract the top {num_clips} most VIRAL standalone moments.
 
 ### VIRALITY CRITERIA:
-1. **Immediate Hook (0-3s)**: The clip MUST start directly on an impactful sentence about money, wealth, debt, income, or investing. Never start on pauses, host chitchat, or filler words ('um', 'uh', 'so', 'you know', 'yeah'). The first 3 seconds decide viral retention on TikTok, YouTube Shorts, and Reels. Start at the exact second the core argument begins.
+1. **Immediate Hook (0-3s)**: The clip MUST start directly on an impactful sentence about {profile["focus"]}. Never start on pauses, host chitchat, or filler words ('um', 'uh', 'so', 'you know', 'yeah'). The first 3 seconds decide viral retention on TikTok, YouTube Shorts, and Reels. Start at the exact second the core argument begins.
 2. **High Emotional Intensity or Insight**: Heated debt arguments, shocking income numbers, millionaire habits, counter-intuitive financial advice, or psychological money breakdowns.
 3. **Standalone Cohesion**: The clip must make complete sense on its own without needing the rest of the 2-hour podcast.
 4. **Optimal Duration**: Each clip MUST be strictly between 30 and 60 seconds (target: 35-50s).
@@ -410,7 +477,12 @@ Do not include markdown backticks or commentary outside the JSON.
     # Parse JSON if any LLM responded
     if raw_text:
         try:
-            candidates = parse_clips_json(raw_text, segments, num_clips)
+            candidates = parse_clips_json(
+                raw_text,
+                segments,
+                num_clips,
+                default_hashtags=default_hashtags,
+            )
             if candidates:
                 print(f"[+] Successfully detected {len(candidates)} viral candidates via AI!")
                 return candidates
@@ -419,14 +491,17 @@ Do not include markdown backticks or commentary outside the JSON.
 
     # Tier 4: Semantic dialogue topic extraction
     print("[*] Tier 4: Using intelligent semantic topic detector.")
-    return fallback_rule_based_detector(segments, num_clips)
+    return fallback_rule_based_detector(segments, num_clips, niche=niche)
 
-def fallback_rule_based_detector(segments: List[TranscriptSegment], num_clips: int = 3) -> List[ViralClipCandidate]:
+def fallback_rule_based_detector(segments: List[TranscriptSegment], num_clips: int = 3, niche: str = "finance") -> List[ViralClipCandidate]:
     """Intelligent semantic fallback that extracts meaningful topic titles from transcript speech."""
     if not segments:
         return []
 
     total_duration = segments[-1].end - segments[0].start
+    if total_duration < MIN_CLIP_DURATION:
+        return []
+    profile = NICHE_PROFILES.get(niche, NICHE_PROFILES["finance"])
     step = total_duration / (num_clips + 1)
     
     candidates = []
@@ -436,6 +511,10 @@ def fallback_rule_based_detector(segments: List[TranscriptSegment], num_clips: i
         closest_seg = min(segments, key=lambda s: abs(s.start - target_start))
         start_t = closest_seg.start
         end_t = min(start_t + 45.0, segments[-1].end)
+        normalized = _normalize_clip_window(start_t, end_t, segments)
+        if normalized is None:
+            continue
+        start_t, end_t = normalized
         
         # Extract speech text within this window to form a relevant semantic title
         chunk_words = []
@@ -452,7 +531,7 @@ def fallback_rule_based_detector(segments: List[TranscriptSegment], num_clips: i
             derived_title = f"POWERFUL PODCAST INSIGHT #{i+1}"
         
         dur = round(end_t - start_t, 1)
-        peaks = [[5.0, 10.0], [20.0, 25.0]] if dur > 30 else [[3.0, 7.0]]
+        peaks: List[Tuple[float, float]] = [(5.0, 10.0), (20.0, 25.0)] if dur > 30 else [(3.0, 7.0)]
         sfx = [(0.1, "whoosh"), (peaks[0][0], "whoosh")]
         if dur > 20:
             sfx.append((round(dur - 2.0, 1), "ding"))
@@ -465,7 +544,7 @@ def fallback_rule_based_detector(segments: List[TranscriptSegment], num_clips: i
             viral_score=80 - (i * 5),
             hook_reason="Engaging dialogue section with high-retention speech",
             social_caption=strip_emojis(f"{derived_title}\n\nWhat are your thoughts on this? Let us know below."),
-            hashtags=["#podcast", "#mindset", "#shorts", "#reels", "#viral"],
+            hashtags=list(profile["hashtags"]),
             peak_intensity_segments=peaks,
             sfx_cues=sfx,
             keyword_emojis=dict(DEFAULT_KEYWORD_EMOJIS)

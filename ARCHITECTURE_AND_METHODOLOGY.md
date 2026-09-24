@@ -132,14 +132,13 @@ Social media platforms re-compress uploaded audio. Improperly mastered audio res
 - **Right 120px (11.1%)**: Reserved for Like, Comment, Bookmark, and Share button column.
 
 ### Subtitle Safe Placement:
-- **Bottom Margin**: `MarginV = 420` (anchors text in the lower-middle safe zone, clearing all platform UI buttons).
-- **Split-Screen Mode**: Anchors text along the middle divider (`Alignment = 5`, Center) to preserve faces in both panes.
+- **Bottom Margin**: Layout-specific margins keep text above platform controls; the implementation uses different values for solo, blur-stack, and split-screen layouts.
+- **Split-Screen Mode**: Anchors text along the middle divider to preserve faces in both panes.
 
-### Studio Kinetic Subtitles & Emoji Sound Cues:
+### Studio Kinetic Subtitles:
 - **Kinetic Bounce Scaling**: Spoken words pop with high-energy spring animation:
   `{\c<highlight>\t(0,70,\fscx118\fscy118)\t(70,140,\fscx100\fscy100)}WORD`
-- **Contextual Emojis**: High-CPM trigger words automatically receive visual icons:
-  `money` 💰, `debt` 💸, `invest` 📈, `bank` 🏦, `tax` 🏛️, `salary` 💼, `rich` 🤑.
+- **Text Safety**: Transcript text is normalized to a font-safe character set; emoji glyphs are not burned into the ASS output.
 - **Top Hook Retention Capsule**: An upper-safe-zone capsule badge reinforces the central question/hook during the critical first 3 seconds.
 - Themes:
   - `hormozi`: Crisp White (`#FFFFFF`) + Electric Yellow (`#FFE600`) + 4px black outline.

@@ -1,9 +1,8 @@
-import math
 import re
 from pathlib import Path
-from typing import List, Optional, Any, Dict, Tuple
+from typing import List, Optional, Any, Dict
 from src.config import (
-    SUBTITLE_THEMES, SUBTITLES_DIR, OUTPUT_WIDTH, OUTPUT_HEIGHT, CHANNEL_WATERMARK,
+    SUBTITLE_THEMES, OUTPUT_WIDTH, OUTPUT_HEIGHT, CHANNEL_WATERMARK,
     ENABLE_TOP_HOOK_BADGE, HOOK_BADGE_DURATION, HOOK_BADGE_MARGIN_V
 )
 from src.transcriber import TranscriptSegment, WordTimestamp
@@ -86,8 +85,6 @@ def generate_ass_header(
         margin_v = 460  # Y ≈ 1460px (sweet spot: clear of bottom drawer, below mouth)
 
     # Watermark MarginV: dynamically position @allinonepodcastsss right below the purple capsule
-    w_margin_v = watermark_margin_v if watermark_margin_v is not None else (HOOK_BADGE_MARGIN_V + 95)
-
     header = f"""[Script Info]
 Title: Viral Social Captions
 ScriptType: v4.00+

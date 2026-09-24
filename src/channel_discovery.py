@@ -2,7 +2,6 @@ import os
 import sys
 import argparse
 import json
-import time
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -227,8 +226,14 @@ def discover_via_rss(channel_id: str) -> List[Dict[str, Any]]:
         ns = {'yt': 'http://www.youtube.com/xml/schemas/2015', 'atom': 'http://www.w3.org/2005/Atom'}
         
         for entry in root.findall('atom:entry', ns):
-            title = entry.find('atom:title', ns).text
-            v_url = entry.find('atom:link', ns).attrib['href']
+            title_node = entry.find('atom:title', ns)
+            link_node = entry.find('atom:link', ns)
+            if title_node is None or link_node is None:
+                continue
+            title = title_node.text
+            v_url = link_node.attrib.get("href")
+            if not v_url:
+                continue
             vid = extract_youtube_id(v_url)
             if vid:
                 videos.append({
@@ -271,8 +276,19 @@ def record_history(video_url: str, title: str, niche: str, history_file_path: Op
     }
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        with open(target, "w", encoding="utf-8") as f:
-            json.dump(history, f, indent=2, ensure_ascii=False)
+        temp_target = target.with_name(f"{target.name}.tmp")
+        try:
+            with open(temp_target, "w", encoding="utf-8") as f:
+                json.dump(history, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_target, target)
+        finally:
+            if temp_target.exists():
+                try:
+                    temp_target.unlink()
+                except OSError:
+                    pass
         print(f"[+] Recorded '{vid}' to persistent history: {target}")
     except Exception as e:
         print(f"[-] Failed to update history: {e}")
@@ -350,9 +366,11 @@ def filter_fresh_candidates(
                 continue
             for entry in (res.get("entries") or []):
                 picked = classify_candidate_entry(entry, processed_ids)
-                if not picked: continue
+                if not picked:
+                    continue
                 vurl, title, cid, is_long = picked
-                if cid in seen: continue
+                if cid in seen:
+                    continue
                 seen.add(cid)
                 scored.append((0 if is_long else 3, vurl, title, cid))
 
@@ -372,7 +390,7 @@ def filter_fresh_candidates(
                             if cid not in seen:
                                 seen.add(cid)
                                 scored.append((1 if is_long else 4, vurl, title, cid))
-                except Exception as e:
+                except Exception:
                     continue
 
     scored.sort(key=lambda c: c[0])
@@ -391,14 +409,16 @@ def get_daily_discovery_candidates(niche: Optional[str] = None, history_file: st
         try:
             for line in legacy_txt.read_text(encoding="utf-8").splitlines():
                 lid = extract_youtube_id(line.strip())
-                if lid: processed_ids.add(lid)
-        except Exception: pass
+                if lid:
+                    processed_ids.add(lid)
+        except Exception:
+            pass
 
     selected_niche = resolve_daily_niche(niche)
     niche_data = HIGH_CPM_NICHES[selected_niche]
-    queries = niche_data["search_queries"].copy()
+    queries: List[str] = list(niche_data["search_queries"])
     random.shuffle(queries)
-    channel_urls = niche_data.get("channel_urls", []).copy()
+    channel_urls: List[str] = list(niche_data.get("channel_urls", []))
     random.shuffle(channel_urls)
 
     print(f"[*] Auto-Discovering latest episodes in niche: {niche_data['title']} (Day rotation: {selected_niche})")
@@ -411,8 +431,10 @@ def get_daily_discovery_candidates(niche: Optional[str] = None, history_file: st
         candidates = filter_fresh_candidates(ydl_opts, queries, processed_ids, channel_urls=channel_urls, cookie_path=cookie_path)
     finally:
         if cookie_path and cookie_path.exists():
-            try: cookie_path.unlink()
-            except Exception: pass
+            try:
+                cookie_path.unlink()
+            except Exception:
+                pass
 
     if candidates:
         print(f"[+] Found {len(candidates)} fresh high-CPM podcast candidates:")

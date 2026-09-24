@@ -8,6 +8,7 @@ BUFFER_GRAPHQL_ENDPOINT = "https://api.buffer.com"
 class BufferClient:
     def __init__(self, access_token: Optional[str] = None):
         self.token = access_token or BUFFER_ACCESS_TOKEN
+        self.last_error: Optional[str] = None
         if not self.token:
             print("[-] Warning: BUFFER_ACCESS_TOKEN not configured.")
 
@@ -20,6 +21,7 @@ class BufferClient:
 
     def get_channels(self) -> List[Dict[str, Any]]:
         """Queries connected social channels from Buffer GraphQL using organization-based schema."""
+        self.last_error = None
         org_query = """
         query GetOrgs {
           account {
@@ -38,7 +40,8 @@ class BufferClient:
                 timeout=15
             )
             if res.status_code != 200:
-                print(f"[-] Buffer organizations query failed: {res.status_code} - {res.text}")
+                self.last_error = f"Buffer organizations query failed: {res.status_code}"
+                print(f"[-] {self.last_error}")
                 return []
 
             orgs = res.json().get("data", {}).get("account", {}).get("organizations", [])
@@ -47,17 +50,17 @@ class BufferClient:
                 org_id = org.get("id")
                 if not org_id:
                     continue
-                ch_query = f"""query {{
-                  channels(input: {{ organizationId: "{org_id}" }}) {{
+                ch_query = """query GetChannels($organizationId: ID!) {
+                  channels(input: { organizationId: $organizationId }) {
                     id
                     name
                     service
-                  }}
-                }}"""
+                  }
+                }"""
                 ch_res = requests.post(
                     BUFFER_GRAPHQL_ENDPOINT,
                     headers=self.headers,
-                    json={"query": ch_query},
+                    json={"query": ch_query, "variables": {"organizationId": org_id}},
                     timeout=15
                 )
                 if ch_res.status_code == 200:
@@ -65,9 +68,13 @@ class BufferClient:
                     for ch in ch_items:
                         ch["organizationName"] = org.get("name")
                         channels.append(ch)
+                else:
+                    self.last_error = f"Buffer channels query failed for organization {org_id}: {ch_res.status_code}"
+                    print(f"[-] {self.last_error}")
             return channels
         except Exception as e:
-            print(f"[-] Error fetching Buffer channels: {e}")
+            self.last_error = f"Error fetching Buffer channels: {e}"
+            print(f"[-] {self.last_error}")
             return []
 
     def get_active_video_urls(self) -> Dict[str, str]:
@@ -76,9 +83,12 @@ class BufferClient:
         of video_url -> status for posts that are not yet 'sent'.
         """
         if not self.token:
+            self.last_error = "BUFFER_ACCESS_TOKEN is missing"
             return {}
 
         connected = self.get_channels()
+        if self.last_error:
+            return {}
         active_urls = {}
 
         # We need to iterate through channels to get posts
@@ -121,28 +131,37 @@ class BufferClient:
                                 video = asset.get("video")
                                 if video and video.get("url"):
                                     active_urls[video["url"]] = status
+                if res.status_code != 200:
+                    self.last_error = f"Buffer posts query failed for channel {channel_id}: {res.status_code}"
+                    print(f"[-] {self.last_error}")
             except Exception as e:
-                print(f"[-] Error fetching posts for channel {channel_id}: {e}")
+                self.last_error = f"Error fetching posts for channel {channel_id}: {e}"
+                print(f"[-] {self.last_error}")
 
         return active_urls
 
     def get_pinterest_boards(self, channel_id: str) -> List[Dict[str, Any]]:
         """Queries boards for a specific Pinterest channel."""
-        q = f"""query {{
-          channel(input: {{ id: "{channel_id}" }}) {{
-            metadata {{
-              ... on PinterestMetadata {{
-                boards {{
+        q = """query GetPinterestBoards($channelId: ID!) {
+          channel(input: { id: $channelId }) {
+            metadata {
+              ... on PinterestMetadata {
+                boards {
                   id
                   name
                   serviceId
-                }}
-              }}
-            }}
-          }}
-        }}"""
+                }
+              }
+            }
+          }
+        }"""
         try:
-            res = requests.post(BUFFER_GRAPHQL_ENDPOINT, headers=self.headers, json={"query": q}, timeout=10)
+            res = requests.post(
+                BUFFER_GRAPHQL_ENDPOINT,
+                headers=self.headers,
+                json={"query": q, "variables": {"channelId": channel_id}},
+                timeout=10,
+            )
             if res.status_code == 200:
                 data = res.json().get("data", {}).get("channel", {}).get("metadata", {})
                 return data.get("boards", [])
@@ -249,6 +268,7 @@ class BufferClient:
                 if not boards:
                     ch_name = next((ch["name"] for ch in connected if ch["id"] == channel_id), channel_id)
                     print(f"[-] Pinterest channel '{ch_name}' has no boards configured yet. Please create a board on Pinterest (e.g., 'Podcast Clips') to enable automated pinning. Skipping Pinterest.")
+                    results.append({"channel_id": channel_id, "skipped": True, "reason": "pinterest_board_missing"})
                     continue
                 board_service_id = boards[0].get("serviceId") or boards[0].get("id")
                 metadata = {
@@ -261,7 +281,7 @@ class BufferClient:
                 if source_url:
                     channel_text = f"{channel_text}\n\n👉 Watch the full episode: {source_url}"
 
-            post_input = {
+            post_input: Dict[str, Any] = {
                 "channelId": channel_id,
                 "text": channel_text,
                 "schedulingType": "automatic",
@@ -290,8 +310,8 @@ class BufferClient:
             }
 
             # Retry logic for CDN propagation delay
-            max_retries = 5
-            retry_delays = [10, 30, 60, 120, 300]
+            max_retries = 3
+            retry_delays = [10, 30, 60]
             attempt = 0
             
             while attempt <= max_retries:

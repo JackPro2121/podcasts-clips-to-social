@@ -10,7 +10,14 @@ on:
         description: 'Delete video releases older than N days'
         required: true
         default: '5'
-        type: string
+        type: choice
+        options:
+          - '1'
+          - '3'
+          - '5'
+          - '7'
+          - '14'
+          - '30'
       dry_run:
         description: 'Simulate cleanup without deleting'
         required: true
@@ -20,10 +27,15 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: podcast-release-cleanup
+  cancel-in-progress: false
+
 jobs:
   cleanup-releases:
     name: Clean Old Video Releases
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout Code
@@ -42,10 +54,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN || secrets.BUFFER_API_KEY }}
+          INPUT_DAYS: ${{ github.event.inputs.days || '5' }}
+          INPUT_DRY_RUN: ${{ github.event.inputs.dry_run }}
         run: |
-          DAYS_ARG="--days ${{ github.event.inputs.days || '5' }}"
-          DRY_ARG=""
-          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            DRY_ARG="--dry-run"
+          case "$INPUT_DAYS" in
+            1|3|5|7|14|30) ;;
+            *) echo "Invalid cleanup age: $INPUT_DAYS" >&2; exit 1 ;;
+          esac
+          args=(--days "$INPUT_DAYS" --release-prefix "clips-")
+          if [ "$INPUT_DRY_RUN" = "true" ]; then
+            args+=(--dry-run)
           fi
-          python -m src.release_cleaner $DAYS_ARG $DRY_ARG
+          python -m src.release_cleaner "${args[@]}"

@@ -12,13 +12,13 @@ if hasattr(sys.stderr, "reconfigure"):
 
 from src.config import (
     CLIPS_DIR, SUBTITLES_DIR, DOWNLOADS_DIR, CLIP_ONLY_MODE,
-    MAX_TRANSCRIPT_FALLBACKS,
+    MAX_TRANSCRIPT_FALLBACKS, BUFFER_ACCESS_TOKEN,
 )
 from src.downloader import (
     download_video, fetch_transcript_only, download_clip_segment, extract_youtube_id,
-    APIFY_API_TOKEN,
+    get_video_dimensions, APIFY_API_TOKEN,
 )
-from src.transcriber import get_transcript, TranscriptSegment, transcribe_audio_whisper
+from src.transcriber import get_transcript, TranscriptSegment, WordTimestamp, transcribe_audio_whisper
 from src.viral_detector import detect_viral_moments
 from src.face_tracker import analyze_faces_in_clip, FramingDecision
 from src.subtitle_generator import create_styled_ass_subtitles
@@ -29,6 +29,39 @@ from src.github_uploader import upload_clip_to_github_release
 from src.buffer_client import BufferClient
 from src.slack_notifier import SlackNotifier
 from src.channel_discovery import record_history
+
+
+def _manual_framing(video_path: Path, framing_mode: str) -> FramingDecision:
+    width, height = get_video_dimensions(video_path)
+    if framing_mode == "split":
+        panel_height = max(1, height // 2)
+        panel_width = min(width, max(1, int(panel_height * 9 / 8)))
+        if panel_width * 2 > width:
+            panel_width = max(1, width // 2)
+        left_x = max(0, (width - (panel_width * 2)) // 2)
+        return FramingDecision(
+            mode="split_screen",
+            face_count=2,
+            speaker1_box=(left_x, 0, panel_width, panel_height),
+            speaker2_box=(left_x + panel_width, 0, panel_width, panel_height),
+            video_width=width,
+            video_height=height,
+        )
+    if framing_mode == "crop":
+        return FramingDecision(
+            mode="single_smooth",
+            face_count=1,
+            smoothed_center_x=width // 2,
+            video_width=width,
+            video_height=height,
+        )
+    return FramingDecision(
+        mode="blur_stack",
+        face_count=0,
+        video_width=width,
+        video_height=height,
+    )
+
 
 def run_pipeline(
     url_or_path: Union[str, List[str]],
@@ -108,7 +141,7 @@ def run_pipeline(
 
     viral_moments = None
     if segments:
-        viral_moments = detect_viral_moments(segments, num_clips=num_clips)
+        viral_moments = detect_viral_moments(segments, num_clips=num_clips, niche=niche)
         if viral_moments:
             print(f"\n[+] Gemini identified {len(viral_moments)} viral clips:")
             for idx, m in enumerate(viral_moments, 1):
@@ -121,7 +154,7 @@ def run_pipeline(
         print("\n[!] Dry run enabled. Skipping video download, rendering and Buffer upload.")
         return
 
-    rendered_clips = []
+    rendered_clips: List[Dict[str, Any]] = []
 
     # ------ BRANCH A: Targeted Clip Segment Downloads ------
     if viral_moments and is_youtube_url and not is_local_file:
@@ -155,13 +188,8 @@ def run_pipeline(
                 print("[*] Running AI Face Detection & Speaker Tracking on segment...")
                 framing = analyze_faces_in_clip(clip_path, render_start, render_end)
                 print(f"[+] Framing decision: '{framing.mode}' (Detected faces: {framing.face_count})")
-            elif framing_mode == "split":
-                framing = FramingDecision(mode="split_screen", face_count=2,
-                    speaker1_box=(100,0,900,1080), speaker2_box=(920,0,900,1080))
-            elif framing_mode == "crop":
-                framing = FramingDecision(mode="single_smooth", face_count=1, smoothed_center_x=960)
             else:
-                framing = FramingDecision(mode="blur_stack", face_count=0)
+                framing = _manual_framing(clip_path, framing_mode)
 
             burn_subtitles = subtitles_mode in ("auto", "burn")
             ass_path = None
@@ -206,7 +234,11 @@ def run_pipeline(
                 for s in segments:
                     for w in getattr(s, "words", []):
                         if moment.start_time <= w.start <= moment.end_time:
-                            clip_words.append(w)
+                            clip_words.append(WordTimestamp(
+                                word=w.word,
+                                start=w.start - moment.start_time,
+                                end=w.end - moment.start_time,
+                            ))
                 if clip_words:
                     broll_cues = find_broll_cues_for_clip(clip_words, clip_duration=clip_duration)
 
@@ -266,7 +298,7 @@ def run_pipeline(
                     segments = []
                 if segments:
                     print(f"[+] Whisper produced {len(segments)} segments from probe. Running viral detection...")
-                    viral_moments = detect_viral_moments(segments, num_clips=num_clips)
+                    viral_moments = detect_viral_moments(segments, num_clips=num_clips, niche=niche)
                     if viral_moments:
                         print(f"[+] Viral moments detected from Whisper probe. Downloading {len(viral_moments)} targeted clips...")
                         DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
@@ -286,7 +318,14 @@ def run_pipeline(
                                 clip_path = Path(clip_info["video_path"])
                                 render_start = 0.0
                                 render_end = moment.end_time - moment.start_time
-                                framing = analyze_faces_in_clip(clip_path, framing_mode)
+                                if framing_mode == "auto":
+                                    framing = analyze_faces_in_clip(
+                                        clip_path,
+                                        render_start,
+                                        render_end,
+                                    )
+                                else:
+                                    framing = _manual_framing(clip_path, framing_mode)
                                 ass_path = SUBTITLES_DIR / f"probe_clip_{idx}.ass"
                                 burn_subtitles = subtitles_mode != "skip"
                                 if burn_subtitles:
@@ -384,7 +423,7 @@ def run_pipeline(
                 sys.exit(1)
 
             print("\n--- [3b/6] VIRAL MOMENT HUNTING & HOOK SCORING (Fallback) ---")
-            viral_moments = detect_viral_moments(segments, num_clips=num_clips)
+            viral_moments = detect_viral_moments(segments, num_clips=num_clips, niche=niche)
             if not viral_moments:
                 print("[-] No viral moments detected. Exiting.")
                 sys.exit(1)
@@ -396,77 +435,75 @@ def run_pipeline(
             print("\n--- [4/6 & 5/6] EDITING, FACE TRACKING, AUDIO MASTERING & RENDERING ---")
             for idx, moment in enumerate(viral_moments, 1):
                 print(f"\n>>> Processing Clip #{idx}: {moment.title} ({moment.duration:.1f}s)")
+                try:
+                    if framing_mode == "auto":
+                        print("[*] Running AI Face Detection & Speaker Tracking...")
+                        framing = analyze_faces_in_clip(video_path, moment.start_time, moment.end_time)
+                        print(f"[+] Framing decision: '{framing.mode}' (Detected faces: {framing.face_count})")
+                    else:
+                        framing = _manual_framing(video_path, framing_mode)
 
+                    burn_subtitles = subtitles_mode in ("auto", "burn")
+                    ass_path = None
+                    if burn_subtitles:
+                        ass_path = SUBTITLES_DIR / f"clip_{idx}_{subtitle_style}.ass"
+                        create_styled_ass_subtitles(
+                            segments=segments,
+                            clip_start=moment.start_time,
+                            clip_end=moment.end_time,
+                            output_ass_path=ass_path,
+                            theme_key=subtitle_style,
+                            layout_mode=framing.mode,
+                            header_title=moment.title,
+                            watermark=watermark,
+                            shots=framing.shots,
+                            keyword_emojis=getattr(moment, "keyword_emojis", None)
+                        )
 
-            if framing_mode == "auto":
-                print("[*] Running AI Face Detection & Speaker Tracking...")
-                framing = analyze_faces_in_clip(video_path, moment.start_time, moment.end_time)
-                print(f"[+] Framing decision: '{framing.mode}' (Detected faces: {framing.face_count})")
-            elif framing_mode == "split":
-                framing = FramingDecision(mode="split_screen", face_count=2,
-                    speaker1_box=(100,0,900,1080), speaker2_box=(920,0,900,1080))
-            elif framing_mode == "crop":
-                framing = FramingDecision(mode="single_smooth", face_count=1, smoothed_center_x=960)
-            else:
-                framing = FramingDecision(mode="blur_stack", face_count=0)
+                    safe_title = "".join(c for c in moment.title if c.isalnum() or c in (" ", "_", "-")).rstrip()
+                    safe_title = safe_title.replace(" ", "_")[:30]
+                    out_clip_path = CLIPS_DIR / f"clip_{idx}_{safe_title}.mp4"
 
-            burn_subtitles = subtitles_mode in ("auto", "burn")
-            ass_path = None
-            if burn_subtitles:
-                ass_path = SUBTITLES_DIR / f"clip_{idx}_{subtitle_style}.ass"
-                create_styled_ass_subtitles(
-                    segments=segments,
-                    clip_start=moment.start_time,
-                    clip_end=moment.end_time,
-                    output_ass_path=ass_path,
-                    theme_key=subtitle_style,
-                    layout_mode=framing.mode,
-                    header_title=moment.title,
-                    watermark=watermark,
-                    shots=framing.shots,
-                    keyword_emojis=getattr(moment, "keyword_emojis", None)
-                )
+                    thumb_path = None
+                    try:
+                        thumb_target = CLIPS_DIR / f"{out_clip_path.stem}_thumb.jpg"
+                        thumb_path = generate_clip_thumbnail(
+                            clip_path=video_path,
+                            title=moment.title,
+                            output_path=thumb_target,
+                            extract_time=moment.start_time + 1.5,
+                            badge_text="MUST WATCH",
+                            watermark=watermark
+                        )
+                    except Exception as te:
+                        print(f"[!] Thumbnail generation notice for clip #{idx}: {te}")
 
-            safe_title = "".join(c for c in moment.title if c.isalnum() or c in (" ", "_", "-")).rstrip()
-            safe_title = safe_title.replace(" ", "_")[:30]
-            out_clip_path = CLIPS_DIR / f"clip_{idx}_{safe_title}.mp4"
-
-            thumb_path = None
-            try:
-                thumb_target = CLIPS_DIR / f"{out_clip_path.stem}_thumb.jpg"
-                thumb_path = generate_clip_thumbnail(
-                    clip_path=video_path,
-                    title=moment.title,
-                    output_path=thumb_target,
-                    extract_time=moment.start_time + 1.5,
-                    badge_text="MUST WATCH",
-                    watermark=watermark
-                )
-            except Exception as te:
-                print(f"[!] Thumbnail generation notice for clip #{idx}: {te}")
-
-            rendered_path = render_viral_clip(
-                source_video_path=video_path,
-                start_time=moment.start_time,
-                end_time=moment.end_time,
-                output_clip_path=out_clip_path,
-                framing=framing,
-                peak_intensity_segments=getattr(moment, "peak_intensity_segments", []),
-                ass_subtitle_path=ass_path,
-                burn_subtitles=burn_subtitles,
-                sfx_cues=getattr(moment, "sfx_cues", []),
-                cover_image_path=thumb_path
-            )
-            rendered_clips.append({"path": rendered_path, "thumbnail": thumb_path, "moment": moment})
+                    rendered_path = render_viral_clip(
+                        source_video_path=video_path,
+                        start_time=moment.start_time,
+                        end_time=moment.end_time,
+                        output_clip_path=out_clip_path,
+                        framing=framing,
+                        peak_intensity_segments=getattr(moment, "peak_intensity_segments", []),
+                        ass_subtitle_path=ass_path,
+                        burn_subtitles=burn_subtitles,
+                        sfx_cues=getattr(moment, "sfx_cues", []),
+                        cover_image_path=thumb_path
+                    )
+                    rendered_clips.append({"path": rendered_path, "thumbnail": thumb_path, "moment": moment})
+                except Exception as e:
+                    print(f"[-] Full-download clip #{idx} failed: {e}")
+                    continue
 
     if not rendered_clips:
         raise RuntimeError(
             "No clips were rendered. Refusing to report a successful run without publishable output."
         )
 
-    # Step 6: Permanent Hosting & Buffer Social Distribution
-    print("\n--- [6/6] PERMANENT HOSTING & BUFFER SOCIAL PUBLISHING ---")
-    buffer_client = BufferClient() if post_to_buffer else None
+    # Step 6: Release Hosting & Buffer Social Distribution
+    print("\n--- [6/6] RELEASE HOSTING & BUFFER SOCIAL PUBLISHING ---")
+    buffer_client = BufferClient() if post_to_buffer or BUFFER_ACCESS_TOKEN else None
+    publish_failed = False
     clips_report = []
     for item in rendered_clips:
         clip_path = item["path"]
@@ -479,17 +516,34 @@ def run_pipeline(
         buffer_status = "Local Only"
         if post_to_buffer and direct_url:
             caption_text = f"{moment.title}\n\n{moment.social_caption}\n\n{' '.join(moment.hashtags)}"
-            schedule_results = buffer_client.schedule_video_post(
-                video_url=direct_url,
-                text=caption_text,
-                title=moment.title,
-                source_url=active_source_url,
-                thumbnail_url=thumb_url
-            )
-            buffer_status = "Scheduled" if schedule_results else "Failed"
+            if buffer_client is None:
+                buffer_status = "No Client"
+                publish_failed = True
+            else:
+                schedule_results = buffer_client.schedule_video_post(
+                    video_url=direct_url,
+                    text=caption_text,
+                    title=moment.title,
+                    source_url=active_source_url,
+                    thumbnail_url=thumb_url
+                )
+                successful_posts = sum(
+                    1
+                    for result in schedule_results
+                    if (((result.get("response") or {}).get("data") or {}).get("createPost") or {}).get("post")
+                )
+                if schedule_results and successful_posts == len(schedule_results):
+                    buffer_status = "Scheduled"
+                elif successful_posts:
+                    buffer_status = "Partial"
+                    publish_failed = True
+                else:
+                    buffer_status = "Failed"
+                    publish_failed = True
         elif post_to_buffer and not direct_url:
             print("[-] Cannot post to Buffer because direct video URL is not available.")
             buffer_status = "No URL"
+            publish_failed = True
 
         clips_report.append({
             "title": moment.title,
@@ -508,12 +562,6 @@ def run_pipeline(
     except Exception as e:
         print(f"[-] Auto-cleanup warning: {e}")
 
-    # Record to persistent zero-duplicate history
-    try:
-        record_history(video_url=active_source_url, title=video_title, niche=niche)
-    except Exception as e:
-        print(f"[-] History record warning: {e}")
-
     # Dispatch Slack Operational Report Card
     try:
         slack = SlackNotifier()
@@ -525,6 +573,14 @@ def run_pipeline(
         )
     except Exception as e:
         print(f"[-] Slack alert warning: {e}")
+
+    if publish_failed:
+        raise RuntimeError("One or more clips failed required hosting or Buffer publishing.")
+
+    try:
+        record_history(video_url=active_source_url, title=video_title, niche=niche)
+    except Exception as e:
+        print(f"[-] History record warning: {e}")
 
     print("\n" + "=" * 70)
     print("✨ ALL CLIPS PROCESSED SUCCESSFULLY!")

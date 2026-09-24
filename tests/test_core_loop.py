@@ -119,7 +119,7 @@ class TestDownloaderClassification(unittest.TestCase):
                 self.assertEqual(result["height"], 1080)
 
     def test_download_clip_segment_prioritizes_apify(self):
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import patch
         from src.downloader import download_clip_segment
         import tempfile
 
@@ -153,6 +153,25 @@ class TestDownloaderClassification(unittest.TestCase):
                 # yt-dlp should not be invoked at all when Apify succeeds
                 mock_ydl.assert_not_called()
                 self.assertAlmostEqual(res["segment_start"], 0.25)
+
+
+class TestReleaseCleanupSafety(unittest.TestCase):
+    def test_buffer_lookup_failure_preserves_releases(self):
+        from src.release_cleaner import clean_old_releases
+
+        class BrokenBuffer:
+            last_error = "Buffer API timeout"
+
+            def get_active_video_urls(self):
+                return {}
+
+        result = clean_old_releases(
+            repo="owner/repo",
+            token="test-token",
+            buffer_client=BrokenBuffer(),
+        )
+        self.assertTrue(result["skipped"])
+        self.assertEqual(result["deleted"], 0)
 
 
 class TestDiscoveryFilter(unittest.TestCase):

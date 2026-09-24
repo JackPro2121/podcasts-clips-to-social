@@ -1,8 +1,8 @@
 import unittest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from src.thumbnail_generator import generate_clip_thumbnail
-from src.broll_manager import search_pexels_broll, select_best_video_file, find_broll_cues_for_clip
+from src.broll_manager import select_best_video_file, find_broll_cues_for_clip
 from src.transcriber import WordTimestamp
 
 class TestBrollAndThumbnail(unittest.TestCase):
@@ -50,7 +50,9 @@ class TestBrollAndThumbnail(unittest.TestCase):
             WordTimestamp(word="money", start=6.0, end=6.5),
             WordTimestamp(word="today", start=7.0, end=7.5)
         ]
-        with patch.object(Path, "exists", return_value=True):
+        with patch("src.broll_manager.ENABLE_BROLL", True), \
+             patch("src.broll_manager.PEXELS_API_KEY", "test-key"), \
+             patch.object(Path, "exists", return_value=True):
             cues = find_broll_cues_for_clip(words, clip_duration=30.0, max_brolls=1)
             self.assertEqual(len(cues), 1)
             self.assertEqual(cues[0][3], "money")

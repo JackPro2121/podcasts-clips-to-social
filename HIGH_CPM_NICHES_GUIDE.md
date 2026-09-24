@@ -120,6 +120,6 @@ python -m src.channel_discovery --niche business
 # Extract AI & tech channels:
 python -m src.channel_discovery --niche ai_tech
 
-# Extract all 5 categories and save to JSON:
-python -m src.channel_discovery --niche all --output-json high_cpm_podcasts.json
+# Discover candidates for a category:
+python -m src.channel_discovery --niche finance
 ```
