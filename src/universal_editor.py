@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -84,6 +85,27 @@ def _beats(segments: Sequence[TranscriptSegment]) -> List[StoryBeat]:
     ]
 
 
+ENDPOINT_FRAGMENT_WORDS = {
+    "and", "but", "so", "the", "a", "an", "to", "of", "on", "in", "at", "now", "yeah", "okay", "right", "you", "your", "you're"
+}
+
+
+def _endpoint_warnings(segments: Sequence[TranscriptSegment]) -> List[str]:
+    if not segments:
+        return []
+    text = segments[-1].text.strip()
+    if not text:
+        return ["endpoint_not_proven_complete"]
+    warnings: List[str] = []
+    if not text.endswith((".", "?", "!")):
+        warnings.append("endpoint_not_proven_complete")
+        return warnings
+    words = re.findall(r"[A-Za-z0-9']+", text.lower())
+    if len(words) < 2 or words[-1] in ENDPOINT_FRAGMENT_WORDS:
+        warnings.append("endpoint_caption_fragment")
+    return warnings
+
+
 def _write_json(path: Path, payload: Dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path: Optional[Path] = None
@@ -152,9 +174,7 @@ def build_clip_editor_artifacts(
     source_path = artifact_dir / f"clip_{clip_index}_source_index.json"
     save_source_index(source_index, source_path)
     suggestions = build_semantic_edit_plans(relative_segments, source_index, num_clips=1)
-    warnings: List[str] = []
-    if relative_segments and not relative_segments[-1].text.rstrip().endswith((".", "?", "!")):
-        warnings.append("endpoint_not_proven_complete")
+    warnings = _endpoint_warnings(relative_segments)
     plan = EditPlan(
         plan_id=f"{run_id}_clip_{clip_index}",
         start=0.0,

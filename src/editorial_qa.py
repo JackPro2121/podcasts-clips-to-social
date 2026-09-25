@@ -203,6 +203,8 @@ def _plan_issues(
         issues.append(QaIssue("composition_missing", "error", "Composition has no shots"))
     if "endpoint_not_proven_complete" in edit_plan.warnings:
         issues.append(QaIssue("incomplete_endpoint", "error", "Edit endpoint is not proven complete"))
+    if "endpoint_caption_fragment" in edit_plan.warnings:
+        issues.append(QaIssue("fragmented_endpoint", "error", "Edit endpoint is a weak caption fragment"))
     for shot in composition.shots:
         if shot.protected_regions and shot.caption_rect.intersects(shot.protected_regions[0]):
             issues.append(QaIssue("caption_source_collision", "error", f"Caption overlaps source text in {shot.shot_id}"))

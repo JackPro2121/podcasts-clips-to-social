@@ -35,6 +35,23 @@ class TestUniversalEditor(unittest.TestCase):
             payload = json.loads((Path(tmpdir) / "clip_1_composition_plan.json").read_text(encoding="utf-8"))
             self.assertEqual(payload["plan_id"], "composition_run_1_clip_1")
 
+    def test_weak_single_word_endpoint_is_flagged(self):
+        media = SourceMediaInfo("clip.mp4", 30.0, 1080, 1920, 30.0)
+        index = SourceIndex(media=media, shots=[])
+        segments = [TranscriptSegment(10.0, 40.0, "Now.", [WordTimestamp("Now.", 39.0, 40.0)])]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("src.universal_editor.build_source_index", return_value=index):
+                artifacts = build_clip_editor_artifacts(
+                    Path("clip.mp4"),
+                    segments,
+                    10.0,
+                    40.0,
+                    Path(tmpdir),
+                    "run_1",
+                    1,
+                )
+        self.assertIn("endpoint_caption_fragment", artifacts.edit_plan.warnings)
+
 
 if __name__ == "__main__":
     unittest.main()

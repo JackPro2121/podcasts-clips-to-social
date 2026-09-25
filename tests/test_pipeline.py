@@ -284,6 +284,35 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertTrue(any("THREE" in line and "FOUR" in line for line in lines))
         out_ass.unlink()
 
+    def test_subtitle_uses_three_word_phrases_when_available(self):
+        words = [
+            WordTimestamp(word="One", start=0.0, end=0.8),
+            WordTimestamp(word="Two", start=0.8, end=1.6),
+            WordTimestamp(word="Three", start=1.6, end=2.4),
+            WordTimestamp(word="Four", start=2.4, end=3.2),
+            WordTimestamp(word="Five", start=3.2, end=4.0),
+            WordTimestamp(word="Six", start=4.0, end=4.8),
+        ]
+        out_ass = Path("subtitles/test_three_word_phrase.ass")
+        create_styled_ass_subtitles(
+            segments=[TranscriptSegment(0.0, 4.8, "One Two Three Four Five Six", words)],
+            clip_start=0.0,
+            clip_end=4.8,
+            output_ass_path=out_ass,
+        )
+        lines = [
+            line for line in out_ass.read_text(encoding="utf-8").splitlines()
+            if line.startswith("Dialogue: 0,")
+        ]
+        self.assertEqual(len(lines), 2)
+        self.assertIn("ONE", lines[0])
+        self.assertIn("TWO", lines[0])
+        self.assertIn("THREE", lines[0])
+        self.assertIn("FOUR", lines[1])
+        self.assertIn("FIVE", lines[1])
+        self.assertIn("SIX", lines[1])
+        out_ass.unlink()
+
     def test_subtitle_groups_words_across_native_caption_gaps(self):
         words = [
             WordTimestamp(word="One", start=0.0, end=0.4),

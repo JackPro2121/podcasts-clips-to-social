@@ -196,7 +196,7 @@ SUBTITLE_THEMES: Dict[str, Dict[str, Any]] = {
         "outline_width": 6.5,
         "shadow_color": "&H90000000",       # Deep Soft Drop Shadow
         "shadow_depth": 3.5,
-         "max_words_per_line": 2,            # Fast-paced phrase grouping
+         "max_words_per_line": 3,            # Fast-paced phrase grouping
         "uppercase": True
     },
     "neon_green": {
@@ -210,7 +210,7 @@ SUBTITLE_THEMES: Dict[str, Dict[str, Any]] = {
         "outline_width": 6.5,
         "shadow_color": "&HA0000000",
         "shadow_depth": 3.5,
-        "max_words_per_line": 2,
+        "max_words_per_line": 3,
         "uppercase": True
     },
     "luxury_gold": {
@@ -238,7 +238,7 @@ SUBTITLE_THEMES: Dict[str, Dict[str, Any]] = {
         "outline_width": 6.5,
         "shadow_color": "&HA0000000",
         "shadow_depth": 3.5,
-        "max_words_per_line": 2,
+        "max_words_per_line": 3,
         "uppercase": True
     }
 }

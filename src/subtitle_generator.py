@@ -232,7 +232,9 @@ def create_styled_ass_subtitles(
     i = 0
     while i < len(clip_words):
         chunk: List[WordTimestamp] = []
-        while i < len(clip_words) and len(chunk) < effective_max_words:
+        remaining_words = len(clip_words) - i
+        chunk_limit = 2 if remaining_words == effective_max_words + 1 else effective_max_words
+        while i < len(clip_words) and len(chunk) < chunk_limit:
             candidate = clip_words[i]
             if chunk and candidate.start - chunk[-1].end >= 1.2:
                 break

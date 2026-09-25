@@ -404,6 +404,10 @@ def _stable_face_timeline(
     return _apply_autoflip_smoothing(ordered)
 
 
+def _is_visual_layout_scene(scene_info: dict) -> bool:
+    return bool(scene_info.get("is_presentation") or scene_info.get("has_slide_layout"))
+
+
 def _frame_window(start_time: float, end_time: float, fps: float) -> Tuple[int, int]:
     safe_fps = max(1.0, float(fps))
     start_frame = max(0, int(math.ceil(start_time * safe_fps)))
@@ -478,7 +482,7 @@ def analyze_faces_in_clip(
             if (current_frame - start_frame) % (frame_step * 2) == 0:
                 try:
                     scene_info = classify_frame_scene(frame)
-                    if scene_info.get("is_presentation"):
+                    if _is_visual_layout_scene(scene_info):
                         is_slide = True
                 except Exception:
                     pass

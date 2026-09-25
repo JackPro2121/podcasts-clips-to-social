@@ -198,6 +198,11 @@ class TestFramingAndAspect(unittest.TestCase):
         self.assertEqual((crop.active_w, crop.active_h), (321, 241))
         self.assertEqual((blur.active_w, blur.active_h), (321, 241))
 
+    def test_slide_layout_with_person_uses_visual_scene_mode(self):
+        from src.face_tracker import _is_visual_layout_scene
+
+        self.assertTrue(_is_visual_layout_scene({"is_presentation": False, "has_slide_layout": True}))
+
     def test_unstable_face_timeline_disables_panning(self):
         from src.face_tracker import _stable_face_timeline
 
