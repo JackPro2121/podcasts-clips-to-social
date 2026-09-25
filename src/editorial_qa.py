@@ -195,16 +195,18 @@ def _plan_issues(
     composition: CompositionPlan,
     source_duration: Optional[float] = None,
 ) -> List[QaIssue]:
+    validation_codes = validate_edit_plan(edit_plan, source_duration)
     issues = [
         QaIssue(code, "error", code)
-        for code in validate_edit_plan(edit_plan, source_duration)
+        for code in validation_codes
+        if code != "endpoint_not_proven_complete"
     ]
+    if "endpoint_not_proven_complete" in validation_codes or "endpoint_not_proven_complete" in edit_plan.warnings:
+        issues.append(QaIssue("incomplete_endpoint", "warning", "Edit endpoint is not proven complete"))
+    if "endpoint_caption_fragment" in edit_plan.warnings:
+        issues.append(QaIssue("fragmented_endpoint", "warning", "Edit endpoint is a weak caption fragment"))
     if not composition.shots:
         issues.append(QaIssue("composition_missing", "error", "Composition has no shots"))
-    if "endpoint_not_proven_complete" in edit_plan.warnings:
-        issues.append(QaIssue("incomplete_endpoint", "error", "Edit endpoint is not proven complete"))
-    if "endpoint_caption_fragment" in edit_plan.warnings:
-        issues.append(QaIssue("fragmented_endpoint", "error", "Edit endpoint is a weak caption fragment"))
     for shot in composition.shots:
         if shot.protected_regions and shot.caption_rect.intersects(shot.protected_regions[0]):
             issues.append(QaIssue("caption_source_collision", "error", f"Caption overlaps source text in {shot.shot_id}"))

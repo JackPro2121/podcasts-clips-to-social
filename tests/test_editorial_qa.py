@@ -50,7 +50,7 @@ class TestEditorialQa(unittest.TestCase):
         self.assertTrue(report.passed)
         self.assertEqual(report.issues, [])
 
-    def test_incomplete_endpoint_blocks_publish(self):
+    def test_incomplete_endpoint_is_warning_only(self):
         probe = {
             "format": {"duration": "30.0"},
             "streams": [
@@ -64,10 +64,11 @@ class TestEditorialQa(unittest.TestCase):
              patch("src.editorial_qa._detect_intervals", side_effect=[[], []]), \
              patch("src.editorial_qa._loudness_metrics", return_value={"integrated_lufs": -14.0, "peak_dbfs": -1.8}):
             report = run_editorial_qa("output.mp4", edit_plan, self._composition(), report_id="qa_incomplete")
-        self.assertFalse(report.passed)
+        self.assertTrue(report.passed)
         self.assertIn("incomplete_endpoint", {issue.code for issue in report.issues})
+        self.assertFalse(report.to_dict()["blocks_publish"])
 
-    def test_fragmented_endpoint_blocks_publish(self):
+    def test_fragmented_endpoint_is_warning_only(self):
         probe = {
             "format": {"duration": "30.0"},
             "streams": [
@@ -81,8 +82,9 @@ class TestEditorialQa(unittest.TestCase):
              patch("src.editorial_qa._detect_intervals", side_effect=[[], []]), \
              patch("src.editorial_qa._loudness_metrics", return_value={"integrated_lufs": -14.0, "peak_dbfs": -1.8}):
             report = run_editorial_qa("output.mp4", edit_plan, self._composition(), report_id="qa_fragment")
-        self.assertFalse(report.passed)
+        self.assertTrue(report.passed)
         self.assertIn("fragmented_endpoint", {issue.code for issue in report.issues})
+        self.assertFalse(report.to_dict()["blocks_publish"])
 
     def test_freeze_and_collision_block_publish(self):
         probe = {

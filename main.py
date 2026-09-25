@@ -175,6 +175,9 @@ def _run_universal_qa(
         print(f"[-] Editorial QA blocked clip #{clip_index}: {issue_codes}")
         return False
     print(f"[+] Editorial QA report for clip #{clip_index}: passed={qa_report.passed}")
+    warning_codes = [issue.code for issue in qa_report.issues if not issue.blocks_publish]
+    if warning_codes:
+        print(f"[!] Editorial QA warnings for clip #{clip_index}: {warning_codes}")
     return True
 
 
