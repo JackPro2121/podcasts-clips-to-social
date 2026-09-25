@@ -12,7 +12,7 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
 from src.config import (
-    CLIPS_DIR, SUBTITLES_DIR, DOWNLOADS_DIR, CLIP_ONLY_MODE, DATA_DIR, FPS, OUTPUT_WIDTH, OUTPUT_HEIGHT,
+    CLIPS_DIR, SUBTITLES_DIR, DOWNLOADS_DIR, CLIP_ONLY_MODE, DATA_DIR, FPS, OUTPUT_WIDTH, OUTPUT_HEIGHT, IS_CI,
     MAX_TRANSCRIPT_FALLBACKS, BUFFER_ACCESS_TOKEN,
     UNIVERSAL_EDITOR_SHADOW, UNIVERSAL_EDITOR_ENFORCE_QA,
 )
@@ -269,7 +269,7 @@ def run_pipeline(
                         output_start=moment.start_time,
                         output_end=moment.end_time,
                         fallback_segments=segments,
-                        model_size="base.en",
+                        model_size="tiny.en" if IS_CI else "base.en",
                     )
                     if aligned_segments is not segments:
                         print(f"[+] Local Whisper alignment refreshed clip #{idx} caption timing.")
