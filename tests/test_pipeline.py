@@ -16,7 +16,9 @@ from src.subtitle_generator import (
 from src.video_editor import (
     build_video_filtergraph,
     build_audio_filtergraph,
-    sanitize_ffmpeg_path
+    sanitize_ffmpeg_path,
+    _LOUDNESS_PASS_LADDER,
+    _measured_loudnorm_filter,
 )
 
 class TestPodcastClipperPipeline(unittest.TestCase):
@@ -47,6 +49,26 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertFalse(looks_like_english_text("আজকের বাজারে অনেক চড়াচড়ি হয়েছে।"))
         self.assertFalse(looks_like_english_text("hola mundo como estas amigo mio hoy"))
         self.assertFalse(looks_like_english_text("too short"))
+
+    def test_loudness_pass_ladder_falls_back_to_dynamic_normalization(self):
+        self.assertTrue(_LOUDNESS_PASS_LADDER[0][0])
+        self.assertTrue(any(not linear for linear, _ in _LOUDNESS_PASS_LADDER[1:]))
+        limits = [limit for _, limit in _LOUDNESS_PASS_LADDER]
+        self.assertEqual(limits, sorted(limits, reverse=True))
+        self.assertGreaterEqual(len(_LOUDNESS_PASS_LADDER), 3)
+
+        measurement = {
+            "input_i": -18.0,
+            "input_tp": -3.0,
+            "input_lra": 6.0,
+            "input_thresh": -28.0,
+            "target_offset": 0.2,
+        }
+        linear_filter = _measured_loudnorm_filter(measurement, 0.80, True)
+        dynamic_filter = _measured_loudnorm_filter(measurement, 0.71, False)
+        self.assertIn("linear=true", linear_filter)
+        self.assertIn("linear=false", dynamic_filter)
+        self.assertIn("alimiter=limit=0.7100", dynamic_filter)
 
     def test_transcript_parsing(self):
         raw = [
@@ -803,7 +825,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
             "target_offset": 0.0,
         }
 
-        def copy_normalized_output(source_path, destination_path, measured):
+        def copy_normalized_output(source_path, destination_path, measured, limiter_limit=0.80, linear=True):
             Path(destination_path).write_bytes(Path(source_path).read_bytes())
 
         with patch("subprocess.run") as mock_run, \

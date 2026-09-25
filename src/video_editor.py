@@ -82,28 +82,42 @@ def _measure_loudness(path: Path) -> Optional[Dict[str, float]]:
     return measurement
 
 
-def _measured_loudnorm_filter(measurement: Dict[str, float]) -> str:
+def _measured_loudnorm_filter(
+    measurement: Dict[str, float],
+    limiter_limit: float = 0.80,
+    linear: bool = True,
+) -> str:
     return (
         f"loudnorm=I={TARGET_LUFS}:TP={TARGET_TRUE_PEAK}:LRA=11:"
         f"measured_I={measurement['input_i']}:"
         f"measured_TP={measurement['input_tp']}:"
         f"measured_LRA={measurement['input_lra']}:"
         f"measured_thresh={measurement['input_thresh']}:"
-        f"offset={measurement['target_offset']}:linear=true,"
-        f"alimiter=limit=0.80:attack=5:release=50:level=0"
+        f"offset={measurement['target_offset']}:linear={'true' if linear else 'false'},"
+        f"alimiter=limit={limiter_limit:.4f}:attack=2:release=60:level=0"
     )
+
+
+_LOUDNESS_PASS_LADDER = (
+    (True, 0.80),
+    (False, 0.80),
+    (False, 0.71),
+    (False, 0.63),
+)
 
 
 def _apply_measured_loudness(
     source_path: Path,
     destination_path: Path,
-    measurement: Dict[str, float]
+    measurement: Dict[str, float],
+    limiter_limit: float = 0.80,
+    linear: bool = True,
 ) -> None:
     result = subprocess.run(
         [
             "ffmpeg", "-y", "-i", str(source_path),
             "-map", "0:v:0", "-map", "0:a:0", "-c:v", "copy",
-            "-af", _measured_loudnorm_filter(measurement),
+            "-af", _measured_loudnorm_filter(measurement, limiter_limit, linear),
             "-c:a", "aac", "-b:a", AUDIO_BITRATE, "-ar", "48000",
             "-movflags", "+faststart", str(destination_path),
         ],
@@ -669,18 +683,49 @@ def render_viral_clip(
             measurement = _measure_loudness(temp_output)
             if measurement is None:
                 raise RuntimeError(f"Could not measure loudness for clip {output_clip_path.name}")
-            _apply_measured_loudness(temp_output, normalized_output, measurement)
-            if not normalized_output.exists() or normalized_output.stat().st_size <= 0:
-                raise RuntimeError(f"Loudness pass produced no output for clip {output_clip_path.name}")
-            verification = _measure_loudness(normalized_output)
-            if verification is None:
-                raise RuntimeError(f"Could not verify loudness for clip {output_clip_path.name}")
-            if abs(verification["input_i"] - TARGET_LUFS) > 1.0:
+            source_candidate = temp_output
+            attempt_outputs: List[Path] = []
+            for attempt, (linear_pass, limiter_limit) in enumerate(_LOUDNESS_PASS_LADDER):
+                if attempt == 0:
+                    destination = normalized_output
+                else:
+                    destination = output_clip_path.with_name(
+                        f".{output_clip_path.stem}.{uuid.uuid4().hex}"
+                        f".retry{attempt}{output_clip_path.suffix or '.mp4'}"
+                    )
+                if attempt > 0:
+                    print(
+                        f"[!] Retrying loudness pass for {output_clip_path.name} "
+                        f"(attempt {attempt + 1}, linear={linear_pass}, "
+                        f"limiter={limiter_limit:.2f})."
+                    )
+                _apply_measured_loudness(
+                    source_candidate, destination, measurement, limiter_limit, linear_pass
+                )
+                if not destination.exists() or destination.stat().st_size <= 0:
+                    raise RuntimeError(f"Loudness pass produced no output for clip {output_clip_path.name}")
+                verification = _measure_loudness(destination)
+                if verification is None:
+                    raise RuntimeError(f"Could not verify loudness for clip {output_clip_path.name}")
+                lufs_ok = abs(verification["input_i"] - TARGET_LUFS) <= 1.0
+                peak_ok = verification["input_tp"] <= TARGET_TRUE_PEAK + 0.5
+                if lufs_ok and peak_ok:
+                    loudness_verified = True
+                    attempt_outputs.append(destination)
+                    break
+                print(
+                    f"[!] Loudness verification missed target for {output_clip_path.name} "
+                    f"(LUFS={verification['input_i']:.2f}, TP={verification['input_tp']:.2f})."
+                )
+                attempt_outputs.append(destination)
+                source_candidate = destination
+                measurement = verification
+            if not loudness_verified:
                 raise RuntimeError(f"Loudness verification failed for clip {output_clip_path.name}")
-            if verification["input_tp"] > TARGET_TRUE_PEAK + 0.5:
-                raise RuntimeError(f"True-peak verification failed for clip {output_clip_path.name}")
-            loudness_verified = True
-            os.replace(normalized_output, output_clip_path)
+            os.replace(attempt_outputs[-1], output_clip_path)
+            for stale_output in attempt_outputs[:-1]:
+                if stale_output.exists():
+                    stale_output.unlink()
             if temp_output.exists():
                 temp_output.unlink()
         else:
@@ -698,7 +743,7 @@ def render_viral_clip(
         }
         print(f"[render_metadata] {json.dumps(metadata, sort_keys=True)}")
     except Exception:
-        for partial_output in (temp_output, normalized_output):
+        for partial_output in list(output_clip_path.parent.glob(f".{output_clip_path.stem}.*")):
             if partial_output.exists():
                 try:
                     partial_output.unlink()

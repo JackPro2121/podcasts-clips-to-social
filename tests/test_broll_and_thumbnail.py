@@ -16,7 +16,7 @@ def fake_loudness_measurement():
     }
 
 
-def copy_normalized_output(source_path, destination_path, measurement):
+def copy_normalized_output(source_path, destination_path, measurement, limiter_limit=0.80, linear=True):
     Path(destination_path).write_bytes(Path(source_path).read_bytes())
 
 
