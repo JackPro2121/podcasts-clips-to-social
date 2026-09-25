@@ -568,6 +568,17 @@ def analyze_faces_in_clip(
                 crop_h=active_h,
                 margin_v=400
             ))
+        elif not valid_face_samples:
+            shot_plans.append(ShotPlan(
+                start=rel_s,
+                end=rel_e,
+                mode='presentation_slide',
+                crop_x=active_x,
+                crop_y=active_y,
+                crop_w=active_w,
+                crop_h=active_h,
+                margin_v=400
+            ))
         # 2. Dynamic Split-Screen or Active Solo Speaker — tight face-relative crops
         elif valid_face_samples and (len(two_speaker_samples) / len(valid_face_samples) >= 0.40):
             # Check for dominant single-speaker speech activity (lip motion)
