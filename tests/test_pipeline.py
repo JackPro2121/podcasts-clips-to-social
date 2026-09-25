@@ -2,7 +2,7 @@ import unittest
 from pathlib import Path
 from src.config import TARGET_LUFS, OUTPUT_WIDTH, OUTPUT_HEIGHT
 from src.downloader import extract_youtube_id
-from src.transcriber import is_english_language_code, parse_native_transcript, TranscriptSegment, WordTimestamp
+from src.transcriber import is_english_language_code, looks_like_english_text, parse_native_transcript, TranscriptSegment, WordTimestamp
 from src.viral_detector import fallback_rule_based_detector, parse_clips_json
 from src.face_tracker import FramingDecision
 from src.subtitle_generator import (
@@ -36,6 +36,17 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertTrue(is_english_language_code("en-US"))
         self.assertFalse(is_english_language_code("es"))
         self.assertFalse(is_english_language_code(""))
+
+    def test_transcript_language_corroboration(self):
+        english = (
+            "I think the market is going to crash and the people who are in the "
+            "luxury car business should be careful because they do not know what is "
+            "coming for them this year."
+        )
+        self.assertTrue(looks_like_english_text(english))
+        self.assertFalse(looks_like_english_text("আজকের বাজারে অনেক চড়াচড়ি হয়েছে।"))
+        self.assertFalse(looks_like_english_text("hola mundo como estas amigo mio hoy"))
+        self.assertFalse(looks_like_english_text("too short"))
 
     def test_transcript_parsing(self):
         raw = [

@@ -97,6 +97,19 @@ def _print_framing_summary(framing: FramingDecision) -> None:
         )
 
 
+def _clip_transcript_text(
+    segments: List[TranscriptSegment],
+    start_time: float,
+    end_time: float,
+) -> str:
+    parts = [
+        segment.text
+        for segment in segments
+        if segment.end > start_time and segment.start < end_time
+    ]
+    return " ".join(parts)
+
+
 def _extend_moment_to_complete_transcript(segments: List[TranscriptSegment], moment: Any) -> None:
     original_end = float(moment.end_time)
     max_end = original_end + 8.0
@@ -320,7 +333,12 @@ def run_pipeline(
             clip_path = clip_info['video_path']
             clip_duration = moment.end_time - moment.start_time
             try:
-                verify_audio_language(Path(clip_path))
+                verify_audio_language(
+                    Path(clip_path),
+                    transcript_text=_clip_transcript_text(
+                        segments or [], moment.start_time, moment.end_time
+                    ),
+                )
             except Exception as language_error:
                 print(f"[-] Skipping non-English clip #{idx}: {language_error}")
                 continue
@@ -500,7 +518,12 @@ def run_pipeline(
                                     continue
                                 clip_path = Path(clip_info["video_path"])
                                 try:
-                                    verify_audio_language(clip_path)
+                                    verify_audio_language(
+                                        clip_path,
+                                        transcript_text=_clip_transcript_text(
+                                            segments, moment.start_time, moment.end_time
+                                        ),
+                                    )
                                 except Exception as language_error:
                                     print(f"[-] Skipping non-English probe clip #{idx}: {language_error}")
                                     continue
@@ -640,13 +663,19 @@ def run_pipeline(
                 print(f"   #{idx}: [{m.start_time:.1f}s - {m.end_time:.1f}s] (Virality: {m.viral_score}/100) '{m.title}'")
 
             print("\n--- [4/6 & 5/6] EDITING, FACE TRACKING, AUDIO MASTERING & RENDERING ---")
-            try:
-                verify_audio_language(Path(video_path))
-            except Exception as language_error:
-                raise RuntimeError(f"Source audio is not English: {language_error}") from language_error
             for idx, moment in enumerate(viral_moments, 1):
                 _extend_moment_to_complete_transcript(segments, moment)
                 print(f"\n>>> Processing Clip #{idx}: {moment.title} ({moment.duration:.1f}s)")
+                try:
+                    verify_audio_language(
+                        Path(video_path),
+                        transcript_text=_clip_transcript_text(
+                            segments, moment.start_time, moment.end_time
+                        ),
+                    )
+                except Exception as language_error:
+                    print(f"[-] Full-download clip #{idx} is not English: {language_error}. Skipping.")
+                    continue
                 try:
                     if framing_mode == "auto":
                         print("[*] Running AI Face Detection & Speaker Tracking...")

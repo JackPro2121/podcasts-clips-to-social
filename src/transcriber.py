@@ -29,14 +29,46 @@ def is_english_language_code(language: Optional[str]) -> bool:
     return normalized == "en" or normalized.startswith("en-")
 
 
+_ENGLISH_STOPWORDS = frozenset({
+    "a", "about", "after", "all", "also", "am", "an", "and", "any", "are", "as", "at",
+    "be", "because", "been", "but", "by", "can", "do", "does", "for", "from", "get",
+    "go", "good", "has", "have", "he", "her", "here", "him", "his", "how", "i", "if",
+    "in", "is", "it", "its", "just", "know", "like", "look", "me", "more", "most",
+    "my", "new", "no", "not", "now", "of", "on", "one", "only", "or", "other", "our",
+    "out", "people", "so", "some", "than", "that", "the", "their", "them", "then",
+    "there", "these", "they", "think", "this", "those", "to", "up", "us", "was", "we",
+    "well", "were", "what", "when", "which", "who", "why", "will", "with", "would",
+    "you", "your",
+})
+
+
+def looks_like_english_text(
+    text: str,
+    min_words: int = 8,
+    min_stopword_ratio: float = 0.08,
+) -> bool:
+    words = re.findall(r"[A-Za-z']+", text or "")
+    if len(words) < min_words:
+        return False
+    lowered = [word.lower() for word in words]
+    stopword_hits = sum(1 for word in lowered if word in _ENGLISH_STOPWORDS)
+    if stopword_hits / len(lowered) < min_stopword_ratio:
+        return False
+    letters = re.findall(r"[^\W\d_]", text or "", flags=re.UNICODE)
+    if not letters:
+        return False
+    latin_letters = sum(1 for letter in letters if letter.isascii() or "\u00c0" <= letter <= "\u024f")
+    return latin_letters / len(letters) >= 0.9
+
+
 def verify_audio_language(
     video_or_audio_path: Path,
     model_size: Optional[str] = None,
     min_probability: float = 0.55,
+    transcript_text: Optional[str] = None,
 ) -> str:
-    from src.config import IS_CI
     if model_size is None:
-        model_size = "tiny" if IS_CI else "base"
+        model_size = "base"
     try:
         from faster_whisper import WhisperModel
     except ImportError as error:
@@ -59,6 +91,13 @@ def verify_audio_language(
     detected = str(getattr(info, "language", "") or "")
     probability = float(getattr(info, "language_probability", 0.0) or 0.0)
     if not is_english_language_code(detected) or probability < min_probability:
+        if transcript_text and looks_like_english_text(transcript_text):
+            print(
+                f"[!] Language detector suggested '{detected or 'unknown'}' "
+                f"(confidence={probability:.2f}) but the clip transcript is clearly English. "
+                "Treating the detector result as a false positive."
+            )
+            return detected
         raise RuntimeError(
             f"Audio language is not English (detected={detected or 'unknown'}, "
             f"confidence={probability:.2f})"
