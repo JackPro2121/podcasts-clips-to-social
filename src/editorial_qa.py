@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
+import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -205,6 +207,30 @@ def _plan_issues(
         if shot.max_static_hold > 2.5:
             issues.append(QaIssue("static_hold_limit", "error", f"Static hold exceeds limit in {shot.shot_id}"))
     return issues
+
+
+def save_qa_report(report: QaReport, output_path: Path) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Optional[Path] = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=output_path.parent,
+            prefix=f"{output_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+            json.dump(report.to_dict(), handle, indent=2, ensure_ascii=False)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, output_path)
+    finally:
+        if temporary_path and temporary_path.exists():
+            temporary_path.unlink()
+    return output_path
 
 
 def run_editorial_qa(

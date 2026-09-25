@@ -1,6 +1,7 @@
 import sys
 import argparse
 import traceback
+import uuid
 from pathlib import Path
 from typing import Optional, List, Union, Dict, Any
 
@@ -11,8 +12,9 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
 from src.config import (
-    CLIPS_DIR, SUBTITLES_DIR, DOWNLOADS_DIR, CLIP_ONLY_MODE,
+    CLIPS_DIR, SUBTITLES_DIR, DOWNLOADS_DIR, CLIP_ONLY_MODE, DATA_DIR, FPS, OUTPUT_WIDTH, OUTPUT_HEIGHT,
     MAX_TRANSCRIPT_FALLBACKS, BUFFER_ACCESS_TOKEN,
+    UNIVERSAL_EDITOR_SHADOW, UNIVERSAL_EDITOR_ENFORCE_QA,
 )
 from src.downloader import (
     download_video, fetch_transcript_only, download_clip_segment, extract_youtube_id,
@@ -35,6 +37,10 @@ from src.github_uploader import upload_clip_to_github_release
 from src.buffer_client import BufferClient
 from src.slack_notifier import SlackNotifier
 from src.channel_discovery import record_history
+from src.editor_models import StageStatus
+from src.editorial_qa import run_editorial_qa, save_qa_report
+from src.run_state import RunStateStore
+from src.universal_editor import ClipEditorArtifacts, build_clip_editor_artifacts
 
 
 def _manual_framing(video_path: Path, framing_mode: str) -> FramingDecision:
@@ -104,6 +110,22 @@ def run_pipeline(
     print("=" * 70)
 
     candidates = [url_or_path] if isinstance(url_or_path, str) else list(url_or_path)
+    run_id = f"run_{uuid.uuid4().hex[:12]}"
+    state_store = RunStateStore(DATA_DIR / "runs")
+    state_store.create(
+        run_id,
+        candidates[0],
+        settings={
+            "num_clips": num_clips,
+            "niche": niche,
+            "framing": framing_mode,
+            "subtitle_style": subtitle_style,
+            "subtitles_mode": subtitles_mode,
+            "post_to_buffer": post_to_buffer,
+            "watermark": watermark,
+        },
+    )
+    state_store.set_stage(run_id, "pipeline", StageStatus.RUNNING)
     active_source_url = candidates[0]
     is_youtube_url = any(
         "youtube.com" in c or "youtu.be" in c for c in candidates
@@ -169,6 +191,8 @@ def run_pipeline(
             viral_moments = None
 
     if dry_run:
+        state_store.set_stage(run_id, "pipeline", StageStatus.COMPLETED)
+        state_store.set_status(run_id, "completed")
         print("\n[!] Dry run enabled. Skipping video download, rendering and Buffer upload.")
         return
 
@@ -216,6 +240,27 @@ def run_pipeline(
             burn_subtitles = subtitles_mode in ("auto", "burn")
             ass_path = None
             clip_segments: List[TranscriptSegment] = segments or []
+            editor_artifacts: Optional[ClipEditorArtifacts] = None
+            if UNIVERSAL_EDITOR_SHADOW and clip_segments:
+                try:
+                    artifact_dir = DATA_DIR / "runs" / run_id
+                    editor_artifacts = build_clip_editor_artifacts(
+                        video_path=Path(clip_path),
+                        segments=clip_segments,
+                        clip_start=moment.start_time,
+                        clip_end=moment.end_time,
+                        artifact_dir=artifact_dir,
+                        run_id=run_id,
+                        clip_index=idx,
+                        sample_fps=1.0,
+                        detect_faces=False,
+                    )
+                    state_store.record_artifact(run_id, f"clip_{idx}_source_index", artifact_dir / f"clip_{idx}_source_index.json")
+                    state_store.record_artifact(run_id, f"clip_{idx}_edit_plan", artifact_dir / f"clip_{idx}_edit_plan.json")
+                    state_store.record_artifact(run_id, f"clip_{idx}_composition_plan", artifact_dir / f"clip_{idx}_composition_plan.json")
+                    print(f"[+] Universal editor shadow artifacts created for clip #{idx}.")
+                except Exception as shadow_error:
+                    print(f"[!] Universal editor shadow analysis unavailable for clip #{idx}: {shadow_error}")
             if burn_subtitles and segments:
                 try:
                     aligned_segments = align_clip_transcript(
@@ -293,6 +338,25 @@ def run_pipeline(
                     broll_cues=broll_cues,
                     cover_image_path=thumb_path
                 )
+                if editor_artifacts is not None:
+                    qa_report = run_editorial_qa(
+                        path=Path(rendered_path),
+                        edit_plan=editor_artifacts.edit_plan,
+                        composition=editor_artifacts.composition_plan,
+                        expected_width=OUTPUT_WIDTH,
+                        expected_height=OUTPUT_HEIGHT,
+                        expected_fps=float(FPS),
+                        source_duration=clip_duration,
+                        report_id=f"{run_id}_clip_{idx}",
+                    )
+                    qa_path = DATA_DIR / "runs" / run_id / f"clip_{idx}_qa_report.json"
+                    save_qa_report(qa_report, qa_path)
+                    state_store.record_artifact(run_id, f"clip_{idx}_qa_report", qa_path)
+                    if UNIVERSAL_EDITOR_ENFORCE_QA and not qa_report.passed:
+                        issue_codes = [issue.code for issue in qa_report.issues]
+                        print(f"[-] Editorial QA blocked clip #{idx}: {issue_codes}")
+                        continue
+                    print(f"[+] Editorial QA report for clip #{idx}: passed={qa_report.passed}")
                 rendered_clips.append({
                     "path": rendered_path,
                     "thumbnail": thumb_path,
@@ -619,6 +683,8 @@ def run_pipeline(
     except Exception as e:
         print(f"[-] History record warning: {e}")
 
+    state_store.set_stage(run_id, "pipeline", StageStatus.COMPLETED)
+    state_store.set_status(run_id, "completed")
     print("\n" + "=" * 70)
     print("✨ ALL CLIPS PROCESSED SUCCESSFULLY!")
     print(f"📂 Output clips saved to: {CLIPS_DIR.resolve()}")

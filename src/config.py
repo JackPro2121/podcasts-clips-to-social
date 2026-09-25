@@ -132,6 +132,8 @@ ENABLE_BGM = os.getenv("ENABLE_BGM", "true").lower() in ("true", "1", "yes")  # 
 ENABLE_SFX = os.getenv("ENABLE_SFX", "true").lower() in ("true", "1", "yes")  # Transitions & keyword sound design
 ENABLE_DYNAMIC_DUCKING = os.getenv("ENABLE_DYNAMIC_DUCKING", "true").lower() in ("true", "1", "yes")  # Sidechain BGM ducking
 ENABLE_FILM_GRAIN = os.getenv("ENABLE_FILM_GRAIN", "true").lower() in ("true", "1", "yes")  # Breaks visual pHash
+UNIVERSAL_EDITOR_SHADOW = os.getenv("UNIVERSAL_EDITOR_SHADOW", "true").lower() in ("true", "1", "yes")
+UNIVERSAL_EDITOR_ENFORCE_QA = os.getenv("UNIVERSAL_EDITOR_ENFORCE_QA", "false").lower() in ("true", "1", "yes")
 
 # Video & Format Defaults (Ultra HD 60FPS Broadcast Studio)
 IS_CI = os.getenv("GITHUB_ACTIONS", "false").lower() == "true"
