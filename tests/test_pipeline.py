@@ -2,7 +2,7 @@ import unittest
 from pathlib import Path
 from src.config import TARGET_LUFS, OUTPUT_WIDTH, OUTPUT_HEIGHT
 from src.downloader import extract_youtube_id
-from src.transcriber import parse_native_transcript, TranscriptSegment, WordTimestamp
+from src.transcriber import is_english_language_code, parse_native_transcript, TranscriptSegment, WordTimestamp
 from src.viral_detector import fallback_rule_based_detector, parse_clips_json
 from src.face_tracker import FramingDecision
 from src.subtitle_generator import (
@@ -30,6 +30,12 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         ]
         for url, expected_id in urls:
             self.assertEqual(extract_youtube_id(url), expected_id)
+
+    def test_english_language_codes_are_accepted(self):
+        self.assertTrue(is_english_language_code("en"))
+        self.assertTrue(is_english_language_code("en-US"))
+        self.assertFalse(is_english_language_code("es"))
+        self.assertFalse(is_english_language_code(""))
 
     def test_transcript_parsing(self):
         raw = [
@@ -872,6 +878,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
                  patch.object(main, "fetch_transcript_only", return_value=None), \
                  patch.object(main, "download_clip_segment", side_effect=[probe_info, probe_info]), \
                  patch.object(main, "transcribe_audio_whisper", return_value=[TranscriptSegment(0.0, 30.0, "test", [])]), \
+                 patch.object(main, "verify_audio_language", return_value="en"), \
                  patch.object(main, "detect_viral_moments", return_value=[moment]), \
                  patch.object(main, "analyze_faces_in_clip", return_value=FramingDecision(mode="blur_stack", face_count=0)) as analyze_faces, \
                  patch.object(main, "generate_clip_thumbnail", return_value=None), \

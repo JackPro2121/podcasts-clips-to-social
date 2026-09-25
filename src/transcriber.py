@@ -23,6 +23,49 @@ class TranscriptSegment:
 
 _WHISPER_MODELS: Dict[tuple[str, str, str], Any] = {}
 
+
+def is_english_language_code(language: Optional[str]) -> bool:
+    normalized = (language or "").strip().lower().replace("_", "-")
+    return normalized == "en" or normalized.startswith("en-")
+
+
+def verify_audio_language(
+    video_or_audio_path: Path,
+    model_size: Optional[str] = None,
+    min_probability: float = 0.55,
+) -> str:
+    from src.config import IS_CI
+    if model_size is None:
+        model_size = "tiny" if IS_CI else "base"
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError as error:
+        raise RuntimeError("faster-whisper is required to verify English audio language") from error
+
+    model_key = (model_size, "cpu", "language")
+    model = _WHISPER_MODELS.get(model_key)
+    if model is None:
+        print(f"[*] Initializing language detector ({model_size}, cpu)...")
+        model = WhisperModel(model_size, device="cpu", compute_type="int8")
+        _WHISPER_MODELS[model_key] = model
+
+    _, info = model.transcribe(
+        str(video_or_audio_path),
+        beam_size=1,
+        language=None,
+        vad_filter=True,
+        vad_parameters=dict(min_silence_duration_ms=500),
+    )
+    detected = str(getattr(info, "language", "") or "")
+    probability = float(getattr(info, "language_probability", 0.0) or 0.0)
+    if not is_english_language_code(detected) or probability < min_probability:
+        raise RuntimeError(
+            f"Audio language is not English (detected={detected or 'unknown'}, "
+            f"confidence={probability:.2f})"
+        )
+    print(f"[+] English audio verified ({detected}, confidence={probability:.2f}).")
+    return detected
+
 def fetch_transcript_chocodata(video_id: str, api_key: Optional[str] = None) -> Optional[List[TranscriptSegment]]:
     """
     Fetches official timestamped YouTube transcript via Chocodata REST API in 0.4s.

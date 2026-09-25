@@ -26,6 +26,7 @@ from src.transcriber import (
     TranscriptSegment,
     WordTimestamp,
     transcribe_audio_whisper,
+    verify_audio_language,
 )
 from src.viral_detector import detect_viral_moments
 from src.face_tracker import analyze_faces_in_clip, FramingDecision
@@ -318,6 +319,11 @@ def run_pipeline(
 
             clip_path = clip_info['video_path']
             clip_duration = moment.end_time - moment.start_time
+            try:
+                verify_audio_language(Path(clip_path))
+            except Exception as language_error:
+                print(f"[-] Skipping non-English clip #{idx}: {language_error}")
+                continue
 
             render_start = float(clip_info.get("segment_start", 0.0))
             render_end = render_start + clip_duration
@@ -493,6 +499,11 @@ def run_pipeline(
                                     print(f"[-] Targeted clip #{idx} download returned nothing. Skipping.")
                                     continue
                                 clip_path = Path(clip_info["video_path"])
+                                try:
+                                    verify_audio_language(clip_path)
+                                except Exception as language_error:
+                                    print(f"[-] Skipping non-English probe clip #{idx}: {language_error}")
+                                    continue
                                 render_start = 0.0
                                 render_end = moment.end_time - moment.start_time
                                 editor_artifacts = _build_universal_shadow(
@@ -629,6 +640,10 @@ def run_pipeline(
                 print(f"   #{idx}: [{m.start_time:.1f}s - {m.end_time:.1f}s] (Virality: {m.viral_score}/100) '{m.title}'")
 
             print("\n--- [4/6 & 5/6] EDITING, FACE TRACKING, AUDIO MASTERING & RENDERING ---")
+            try:
+                verify_audio_language(Path(video_path))
+            except Exception as language_error:
+                raise RuntimeError(f"Source audio is not English: {language_error}") from language_error
             for idx, moment in enumerate(viral_moments, 1):
                 _extend_moment_to_complete_transcript(segments, moment)
                 print(f"\n>>> Processing Clip #{idx}: {moment.title} ({moment.duration:.1f}s)")
