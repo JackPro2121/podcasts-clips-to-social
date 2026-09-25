@@ -3,7 +3,7 @@ import argparse
 import traceback
 import uuid
 from pathlib import Path
-from typing import Optional, List, Union, Dict, Any
+from typing import Optional, List, Union, Dict, Any, Tuple
 
 # Ensure UTF-8 output encoding across Windows terminals
 if hasattr(sys.stdout, "reconfigure"):
@@ -85,6 +85,73 @@ def _manual_framing(video_path: Path, framing_mode: str) -> FramingDecision:
         active_w=width,
         active_h=height,
     )
+
+
+def _build_universal_shadow(
+    run_id: str,
+    state_store: RunStateStore,
+    video_path: Path,
+    segments: List[TranscriptSegment],
+    clip_start: float,
+    clip_end: float,
+    clip_index: int,
+    source_window: Optional[Tuple[float, float]] = None,
+) -> Optional[ClipEditorArtifacts]:
+    if not UNIVERSAL_EDITOR_SHADOW or not segments:
+        return None
+    try:
+        artifact_dir = DATA_DIR / "runs" / run_id
+        artifacts = build_clip_editor_artifacts(
+            video_path=video_path,
+            segments=segments,
+            clip_start=clip_start,
+            clip_end=clip_end,
+            artifact_dir=artifact_dir,
+            run_id=run_id,
+            clip_index=clip_index,
+            sample_fps=1.0,
+            detect_faces=False,
+            source_window=source_window,
+        )
+        state_store.record_artifact(run_id, f"clip_{clip_index}_source_index", artifact_dir / f"clip_{clip_index}_source_index.json")
+        state_store.record_artifact(run_id, f"clip_{clip_index}_edit_plan", artifact_dir / f"clip_{clip_index}_edit_plan.json")
+        state_store.record_artifact(run_id, f"clip_{clip_index}_composition_plan", artifact_dir / f"clip_{clip_index}_composition_plan.json")
+        print(f"[+] Universal editor shadow artifacts created for clip #{clip_index}.")
+        return artifacts
+    except Exception as shadow_error:
+        print(f"[!] Universal editor shadow analysis unavailable for clip #{clip_index}: {shadow_error}")
+        return None
+
+
+def _run_universal_qa(
+    run_id: str,
+    state_store: RunStateStore,
+    clip_index: int,
+    rendered_path: Path,
+    artifacts: Optional[ClipEditorArtifacts],
+    clip_duration: float,
+) -> bool:
+    if artifacts is None:
+        return True
+    qa_report = run_editorial_qa(
+        path=rendered_path,
+        edit_plan=artifacts.edit_plan,
+        composition=artifacts.composition_plan,
+        expected_width=OUTPUT_WIDTH,
+        expected_height=OUTPUT_HEIGHT,
+        expected_fps=float(FPS),
+        source_duration=clip_duration,
+        report_id=f"{run_id}_clip_{clip_index}",
+    )
+    qa_path = DATA_DIR / "runs" / run_id / f"clip_{clip_index}_qa_report.json"
+    save_qa_report(qa_report, qa_path)
+    state_store.record_artifact(run_id, f"clip_{clip_index}_qa_report", qa_path)
+    if UNIVERSAL_EDITOR_ENFORCE_QA and not qa_report.passed:
+        issue_codes = [issue.code for issue in qa_report.issues]
+        print(f"[-] Editorial QA blocked clip #{clip_index}: {issue_codes}")
+        return False
+    print(f"[+] Editorial QA report for clip #{clip_index}: passed={qa_report.passed}")
+    return True
 
 
 def run_pipeline(
@@ -240,27 +307,15 @@ def run_pipeline(
             burn_subtitles = subtitles_mode in ("auto", "burn")
             ass_path = None
             clip_segments: List[TranscriptSegment] = segments or []
-            editor_artifacts: Optional[ClipEditorArtifacts] = None
-            if UNIVERSAL_EDITOR_SHADOW and clip_segments:
-                try:
-                    artifact_dir = DATA_DIR / "runs" / run_id
-                    editor_artifacts = build_clip_editor_artifacts(
-                        video_path=Path(clip_path),
-                        segments=clip_segments,
-                        clip_start=moment.start_time,
-                        clip_end=moment.end_time,
-                        artifact_dir=artifact_dir,
-                        run_id=run_id,
-                        clip_index=idx,
-                        sample_fps=1.0,
-                        detect_faces=False,
-                    )
-                    state_store.record_artifact(run_id, f"clip_{idx}_source_index", artifact_dir / f"clip_{idx}_source_index.json")
-                    state_store.record_artifact(run_id, f"clip_{idx}_edit_plan", artifact_dir / f"clip_{idx}_edit_plan.json")
-                    state_store.record_artifact(run_id, f"clip_{idx}_composition_plan", artifact_dir / f"clip_{idx}_composition_plan.json")
-                    print(f"[+] Universal editor shadow artifacts created for clip #{idx}.")
-                except Exception as shadow_error:
-                    print(f"[!] Universal editor shadow analysis unavailable for clip #{idx}: {shadow_error}")
+            editor_artifacts = _build_universal_shadow(
+                run_id=run_id,
+                state_store=state_store,
+                video_path=Path(clip_path),
+                segments=clip_segments,
+                clip_start=moment.start_time,
+                clip_end=moment.end_time,
+                clip_index=idx,
+            )
             if burn_subtitles and segments:
                 try:
                     aligned_segments = align_clip_transcript(
@@ -338,25 +393,15 @@ def run_pipeline(
                     broll_cues=broll_cues,
                     cover_image_path=thumb_path
                 )
-                if editor_artifacts is not None:
-                    qa_report = run_editorial_qa(
-                        path=Path(rendered_path),
-                        edit_plan=editor_artifacts.edit_plan,
-                        composition=editor_artifacts.composition_plan,
-                        expected_width=OUTPUT_WIDTH,
-                        expected_height=OUTPUT_HEIGHT,
-                        expected_fps=float(FPS),
-                        source_duration=clip_duration,
-                        report_id=f"{run_id}_clip_{idx}",
-                    )
-                    qa_path = DATA_DIR / "runs" / run_id / f"clip_{idx}_qa_report.json"
-                    save_qa_report(qa_report, qa_path)
-                    state_store.record_artifact(run_id, f"clip_{idx}_qa_report", qa_path)
-                    if UNIVERSAL_EDITOR_ENFORCE_QA and not qa_report.passed:
-                        issue_codes = [issue.code for issue in qa_report.issues]
-                        print(f"[-] Editorial QA blocked clip #{idx}: {issue_codes}")
-                        continue
-                    print(f"[+] Editorial QA report for clip #{idx}: passed={qa_report.passed}")
+                if not _run_universal_qa(
+                    run_id=run_id,
+                    state_store=state_store,
+                    clip_index=idx,
+                    rendered_path=Path(rendered_path),
+                    artifacts=editor_artifacts,
+                    clip_duration=clip_duration,
+                ):
+                    continue
                 rendered_clips.append({
                     "path": rendered_path,
                     "thumbnail": thumb_path,
@@ -419,6 +464,15 @@ def run_pipeline(
                                 clip_path = Path(clip_info["video_path"])
                                 render_start = 0.0
                                 render_end = moment.end_time - moment.start_time
+                                editor_artifacts = _build_universal_shadow(
+                                    run_id=run_id,
+                                    state_store=state_store,
+                                    video_path=clip_path,
+                                    segments=segments,
+                                    clip_start=moment.start_time,
+                                    clip_end=moment.end_time,
+                                    clip_index=idx,
+                                )
                                 if framing_mode == "auto":
                                     framing = analyze_faces_in_clip(
                                         clip_path,
@@ -472,6 +526,15 @@ def run_pipeline(
                                     sfx_cues=getattr(moment, "sfx_cues", []),
                                     cover_image_path=thumb_path
                                 )
+                                if not _run_universal_qa(
+                                    run_id=run_id,
+                                    state_store=state_store,
+                                    clip_index=idx,
+                                    rendered_path=Path(rendered_path),
+                                    artifacts=editor_artifacts,
+                                    clip_duration=render_end - render_start,
+                                ):
+                                    continue
                                 rendered_clips.append({"path": rendered_path, "thumbnail": thumb_path, "moment": moment})
                             except Exception as e:
                                 print(f"[-] Probe clip #{idx} failed: {e}")
@@ -544,6 +607,16 @@ def run_pipeline(
                     else:
                         framing = _manual_framing(video_path, framing_mode)
 
+                    editor_artifacts = _build_universal_shadow(
+                        run_id=run_id,
+                        state_store=state_store,
+                        video_path=Path(video_path),
+                        segments=segments,
+                        clip_start=moment.start_time,
+                        clip_end=moment.end_time,
+                        clip_index=idx,
+                        source_window=(moment.start_time, moment.end_time),
+                    )
                     burn_subtitles = subtitles_mode in ("auto", "burn")
                     ass_path = None
                     if burn_subtitles:
@@ -591,6 +664,15 @@ def run_pipeline(
                         sfx_cues=getattr(moment, "sfx_cues", []),
                         cover_image_path=thumb_path
                     )
+                    if not _run_universal_qa(
+                        run_id=run_id,
+                        state_store=state_store,
+                        clip_index=idx,
+                        rendered_path=Path(rendered_path),
+                        artifacts=editor_artifacts,
+                        clip_duration=moment.end_time - moment.start_time,
+                    ):
+                        continue
                     rendered_clips.append({"path": rendered_path, "thumbnail": thumb_path, "moment": moment})
                 except Exception as e:
                     print(f"[-] Full-download clip #{idx} failed: {e}")

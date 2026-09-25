@@ -5,7 +5,7 @@ import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from src.composition_planner import CompositionPlan, build_composition_plan
 from src.edit_director import EditPlan, HookCandidate, StoryBeat, build_semantic_edit_plans
@@ -108,6 +108,21 @@ def _write_json(path: Path, payload: Dict[str, Any]) -> Path:
     return path
 
 
+def _shift_index_to_clip(index: SourceIndex, offset: float) -> None:
+    if offset == 0:
+        return
+    for shot in index.shots:
+        shot.start = max(0.0, shot.start - offset)
+        shot.end = max(0.0, shot.end - offset)
+        shot.freeze_intervals = [
+            (max(0.0, start - offset), max(0.0, end - offset))
+            for start, end in shot.freeze_intervals
+        ]
+    for event in index.audio_events:
+        event.start = max(0.0, event.start - offset)
+        event.end = max(0.0, event.end - offset)
+
+
 def build_clip_editor_artifacts(
     video_path: Path,
     segments: Sequence[TranscriptSegment],
@@ -118,15 +133,22 @@ def build_clip_editor_artifacts(
     clip_index: int,
     sample_fps: float = 1.0,
     detect_faces: bool = False,
+    source_window: Optional[Tuple[float, float]] = None,
 ) -> ClipEditorArtifacts:
     duration = max(0.1, clip_end - clip_start)
     relative_segments = _relative_segments(segments, clip_start, clip_end)
+    source_start = source_window[0] if source_window else 0.0
+    source_end = source_window[1] if source_window else None
     source_index = build_source_index(
         video_path,
+        start_time=source_start,
+        end_time=source_end,
         sample_fps=sample_fps,
         max_samples=120,
         detect_faces=detect_faces,
     )
+    if source_window:
+        _shift_index_to_clip(source_index, source_window[0])
     source_path = artifact_dir / f"clip_{clip_index}_source_index.json"
     save_source_index(source_index, source_path)
     suggestions = build_semantic_edit_plans(relative_segments, source_index, num_clips=1)
