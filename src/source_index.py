@@ -205,7 +205,7 @@ def _motion_score(previous: np.ndarray, current: np.ndarray) -> float:
 
 def _freeze_intervals(
     samples: List[Tuple[float, np.ndarray]],
-    threshold: float = 0.002,
+    threshold: float = 0.006,
 ) -> List[Tuple[float, float]]:
     if len(samples) < 2:
         return []
