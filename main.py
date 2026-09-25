@@ -87,6 +87,15 @@ def _manual_framing(video_path: Path, framing_mode: str) -> FramingDecision:
     )
 
 
+def _print_framing_summary(framing: FramingDecision) -> None:
+    print(f"[+] Framing decision: '{framing.mode}' (detected faces: {framing.face_count})")
+    for shot in getattr(framing, "shots", []):
+        print(
+            f"    shot {shot.start:.2f}-{shot.end:.2f}s mode={shot.mode} "
+            f"crop_x={shot.crop_x} face_track_points={len(shot.face_centers_timeline)}"
+        )
+
+
 def _extend_moment_to_complete_transcript(segments: List[TranscriptSegment], moment: Any) -> None:
     original_end = float(moment.end_time)
     max_end = original_end + 8.0
@@ -125,7 +134,7 @@ def _build_universal_shadow(
             run_id=run_id,
             clip_index=clip_index,
             sample_fps=1.0,
-            detect_faces=False,
+            detect_faces=True,
             source_window=source_window,
         )
         state_store.record_artifact(run_id, f"clip_{clip_index}_source_index", artifact_dir / f"clip_{clip_index}_source_index.json")
@@ -320,6 +329,7 @@ def run_pipeline(
                 print(f"[+] Framing decision: '{framing.mode}' (Detected faces: {framing.face_count})")
             else:
                 framing = _manual_framing(clip_path, framing_mode)
+            _print_framing_summary(framing)
 
             burn_subtitles = subtitles_mode in ("auto", "burn")
             ass_path = None
@@ -499,6 +509,7 @@ def run_pipeline(
                                     )
                                 else:
                                     framing = _manual_framing(clip_path, framing_mode)
+                                _print_framing_summary(framing)
                                 ass_path = SUBTITLES_DIR / f"probe_clip_{idx}.ass"
                                 burn_subtitles = subtitles_mode != "skip"
                                 if burn_subtitles:
@@ -625,6 +636,7 @@ def run_pipeline(
                         print(f"[+] Framing decision: '{framing.mode}' (Detected faces: {framing.face_count})")
                     else:
                         framing = _manual_framing(video_path, framing_mode)
+                    _print_framing_summary(framing)
 
                     editor_artifacts = _build_universal_shadow(
                         run_id=run_id,

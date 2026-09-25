@@ -198,6 +198,24 @@ class TestFramingAndAspect(unittest.TestCase):
         self.assertEqual((crop.active_w, crop.active_h), (321, 241))
         self.assertEqual((blur.active_w, blur.active_h), (321, 241))
 
+    def test_unstable_face_timeline_disables_panning(self):
+        from src.face_tracker import _stable_face_timeline
+
+        timeline = [
+            (0.0, 578), (0.4, 600), (0.8, 700), (1.2, 700),
+            (1.6, 700), (2.0, 700), (2.4, 700), (2.8, 700),
+            (3.2, 700), (3.6, 700), (4.0, 700),
+        ]
+
+        self.assertEqual(_stable_face_timeline(timeline, 1080), [])
+
+    def test_smooth_monotonic_face_timeline_is_preserved(self):
+        from src.face_tracker import _stable_face_timeline
+
+        timeline = [(0.0, 900), (0.4, 950), (0.8, 1000), (1.2, 1050)]
+
+        self.assertEqual(len(_stable_face_timeline(timeline, 1920)), 4)
+
     def test_complete_transcript_endpoint_extends_moment(self):
         import main
         from src.transcriber import TranscriptSegment

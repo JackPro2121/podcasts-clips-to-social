@@ -376,6 +376,34 @@ def _apply_autoflip_smoothing(timeline: List[Tuple[float, int]], dead_zone_px: i
     return smoothed
 
 
+def _stable_face_timeline(
+    timeline: List[Tuple[float, int]],
+    active_width: int,
+) -> List[Tuple[float, int]]:
+    if len(timeline) < 4 or active_width <= 0:
+        return []
+    ordered = sorted(timeline, key=lambda item: item[0])
+    times = [float(item[0]) for item in ordered]
+    positions = [int(item[1]) for item in ordered]
+    if max(times) - min(times) < 1.0:
+        return []
+    if max((right - left for left, right in zip(times, times[1:])), default=0.0) > 1.0:
+        return []
+    if abs(positions[-1] - positions[0]) > active_width * 0.30:
+        return []
+    direction = 1 if positions[-1] >= positions[0] else -1
+    directional_steps = sum(
+        1
+        for left, right in zip(positions, positions[1:])
+        if (right - left) * direction > 0
+    )
+    if directional_steps / max(1, len(positions) - 1) < 0.75:
+        return []
+    if max((abs(right - left) for left, right in zip(positions, positions[1:])), default=0.0) > active_width * 0.18:
+        return []
+    return _apply_autoflip_smoothing(ordered)
+
+
 def _frame_window(start_time: float, end_time: float, fps: float) -> Tuple[int, int]:
     safe_fps = max(1.0, float(fps))
     start_frame = max(0, int(math.ceil(start_time * safe_fps)))
@@ -677,7 +705,7 @@ def analyze_faces_in_clip(
                     crop_x = min(active_x + active_w - target_crop_w, med_fx + med_fw + min_safe_pad - target_crop_w)
 
             raw_timeline = [(round(s - rel_s, 2), f.center_x) for s, f in timed_single_faces if isinstance(f, FaceBox)] if timed_single_faces else []
-            timeline = _apply_autoflip_smoothing(raw_timeline, dead_zone_px=40)
+            timeline = _stable_face_timeline(raw_timeline, active_w)
 
             # High-retention opening hook: Apply 1.15x punch-zoom on the first 3.5 seconds
             zoom = 1.15 if (rel_s < 3.2 and ENABLE_PUNCH_ZOOM) else 1.0
