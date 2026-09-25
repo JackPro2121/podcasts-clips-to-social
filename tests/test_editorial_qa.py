@@ -50,6 +50,23 @@ class TestEditorialQa(unittest.TestCase):
         self.assertTrue(report.passed)
         self.assertEqual(report.issues, [])
 
+    def test_incomplete_endpoint_blocks_publish(self):
+        probe = {
+            "format": {"duration": "30.0"},
+            "streams": [
+                {"codec_type": "video", "codec_name": "h264", "width": 1080, "height": 1920, "avg_frame_rate": "30/1", "duration": "30.0"},
+                {"codec_type": "audio", "codec_name": "aac", "sample_rate": "48000"},
+            ],
+        }
+        edit_plan = self._edit_plan()
+        edit_plan.warnings.append("endpoint_not_proven_complete")
+        with patch("src.editorial_qa._probe_output", return_value=probe), \
+             patch("src.editorial_qa._detect_intervals", side_effect=[[], []]), \
+             patch("src.editorial_qa._loudness_metrics", return_value={"integrated_lufs": -14.0, "peak_dbfs": -1.8}):
+            report = run_editorial_qa("output.mp4", edit_plan, self._composition(), report_id="qa_incomplete")
+        self.assertFalse(report.passed)
+        self.assertIn("incomplete_endpoint", {issue.code for issue in report.issues})
+
     def test_freeze_and_collision_block_publish(self):
         probe = {
             "format": {"duration": "30.0"},

@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 import numpy as np
 import cv2
 import tempfile
@@ -196,6 +197,21 @@ class TestFramingAndAspect(unittest.TestCase):
         self.assertEqual(split.speaker2_box, (160, 0, 135, 120))
         self.assertEqual((crop.active_w, crop.active_h), (321, 241))
         self.assertEqual((blur.active_w, blur.active_h), (321, 241))
+
+    def test_complete_transcript_endpoint_extends_moment(self):
+        import main
+        from src.transcriber import TranscriptSegment
+
+        moment = SimpleNamespace(start_time=10.0, end_time=40.0, duration=30.0)
+        segments = [
+            TranscriptSegment(20.0, 40.0, "we're giving", []),
+            TranscriptSegment(40.0, 46.0, "the answer.", []),
+        ]
+
+        main._extend_moment_to_complete_transcript(segments, moment)
+
+        self.assertEqual(moment.end_time, 46.0)
+        self.assertEqual(moment.duration, 36.0)
 
     def test_filtergraph_clamps_odd_low_resolution_crops(self):
         decision = FramingDecision(

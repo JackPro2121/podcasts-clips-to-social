@@ -87,6 +87,21 @@ def _manual_framing(video_path: Path, framing_mode: str) -> FramingDecision:
     )
 
 
+def _extend_moment_to_complete_transcript(segments: List[TranscriptSegment], moment: Any) -> None:
+    original_end = float(moment.end_time)
+    max_end = original_end + 8.0
+    for segment in sorted(segments, key=lambda item: (item.start, item.end)):
+        if segment.end <= original_end + 0.05:
+            continue
+        if segment.start > max_end:
+            break
+        if segment.text.rstrip().endswith((".", "?", "!")):
+            moment.end_time = min(segment.end, max_end)
+            moment.duration = moment.end_time - moment.start_time
+            print(f"[+] Extended clip endpoint to complete transcript sentence at {moment.end_time:.2f}s.")
+            return
+
+
 def _build_universal_shadow(
     run_id: str,
     state_store: RunStateStore,
@@ -273,6 +288,8 @@ def run_pipeline(
         DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
         for idx, moment in enumerate(viral_moments, 1):
+            if segments:
+                _extend_moment_to_complete_transcript(segments, moment)
             print(f"\n>>> Clip #{idx}: '{moment.title}' [{moment.start_time:.1f}s -> {moment.end_time:.1f}s]")
 
             clip_info = download_clip_segment(
@@ -451,6 +468,7 @@ def run_pipeline(
                         rendered_clips = []
                         for idx, moment in enumerate(viral_moments, 1):
                             try:
+                                _extend_moment_to_complete_transcript(segments, moment)
                                 clip_info = download_clip_segment(
                                     video_url=active_source_url,
                                     start_time=moment.start_time,
@@ -598,6 +616,7 @@ def run_pipeline(
 
             print("\n--- [4/6 & 5/6] EDITING, FACE TRACKING, AUDIO MASTERING & RENDERING ---")
             for idx, moment in enumerate(viral_moments, 1):
+                _extend_moment_to_complete_transcript(segments, moment)
                 print(f"\n>>> Processing Clip #{idx}: {moment.title} ({moment.duration:.1f}s)")
                 try:
                     if framing_mode == "auto":
