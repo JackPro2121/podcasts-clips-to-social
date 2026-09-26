@@ -384,12 +384,12 @@ def build_video_filtergraph(
                 h_x = _crop_position(s_cx, _drift_axis_expr(s_cx, active_x, h_hi_x, s_cw, drift_ratio))
                 h_y = _crop_position(s_cy, _drift_axis_expr(s_cy, active_y, h_hi_y, s_ch, drift_ratio))
                 shot_f = (
-                    f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,split=2[p{i}_c][p{i}_h];"
+                    f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,split=3[p{i}_c][p{i}_s][p{i}_h];"
                     f"[p{i}_c]crop={cw}:{ch}:{canvas_x}:{canvas_y},"
                     f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
                     f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},boxblur=30:5,"
                     f"eq=brightness=-0.16:contrast=1.12[p{i}_blur];"
-                    f"[p{i}_c]crop={cw}:{ch}:{canvas_x}:{canvas_y},"
+                    f"[p{i}_s]crop={cw}:{ch}:{canvas_x}:{canvas_y},"
                     f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=decrease[p{i}_slide];"
                     f"[p{i}_blur][p{i}_slide]overlay=(W-w)/2:(H-h)/2,setsar=1:1,fps={FPS}[p{i}_canvas];"
                     f"[p{i}_h]crop={s_cw}:{s_ch}:{h_x}:{h_y},"

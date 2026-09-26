@@ -1070,8 +1070,8 @@ def run_pipeline(
     publish_failed = False
     clips_report = []
     for item in rendered_clips:
-        clip_path = item["path"]
-        thumb_path = item.get("thumbnail")
+        clip_path = Path(item["path"])
+        thumb_path = Path(item["thumbnail"]) if item.get("thumbnail") else None
         moment = item["moment"]
 
         direct_url = upload_clip_to_github_release(clip_path)
