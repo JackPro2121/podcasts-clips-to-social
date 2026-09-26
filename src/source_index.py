@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 
 from src.scene_classifier import detect_clip_shots, detect_slide_heuristics
+from src.text_detection import TextBox, merge_text_boxes
 
 
 @dataclass
@@ -143,26 +144,23 @@ def probe_source_media(video_path: Path) -> SourceMediaInfo:
 
 
 def _estimate_text_regions(frame: np.ndarray) -> List[TextRegion]:
-    height, width = frame.shape[:2]
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    gradient = cv2.Sobel(gray, cv2.CV_16S, 1, 0, ksize=3)
-    binary = cv2.convertScaleAbs(gradient)
-    _, binary = cv2.threshold(binary, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 3))
-    connected = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
-    contours, _ = cv2.findContours(connected, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    """Detect text regions via the configured tier and convert to index form.
+
+    Detection and per-frame merging live in `src.text_detection`. The boxes are
+    merged across the whole shot below, because a per-frame detector jitters and
+    an unmerged list would produce a hundred near-identical protected rects.
+    """
+    from src.text_detection import detect_text_regions
+
     regions: List[TextRegion] = []
-    for contour in contours:
-        x, y, region_width, region_height = cv2.boundingRect(contour)
-        aspect = region_width / max(1, region_height)
-        if aspect < 2.5 or region_width < width * 0.1 or region_height > height * 0.15:
-            continue
+    for box in detect_text_regions(frame):
         regions.append(TextRegion(
-            x=round(x / max(1, width), 4),
-            y=round(y / max(1, height), 4),
-            width=round(region_width / max(1, width), 4),
-            height=round(region_height / max(1, height), 4),
-            confidence=0.45,
+            x=box.x,
+            y=box.y,
+            width=box.width,
+            height=box.height,
+            confidence=box.confidence,
+            source=box.source,
         ))
     return regions
 
@@ -194,6 +192,30 @@ def _sample_frames(
     finally:
         capture.release()
     return samples
+
+
+def sample_frames_at(
+    video_path: Path,
+    start_time: float,
+    end_time: float,
+    count: int = 12,
+) -> List[Tuple[float, np.ndarray]]:
+    """
+    Return roughly `count` evenly-spaced (timestamp, frame) samples across a window.
+
+    Exposed so the director's contact sheet reuses the same decoding path the
+    index already uses, rather than adding a second ffmpeg invocation with
+    different seeking behaviour.
+    """
+    safe_count = max(1, int(count))
+    duration = max(0.1, end_time - start_time)
+    return _sample_frames(
+        video_path,
+        start_time,
+        end_time,
+        sample_fps=max(0.01, safe_count / duration),
+        max_samples=safe_count,
+    )
 
 
 def _motion_score(previous: np.ndarray, current: np.ndarray) -> float:
@@ -275,6 +297,34 @@ def _audio_events(video_path: Path, start_time: float, end_time: float) -> List[
     return events
 
 
+def _merge_shot_text_regions(
+    regions: List[TextRegion],
+    iou_threshold: float = 0.3,
+) -> List[TextRegion]:
+    """
+    Collapse per-frame text detections into one stable region per text block.
+
+    Runs on a whole shot at once so the same line detected in twenty frames
+    becomes a single protected rect rather than twenty overlapping ones.
+    """
+    if not regions:
+        return []
+    boxes = [
+        TextBox(
+            x=region.x, y=region.y, width=region.width, height=region.height,
+            confidence=region.confidence, source=region.source,
+        )
+        for region in regions
+    ]
+    return [
+        TextRegion(
+            x=box.x, y=box.y, width=box.width, height=box.height,
+            confidence=box.confidence, source=box.source,
+        )
+        for box in merge_text_boxes(boxes, iou_threshold=iou_threshold)
+    ]
+
+
 def build_source_index(
     video_path: Path,
     start_time: float = 0.0,
@@ -309,11 +359,15 @@ def build_source_index(
         ]))
         face_values = [_face_count(frame, detect_faces) for _, frame in shot_samples]
         face_count = float(np.mean(face_values)) if face_values else 0.0
-        regions_by_key: Dict[Tuple[float, float, float, float], TextRegion] = {}
+        # Merge text regions across the whole shot by overlap. The previous
+        # exact-coordinate de-duplication happened to work for the edge
+        # heuristic's stable boxes, but a real detector jitters per frame and
+        # would have produced a near-identical rect for every sampled frame --
+        # which would make the caption collision check fire on everything.
+        shot_text: List[TextRegion] = []
         for _, frame in shot_samples:
-            for region in _estimate_text_regions(frame):
-                key = (region.x, region.y, region.width, region.height)
-                regions_by_key[key] = region
+            shot_text.extend(_estimate_text_regions(frame))
+        shot_text = _merge_shot_text_regions(shot_text)
         shot_freezes = _freeze_intervals(shot_samples)
         all_freezes.extend(shot_freezes)
         shot_type = "presentation" if presentation_ratio >= 0.5 else "human_or_scene"
@@ -328,7 +382,7 @@ def build_source_index(
             static_score=round(1.0 - motion_score, 4),
             presentation_ratio=round(presentation_ratio, 4),
             face_count=round(face_count, 2),
-            text_regions=list(regions_by_key.values()),
+            text_regions=shot_text,
             freeze_intervals=shot_freezes,
             confidence=0.65 if samples else 0.2,
         ))

@@ -4,11 +4,16 @@ import json
 import os
 import re
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from src.composition_planner import CompositionPlan, build_composition_plan
+from src.composition_planner import (
+    CaptionPlacement,
+    CompositionPlan,
+    build_caption_placements,
+    build_composition_plan,
+)
 from src.edit_director import EditPlan, HookCandidate, StoryBeat, build_semantic_edit_plans
 from src.source_index import SourceIndex, build_source_index, save_source_index
 from src.transcriber import TranscriptSegment, WordTimestamp
@@ -20,6 +25,10 @@ class ClipEditorArtifacts:
     edit_plan: EditPlan
     composition_plan: CompositionPlan
     semantic_suggestions: List[EditPlan]
+    # Resolved pixel-space caption positions. This is the channel that lets the
+    # director's layout decision reach the renderer instead of only being judged
+    # against it after the fact.
+    caption_placements: List[CaptionPlacement] = field(default_factory=list)
 
 
 def _relative_segments(
@@ -197,4 +206,5 @@ def build_clip_editor_artifacts(
         edit_plan=plan,
         composition_plan=composition,
         semantic_suggestions=suggestions,
+        caption_placements=build_caption_placements(composition),
     )

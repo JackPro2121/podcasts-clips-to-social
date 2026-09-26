@@ -2,6 +2,8 @@ import importlib
 import json
 import re
 import time
+from pathlib import Path
+
 import requests
 import warnings
 from typing import Any, Dict, List, Optional, Tuple
@@ -24,7 +26,8 @@ except ImportError:
 
 from src.config import (
     GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY,
-    OLLAMA_API_KEY, OLLAMA_MODEL, OLLAMA_BASE_URL
+    OLLAMA_API_KEY, OLLAMA_MODEL, OLLAMA_BASE_URL, GEMINI_MODEL_LADDER,
+    MIN_CLIP_DURATION, MAX_CLIP_DURATION,
 )
 from src.transcriber import TranscriptSegment
 
@@ -80,14 +83,36 @@ def format_transcript_with_timestamps(segments: List[TranscriptSegment], max_cha
         lines.append(line)
     return "\n".join(lines)
 
-def query_gemini_models(prompt: str, key: str) -> Optional[str]:
-    """Queries Google Gemini Flash free tier with exponential retry backoff."""
-    models_to_try = [
-        "gemini-2.5-flash",
-        "gemini-1.5-flash",
-        "gemini-2.5-flash-lite",
-        "gemini-2.0-flash",
-    ]
+def _gemini_image_part(image_path: Path) -> Optional[Any]:
+    """Build an inline image part for the new SDK, or None if unreadable."""
+    if not image_path.exists():
+        return None
+    data = image_path.read_bytes()
+    if not data:
+        return None
+    return genai_types.Part.from_bytes(data=data, mime_type="image/jpeg")
+
+
+def query_gemini_models(
+    prompt: str,
+    key: str,
+    image_path: Optional[Path] = None,
+    context_note: str = "",
+) -> Optional[str]:
+    """
+    Queries the Gemini free tier across GEMINI_MODEL_LADDER with exponential backoff.
+
+    When `image_path` is supplied the model also receives that image, which is
+    how the director v2 pass "watches" the clip. The image rides in the same
+    request rather than a second call, so the free-tier quota is unaffected.
+    """
+    models_to_try = list(GEMINI_MODEL_LADDER) or ["gemini-2.5-flash"]
+    image_part = _gemini_image_part(image_path) if (HAS_NEW_GENAI and image_path) else None
+    if image_path is not None and image_part is None:
+        print(f"[-] Image {Path(image_path).name} could not be attached; sending text only.")
+    image_bytes = b""
+    if image_path is not None and image_part is None and image_path.exists():
+        image_bytes = image_path.read_bytes()
     for model_name in models_to_try:
         print(f"[*] Trying Gemini Flash ({model_name})...")
         for attempt in range(3):
@@ -100,9 +125,10 @@ def query_gemini_models(prompt: str, key: str) -> Optional[str]:
                         api_key=key,
                         http_options=genai_types.HttpOptions(timeout=60_000),
                     )
+                    contents: Any = prompt if image_part is None else [prompt, image_part]
                     response = client.models.generate_content(
                         model=model_name,
-                        contents=prompt,
+                        contents=contents,
                         config=genai_types.GenerateContentConfig(
                             temperature=0.4,
                             response_mime_type="application/json"
@@ -112,8 +138,14 @@ def query_gemini_models(prompt: str, key: str) -> Optional[str]:
                 elif legacy_genai is not None:
                     legacy_genai.configure(api_key=key)
                     model = legacy_genai.GenerativeModel(model_name)
+                    legacy_contents: Any = prompt
+                    if image_bytes:
+                        legacy_contents = [
+                            prompt,
+                            {"mime_type": "image/jpeg", "data": image_bytes},
+                        ]
                     response = model.generate_content(
-                        prompt,
+                        legacy_contents,
                         generation_config=legacy_genai.GenerationConfig(
                             temperature=0.4,
                             response_mime_type="application/json"
@@ -125,6 +157,8 @@ def query_gemini_models(prompt: str, key: str) -> Optional[str]:
                     return None
 
                 if raw and len(raw) > 20:
+                    if context_note:
+                        print(f"[+] Gemini ({model_name}) returned a decision for {context_note}.")
                     return raw
             except Exception as e:
                 err_str = str(e)
@@ -252,10 +286,6 @@ def strip_emojis(text: str) -> str:
         flags=re.UNICODE
     )
     return emoji_pattern.sub(r"", text).strip()
-
-
-MIN_CLIP_DURATION = 30.0
-MAX_CLIP_DURATION = 140.0
 
 
 def _complete_boundary_ends(segments: List[TranscriptSegment]) -> List[float]:

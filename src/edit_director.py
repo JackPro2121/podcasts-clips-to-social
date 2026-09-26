@@ -5,6 +5,8 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from src.config import MIN_CLIP_DURATION, SHORT_FORM_MAX_DURATION
+from src.engagement import analyze_window
 from src.source_index import SourceIndex
 from src.transcriber import TranscriptSegment, WordTimestamp
 
@@ -202,8 +204,35 @@ def _score_plan(
     payoff_score = min(1.0, payoff_words / 5.0)
     filler_count = sum(1 for _, token in words if token in FILLER_WORDS)
     filler_score = max(0.0, 1.0 - filler_count / max(20, len(words)))
-    score = hook.score * 0.35 + visual_score * 0.25 + duration_score * 0.2 + payoff_score * 0.15 + filler_score * 0.05
+    energy_score = analyze_window(segments, start, end).score
+    score = (
+        hook.score * 0.30
+        + visual_score * 0.20
+        + energy_score * 0.20
+        + duration_score * 0.15
+        + payoff_score * 0.10
+        + filler_score * 0.05
+    )
     return round(max(0.0, min(1.0, score)), 4)
+
+
+def duration_warnings(start: float, end: float) -> List[str]:
+    """
+    Flag windows that sit outside the documented short-form sweet spot.
+
+    Reported rather than clamped: narrowing MIN/MAX_CLIP_DURATION risks the
+    detector finding no window at all, which aborts the whole run. Making the
+    deviation visible lets an operator tighten the gate deliberately instead.
+    """
+    warnings: List[str] = []
+    duration = end - start
+    if duration > SHORT_FORM_MAX_DURATION:
+        warnings.append(
+            f"exceeds_short_form_window:{duration:.1f}s>{SHORT_FORM_MAX_DURATION:.0f}s"
+        )
+    if duration < MIN_CLIP_DURATION:
+        warnings.append(f"below_min_clip_duration:{duration:.1f}s")
+    return warnings
 
 
 def build_semantic_edit_plans(
@@ -249,7 +278,7 @@ def build_semantic_edit_plans(
             beats=_build_beats(ordered, start, end),
             selected_shot_ids=shot_ids,
             confidence=confidence,
-            warnings=warnings,
+            warnings=warnings + duration_warnings(start, end),
         ))
     candidates.sort(key=lambda plan: plan.confidence, reverse=True)
     selected: List[EditPlan] = []

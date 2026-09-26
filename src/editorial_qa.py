@@ -208,8 +208,19 @@ def _plan_issues(
     if not composition.shots:
         issues.append(QaIssue("composition_missing", "error", "Composition has no shots"))
     for shot in composition.shots:
-        if shot.protected_regions and shot.caption_rect.intersects(shot.protected_regions[0]):
-            issues.append(QaIssue("caption_source_collision", "error", f"Caption overlaps source text in {shot.shot_id}"))
+        # Every protected region, not just the first. A shot with two text
+        # blocks and a collision on the second one was passing QA, which is the
+        # one case the check exists to catch.
+        colliding = [
+            region for region in shot.protected_regions
+            if shot.caption_rect.intersects(region)
+        ]
+        if colliding:
+            issues.append(QaIssue(
+                "caption_source_collision",
+                "error",
+                f"Caption overlaps {len(colliding)} source text region(s) in {shot.shot_id}",
+            ))
         if shot.max_static_hold > 2.5:
             issues.append(QaIssue("static_hold_limit", "error", f"Static hold exceeds limit in {shot.shot_id}"))
     return issues

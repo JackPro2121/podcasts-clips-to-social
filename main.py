@@ -1,5 +1,6 @@
 import sys
 import argparse
+import json
 import traceback
 import uuid
 from pathlib import Path
@@ -15,6 +16,7 @@ from src.config import (
     CLIPS_DIR, SUBTITLES_DIR, DOWNLOADS_DIR, CLIP_ONLY_MODE, DATA_DIR, FPS, OUTPUT_WIDTH, OUTPUT_HEIGHT, IS_CI,
     MAX_TRANSCRIPT_FALLBACKS, BUFFER_ACCESS_TOKEN,
     UNIVERSAL_EDITOR_SHADOW, UNIVERSAL_EDITOR_ENFORCE_QA,
+    DIRECTOR_V2_ENABLED, DIRECTOR_V2_TILES,
 )
 from src.downloader import (
     download_video, fetch_transcript_only, download_clip_segment, extract_youtube_id,
@@ -40,6 +42,14 @@ from src.slack_notifier import SlackNotifier
 from src.channel_discovery import record_history
 from src.editor_models import StageStatus
 from src.editorial_qa import run_editorial_qa, save_qa_report
+from src.composition_planner import build_caption_placements
+from src.director_v2 import (
+    DirectorReview,
+    apply_caption_directives,
+    apply_shot_directives,
+    plan_shot_directives,
+)
+from src.repair import render_with_repair
 from src.run_state import RunStateStore
 from src.universal_editor import ClipEditorArtifacts, build_clip_editor_artifacts
 
@@ -161,16 +171,117 @@ def _build_universal_shadow(
         return None
 
 
-def _run_universal_qa(
+def _apply_director_v2(
+    run_id: str,
+    state_store: RunStateStore,
+    clip_index: int,
+    video_path: Path,
+    segments: List[TranscriptSegment],
+    clip_start: float,
+    clip_end: float,
+    framing: FramingDecision,
+    artifacts: Optional[ClipEditorArtifacts],
+) -> Tuple[FramingDecision, Optional[DirectorReview]]:
+    """
+    Let the director choose per-shot layouts, and execute those choices.
+
+    This is the first point in the pipeline where the director's opinion reaches
+    the pixels. It is a no-op unless DIRECTOR_V2_ENABLED is set, and it returns
+    the original framing on any failure, so enabling it can only ever add
+    decisions on top of behaviour that already works.
+
+    Returns the (possibly rewritten) framing and the review, for logging.
+    """
+    if not DIRECTOR_V2_ENABLED:
+        return framing, None
+
+    source_index = artifacts.source_index if artifacts is not None else None
+    review: Optional[DirectorReview]
+    try:
+        review = plan_shot_directives(
+            video_path=video_path,
+            source_index=source_index,
+            segments=segments,
+            clip_start=clip_start,
+            clip_end=clip_end,
+            output_path=DATA_DIR / "runs" / run_id / f"clip_{clip_index}_contact_sheet.jpg",
+            tile_count=DIRECTOR_V2_TILES,
+        )
+    except Exception as director_error:
+        print(f"[!] Director v2 unavailable for clip #{clip_index}: {director_error}")
+        return framing, None
+
+    if review.failure:
+        print(f"[!] Director v2 made no decision for clip #{clip_index}: {review.failure}")
+    if not review.usable:
+        try:
+            _record_director_review(run_id, state_store, clip_index, review)
+        except Exception:
+            pass
+        return framing, review
+
+    print(
+        f"[+] Director v2 issued {len(review.directives)} shot directive(s) "
+        f"for clip #{clip_index} (model: {review.model or 'unknown'})."
+    )
+    for line in review.audit:
+        print(f"      parse: {line}")
+
+    new_framing, framing_audit = apply_shot_directives(framing, review.directives)
+    for line in framing_audit:
+        print(f"      apply: {line}")
+
+    if artifacts is not None:
+        new_plan, caption_audit = apply_caption_directives(
+            artifacts.composition_plan, review.directives
+        )
+        if caption_audit:
+            artifacts.composition_plan = new_plan
+            artifacts.caption_placements = build_caption_placements(new_plan)
+            for line in caption_audit:
+                print(f"      captions: {line}")
+
+    review.audit.extend(framing_audit)
+    try:
+        _record_director_review(run_id, state_store, clip_index, review)
+    except Exception as record_error:
+        print(f"[!] Director v2 decision log not saved for clip #{clip_index}: {record_error}")
+    return new_framing, review
+
+
+def _record_director_review(
+    run_id: str,
+    state_store: RunStateStore,
+    clip_index: int,
+    review: DirectorReview,
+) -> Path:
+    """Persist the director's decision so a human can audit what it chose."""
+    directory = DATA_DIR / "runs" / run_id
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"clip_{clip_index}_director_v2.json"
+    path.write_text(
+        json.dumps(review.to_dict(), indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    state_store.record_artifact(run_id, f"clip_{clip_index}_director_v2", path)
+    if review.contact_sheet_path is not None and review.contact_sheet_path.exists():
+        state_store.record_artifact(
+            run_id, f"clip_{clip_index}_contact_sheet", review.contact_sheet_path
+        )
+    return path
+
+
+def _evaluate_universal_qa(
     run_id: str,
     state_store: RunStateStore,
     clip_index: int,
     rendered_path: Path,
     artifacts: Optional[ClipEditorArtifacts],
     clip_duration: float,
-) -> bool:
+) -> Tuple[bool, List[str]]:
+    """Run editorial QA and return (enforced_pass, issue_codes)."""
     if artifacts is None:
-        return True
+        return True, []
     qa_report = run_editorial_qa(
         path=rendered_path,
         edit_plan=artifacts.edit_plan,
@@ -184,15 +295,70 @@ def _run_universal_qa(
     qa_path = DATA_DIR / "runs" / run_id / f"clip_{clip_index}_qa_report.json"
     save_qa_report(qa_report, qa_path)
     state_store.record_artifact(run_id, f"clip_{clip_index}_qa_report", qa_path)
-    if UNIVERSAL_EDITOR_ENFORCE_QA and not qa_report.passed:
-        issue_codes = [issue.code for issue in qa_report.issues]
-        print(f"[-] Editorial QA blocked clip #{clip_index}: {issue_codes}")
-        return False
-    print(f"[+] Editorial QA report for clip #{clip_index}: passed={qa_report.passed}")
+    # Only error/fatal issues block publishing. Printing every code under
+    # "blocked" previously hid which issue actually stopped the run.
+    blocking_codes = [issue.code for issue in qa_report.issues if issue.blocks_publish]
     warning_codes = [issue.code for issue in qa_report.issues if not issue.blocks_publish]
+    if UNIVERSAL_EDITOR_ENFORCE_QA and not qa_report.passed:
+        print(f"[-] Editorial QA blocked clip #{clip_index}: {blocking_codes}")
+        for issue in qa_report.issues:
+            if issue.blocks_publish:
+                location = ""
+                if issue.start is not None or issue.end is not None:
+                    location = f" at {issue.start:.2f}-{issue.end:.2f}s"
+                print(f"      - {issue.code}{location}: {issue.message}")
+        if warning_codes:
+            print(f"    (non-blocking warnings: {warning_codes})")
+        return False, blocking_codes
+    print(f"[+] Editorial QA report for clip #{clip_index}: passed={qa_report.passed}")
     if warning_codes:
         print(f"[!] Editorial QA warnings for clip #{clip_index}: {warning_codes}")
-    return True
+    return True, []
+
+
+def _run_universal_qa(
+    run_id: str,
+    state_store: RunStateStore,
+    clip_index: int,
+    rendered_path: Path,
+    artifacts: Optional[ClipEditorArtifacts],
+    clip_duration: float,
+) -> bool:
+    passed, _codes = _evaluate_universal_qa(
+        run_id=run_id,
+        state_store=state_store,
+        clip_index=clip_index,
+        rendered_path=rendered_path,
+        artifacts=artifacts,
+        clip_duration=clip_duration,
+    )
+    return passed
+
+
+def _render_clip_with_repair(
+    render_fn: Any,
+    qa_fn: Any,
+    clip_index: int,
+) -> Tuple[Optional[Path], Any]:
+    """
+    Render a clip, and on a QA veto escalate the render instead of discarding it.
+
+    render_fn(adjustment) -> Path
+    qa_fn(path) -> (passed, issue_codes)
+    """
+    outcome = render_with_repair(render_fn, qa_fn)
+    if outcome.succeeded and outcome.result is not None:
+        if outcome.attempts > 1:
+            print(
+                f"[+] Clip #{clip_index} passed QA after {outcome.attempts} renders "
+                f"(adjustment: {outcome.adjustment.to_dict()})"
+            )
+        return Path(str(outcome.result)), outcome
+    print(
+        f"[-] Clip #{clip_index} failed QA after {outcome.attempts} render(s): "
+        f"{outcome.final_codes}"
+    )
+    return None, outcome
 
 
 def run_pipeline(
@@ -385,6 +551,17 @@ def run_pipeline(
                     clip_segments = aligned_segments
                 except Exception as alignment_error:
                     print(f"[!] Local caption alignment unavailable for clip #{idx}: {alignment_error}")
+                framing, _director_review = _apply_director_v2(
+                    run_id=run_id,
+                    state_store=state_store,
+                    clip_index=idx,
+                    video_path=Path(clip_path),
+                    segments=clip_segments,
+                    clip_start=moment.start_time,
+                    clip_end=moment.end_time,
+                    framing=framing,
+                    artifacts=editor_artifacts,
+                )
                 ass_path = SUBTITLES_DIR / f"clip_{idx}_{subtitle_style}.ass"
                 create_styled_ass_subtitles(
                     segments=clip_segments,
@@ -396,6 +573,7 @@ def run_pipeline(
                     header_title=moment.title,
                     watermark=watermark,
                     shots=framing.shots,
+                    caption_placements=getattr(editor_artifacts, "caption_placements", None),
                     keyword_emojis=getattr(moment, "keyword_emojis", None)
                 )
 
@@ -434,30 +612,63 @@ def run_pipeline(
                     broll_cues = find_broll_cues_for_clip(clip_words, clip_duration=clip_duration)
 
             try:
-                rendered_path = render_viral_clip(
-                    source_video_path=clip_path,
-                    start_time=render_start,
-                    end_time=render_end,
-                    output_clip_path=out_clip_path,
-                    framing=framing,
-                    peak_intensity_segments=getattr(moment, "peak_intensity_segments", []),
-                    ass_subtitle_path=ass_path,
-                    burn_subtitles=burn_subtitles,
-                    sfx_cues=getattr(moment, "sfx_cues", []),
-                    broll_cues=broll_cues,
-                    cover_image_path=thumb_path
-                )
-                if not _run_universal_qa(
-                    run_id=run_id,
-                    state_store=state_store,
+                def _render_attempt(adjustment: Any) -> Path:
+                    # A repair attempt re-derives caption placements with
+                    # collision avoidance when QA reported an overlap.
+                    placements = getattr(editor_artifacts, "caption_placements", None)
+                    if adjustment.avoid_caption_collisions and editor_artifacts is not None:
+                        placements = build_caption_placements(
+                            editor_artifacts.composition_plan,
+                            avoid_collisions=True,
+                        )
+                    if placements is not None and burn_subtitles and ass_path is not None and ass_path.exists():
+                        create_styled_ass_subtitles(
+                            segments=clip_segments,
+                            clip_start=moment.start_time,
+                            clip_end=moment.end_time,
+                            output_ass_path=ass_path,
+                            theme_key=subtitle_style,
+                            layout_mode=framing.mode,
+                            header_title=moment.title,
+                            watermark=watermark,
+                            shots=framing.shots,
+                            caption_placements=placements,
+                            keyword_emojis=getattr(moment, "keyword_emojis", None),
+                        )
+                    return render_viral_clip(
+                        source_video_path=clip_path,
+                        start_time=render_start,
+                        end_time=render_end,
+                        output_clip_path=out_clip_path,
+                        framing=framing,
+                        peak_intensity_segments=getattr(moment, "peak_intensity_segments", []),
+                        ass_subtitle_path=ass_path,
+                        burn_subtitles=burn_subtitles,
+                        sfx_cues=getattr(moment, "sfx_cues", []),
+                        broll_cues=broll_cues,
+                        cover_image_path=thumb_path,
+                        motion_gain=adjustment.motion_gain,
+                    )
+
+                def _qa_attempt(path: Path) -> Tuple[bool, List[str]]:
+                    return _evaluate_universal_qa(
+                        run_id=run_id,
+                        state_store=state_store,
+                        clip_index=idx,
+                        rendered_path=path,
+                        artifacts=editor_artifacts,
+                        clip_duration=clip_duration,
+                    )
+
+                rendered_path, _repair_outcome = _render_clip_with_repair(
+                    render_fn=_render_attempt,
+                    qa_fn=_qa_attempt,
                     clip_index=idx,
-                    rendered_path=Path(rendered_path),
-                    artifacts=editor_artifacts,
-                    clip_duration=clip_duration,
-                ):
+                )
+                if rendered_path is None:
                     continue
                 rendered_clips.append({
-                    "path": rendered_path,
+                    "path": str(rendered_path),
                     "thumbnail": thumb_path,
                     "moment": moment
                 })
@@ -547,6 +758,17 @@ def run_pipeline(
                                 else:
                                     framing = _manual_framing(clip_path, framing_mode)
                                 _print_framing_summary(framing)
+                                framing, _director_review = _apply_director_v2(
+                                    run_id=run_id,
+                                    state_store=state_store,
+                                    clip_index=idx,
+                                    video_path=Path(clip_path),
+                                    segments=segments,
+                                    clip_start=moment.start_time,
+                                    clip_end=moment.end_time,
+                                    framing=framing,
+                                    artifacts=editor_artifacts,
+                                )
                                 ass_path = SUBTITLES_DIR / f"probe_clip_{idx}.ass"
                                 burn_subtitles = subtitles_mode != "skip"
                                 if burn_subtitles:
@@ -560,6 +782,7 @@ def run_pipeline(
                                         header_title=moment.title,
                                         watermark=watermark,
                                         shots=framing.shots,
+                                        caption_placements=getattr(editor_artifacts, "caption_placements", None),
                                         keyword_emojis=getattr(moment, "keyword_emojis", None)
                                     )
                                 safe_title = "".join(c for c in moment.title if c.isalnum() or c in (" ", "_", "-")).rstrip()
@@ -580,28 +803,65 @@ def run_pipeline(
                                 except Exception as te:
                                     print(f"[!] Thumbnail generation notice for probe clip #{idx}: {te}")
 
-                                rendered_path = render_viral_clip(
-                                    source_video_path=clip_path,
-                                    start_time=render_start,
-                                    end_time=render_end,
-                                    output_clip_path=out_clip_path,
-                                    framing=framing,
-                                    peak_intensity_segments=getattr(moment, "peak_intensity_segments", []),
-                                    ass_subtitle_path=ass_path,
-                                    burn_subtitles=burn_subtitles,
-                                    sfx_cues=getattr(moment, "sfx_cues", []),
-                                    cover_image_path=thumb_path
-                                )
-                                if not _run_universal_qa(
-                                    run_id=run_id,
-                                    state_store=state_store,
+                                def _render_attempt(adjustment: Any) -> Path:
+                                    placements = getattr(editor_artifacts, "caption_placements", None)
+                                    if adjustment.avoid_caption_collisions and editor_artifacts is not None:
+                                        placements = build_caption_placements(
+                                            editor_artifacts.composition_plan,
+                                            avoid_collisions=True,
+                                        )
+                                    if (
+                                        placements is not None
+                                        and burn_subtitles
+                                        and ass_path is not None
+                                        and ass_path.exists()
+                                        and segments is not None
+                                    ):
+                                        create_styled_ass_subtitles(
+                                            segments=segments,
+                                            clip_start=moment.start_time,
+                                            clip_end=moment.end_time,
+                                            output_ass_path=ass_path,
+                                            theme_key=subtitle_style,
+                                            layout_mode=framing.mode,
+                                            header_title=moment.title,
+                                            watermark=watermark,
+                                            shots=framing.shots,
+                                            caption_placements=placements,
+                                            keyword_emojis=getattr(moment, "keyword_emojis", None),
+                                        )
+                                    return render_viral_clip(
+                                        source_video_path=clip_path,
+                                        start_time=render_start,
+                                        end_time=render_end,
+                                        output_clip_path=out_clip_path,
+                                        framing=framing,
+                                        peak_intensity_segments=getattr(moment, "peak_intensity_segments", []),
+                                        ass_subtitle_path=ass_path,
+                                        burn_subtitles=burn_subtitles,
+                                        sfx_cues=getattr(moment, "sfx_cues", []),
+                                        cover_image_path=thumb_path,
+                                        motion_gain=adjustment.motion_gain,
+                                    )
+
+                                def _qa_attempt(path: Path) -> Tuple[bool, List[str]]:
+                                    return _evaluate_universal_qa(
+                                        run_id=run_id,
+                                        state_store=state_store,
+                                        clip_index=idx,
+                                        rendered_path=path,
+                                        artifacts=editor_artifacts,
+                                        clip_duration=render_end - render_start,
+                                    )
+
+                                rendered_path, _repair_outcome = _render_clip_with_repair(
+                                    render_fn=_render_attempt,
+                                    qa_fn=_qa_attempt,
                                     clip_index=idx,
-                                    rendered_path=Path(rendered_path),
-                                    artifacts=editor_artifacts,
-                                    clip_duration=render_end - render_start,
-                                ):
+                                )
+                                if rendered_path is None:
                                     continue
-                                rendered_clips.append({"path": rendered_path, "thumbnail": thumb_path, "moment": moment})
+                                rendered_clips.append({"path": str(rendered_path), "thumbnail": thumb_path, "moment": moment})
                             except Exception as e:
                                 print(f"[-] Probe clip #{idx} failed: {e}")
                                 continue
@@ -696,6 +956,17 @@ def run_pipeline(
                         source_window=(moment.start_time, moment.end_time),
                     )
                     burn_subtitles = subtitles_mode in ("auto", "burn")
+                    framing, _director_review = _apply_director_v2(
+                        run_id=run_id,
+                        state_store=state_store,
+                        clip_index=idx,
+                        video_path=Path(video_path),
+                        segments=segments,
+                        clip_start=moment.start_time,
+                        clip_end=moment.end_time,
+                        framing=framing,
+                        artifacts=editor_artifacts,
+                    )
                     ass_path = None
                     if burn_subtitles:
                         ass_path = SUBTITLES_DIR / f"clip_{idx}_{subtitle_style}.ass"
@@ -709,6 +980,7 @@ def run_pipeline(
                             header_title=moment.title,
                             watermark=watermark,
                             shots=framing.shots,
+                            caption_placements=getattr(editor_artifacts, "caption_placements", None),
                             keyword_emojis=getattr(moment, "keyword_emojis", None)
                         )
 
@@ -730,28 +1002,59 @@ def run_pipeline(
                     except Exception as te:
                         print(f"[!] Thumbnail generation notice for clip #{idx}: {te}")
 
-                    rendered_path = render_viral_clip(
-                        source_video_path=video_path,
-                        start_time=moment.start_time,
-                        end_time=moment.end_time,
-                        output_clip_path=out_clip_path,
-                        framing=framing,
-                        peak_intensity_segments=getattr(moment, "peak_intensity_segments", []),
-                        ass_subtitle_path=ass_path,
-                        burn_subtitles=burn_subtitles,
-                        sfx_cues=getattr(moment, "sfx_cues", []),
-                        cover_image_path=thumb_path
-                    )
-                    if not _run_universal_qa(
-                        run_id=run_id,
-                        state_store=state_store,
+                    def _render_attempt(adjustment: Any) -> Path:
+                        placements = getattr(editor_artifacts, "caption_placements", None)
+                        if adjustment.avoid_caption_collisions and editor_artifacts is not None:
+                            placements = build_caption_placements(
+                                editor_artifacts.composition_plan,
+                                avoid_collisions=True,
+                            )
+                        if placements is not None and burn_subtitles and ass_path is not None and ass_path.exists():
+                            create_styled_ass_subtitles(
+                                segments=segments,
+                                clip_start=moment.start_time,
+                                clip_end=moment.end_time,
+                                output_ass_path=ass_path,
+                                theme_key=subtitle_style,
+                                layout_mode=framing.mode,
+                                header_title=moment.title,
+                                watermark=watermark,
+                                shots=framing.shots,
+                                caption_placements=placements,
+                                keyword_emojis=getattr(moment, "keyword_emojis", None),
+                            )
+                        return render_viral_clip(
+                            source_video_path=video_path,
+                            start_time=moment.start_time,
+                            end_time=moment.end_time,
+                            output_clip_path=out_clip_path,
+                            framing=framing,
+                            peak_intensity_segments=getattr(moment, "peak_intensity_segments", []),
+                            ass_subtitle_path=ass_path,
+                            burn_subtitles=burn_subtitles,
+                            sfx_cues=getattr(moment, "sfx_cues", []),
+                            cover_image_path=thumb_path,
+                            motion_gain=adjustment.motion_gain,
+                        )
+
+                    def _qa_attempt(path: Path) -> Tuple[bool, List[str]]:
+                        return _evaluate_universal_qa(
+                            run_id=run_id,
+                            state_store=state_store,
+                            clip_index=idx,
+                            rendered_path=path,
+                            artifacts=editor_artifacts,
+                            clip_duration=moment.end_time - moment.start_time,
+                        )
+
+                    rendered_path, _repair_outcome = _render_clip_with_repair(
+                        render_fn=_render_attempt,
+                        qa_fn=_qa_attempt,
                         clip_index=idx,
-                        rendered_path=Path(rendered_path),
-                        artifacts=editor_artifacts,
-                        clip_duration=moment.end_time - moment.start_time,
-                    ):
+                    )
+                    if rendered_path is None:
                         continue
-                    rendered_clips.append({"path": rendered_path, "thumbnail": thumb_path, "moment": moment})
+                    rendered_clips.append({"path": str(rendered_path), "thumbnail": thumb_path, "moment": moment})
                 except Exception as e:
                     print(f"[-] Full-download clip #{idx} failed: {e}")
                     continue

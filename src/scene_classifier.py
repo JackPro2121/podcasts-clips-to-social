@@ -221,64 +221,31 @@ def detect_clip_shots(
 ) -> List[Tuple[float, float]]:
     """
     Splits video segment [start_sec, end_sec] into discrete camera cuts / shot intervals.
-    Uses PySceneDetect with AdaptiveDetector.
-    Gracefully falls back to full segment if no scene cuts found or if scenedetect is unavailable.
-    Merges any micro-glitches shorter than min_shot_duration (0.4s handles sub-second podcast reaction cuts).
+
+    Delegates to `src.shot_detection.detect_shot_boundaries`, which prefers
+    TransNetV2 and falls back to PySceneDetect's AdaptiveDetector. The fallback
+    is the historical behaviour, unchanged, and both paths share the same
+    boundary normalisation so they cannot drift apart.
+
+    Gracefully falls back to a single full segment if no scene cuts are found or
+    if no detector is available. Shots shorter than min_shot_duration are merged
+    into their predecessor rather than dropped, so the shots always partition
+    the requested window.
     """
-    duration = max(0.1, end_sec - start_sec)
-    default_shot = [(round(start_sec, 2), round(end_sec, 2))]
-    
+    from src.shot_detection import detect_shot_boundaries
+
     try:
-        from scenedetect import open_video, SceneManager, AdaptiveDetector, FrameTimecode
-        video = open_video(str(video_path))
-        fps = video.frame_rate
-        if not fps or fps <= 0:
-            return default_shot
-            
-        start_tc = FrameTimecode(timecode=start_sec, fps=fps)
-        dur_tc = FrameTimecode(timecode=duration, fps=fps)
-        
-        video.seek(start_tc)
-        sm = SceneManager()
-        # Adaptive threshold 2.5 & min_scene_len 0.4s to reliably catch quick reaction cuts
-        sm.add_detector(AdaptiveDetector(adaptive_threshold=2.5, min_scene_len=max(2, int(fps * min_shot_duration))))
-        sm.detect_scenes(video, frame_skip=2, duration=dur_tc)
-        scene_list = sm.get_scene_list()
-        
-        if not scene_list:
-            return default_shot
-            
-        raw_shots = []
-        for s in scene_list:
-            s_start = max(start_sec, float(s[0].seconds))
-            s_end = min(end_sec, float(s[1].seconds))
-            if s_end - s_start > 0.1:
-                raw_shots.append((round(s_start, 2), round(s_end, 2)))
-                
-        if not raw_shots:
-            return default_shot
-            
-        # Ensure beginning and ending bounds align
-        if raw_shots[0][0] > start_sec:
-            raw_shots[0] = (round(start_sec, 2), raw_shots[0][1])
-        if raw_shots[-1][1] < end_sec:
-            raw_shots[-1] = (raw_shots[-1][0], round(end_sec, 2))
-            
-        # Filter and merge shots that are too short (< min_shot_duration)
-        merged_shots: List[Tuple[float, float]] = []
-        for s_start, s_end in raw_shots:
-            if not merged_shots:
-                merged_shots.append((s_start, s_end))
-            elif (s_end - s_start) < min_shot_duration:
-                # Merge into preceding shot
-                prev_start, _ = merged_shots[-1]
-                merged_shots[-1] = (prev_start, s_end)
-            else:
-                merged_shots.append((s_start, s_end))
-                
-        return merged_shots if merged_shots else default_shot
-        
-    except Exception as e:
-        print(f"[-] Scene detection fallback (error: {e}). Using monolithic segment.")
-        return default_shot
+        result = detect_shot_boundaries(
+            video_path, start_sec, end_sec, min_shot_duration
+        )
+    except Exception as error:
+        print(f"[-] Shot boundary detection failed ({error}). Using monolithic segment.")
+        return [(round(start_sec, 2), round(end_sec, 2))]
+
+    if result.source == "transnetv2":
+        print(
+            f"[+] TransNetV2 found {result.transition_count} cut(s) "
+            f"(mean confidence {result.mean_confidence:.2f})."
+        )
+    return result.shots or [(round(start_sec, 2), round(end_sec, 2))]
 

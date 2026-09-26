@@ -64,6 +64,30 @@ APIFY_TRANSCRIPT_ACTOR_ID = os.getenv(
 CLIP_ONLY_MODE = os.getenv("CLIP_ONLY_MODE", "true").lower() in ("true", "1", "yes")
 MAX_DISCOVERY_CANDIDATES = max(1, int(os.getenv("MAX_DISCOVERY_CANDIDATES", "12")))
 MAX_TRANSCRIPT_FALLBACKS = max(1, int(os.getenv("MAX_TRANSCRIPT_FALLBACKS", "3")))
+
+# Clip length gates. The documented short-form sweet spot is 30-60s, but the
+# detector historically accepted up to 140s so it can still return *something*
+# when a transcript has no 30-60s window with a complete thought. Widening these
+# bounds risks the "no clips were rendered" failure, so they are env-tunable and
+# a clip longer than SHORT_FORM_MAX_DURATION is reported as a plan warning
+# instead of being silently accepted.
+MIN_CLIP_DURATION = float(os.getenv("MIN_CLIP_DURATION", "30"))
+MAX_CLIP_DURATION = float(os.getenv("MAX_CLIP_DURATION", "140"))
+SHORT_FORM_MAX_DURATION = float(os.getenv("SHORT_FORM_MAX_DURATION", "60"))
+if MAX_CLIP_DURATION < MIN_CLIP_DURATION:
+    MAX_CLIP_DURATION = MIN_CLIP_DURATION
+# Gemini model ladder. Ordered strongest-first; query_gemini_models walks the
+# ladder and rotates on 429/503 so a busy or deprecating model never fails a run.
+# Override with GEMINI_MODEL_LADDER="gemini-3.8-flash,gemini-3.5-flash-lite".
+GEMINI_MODEL_LADDER = [
+    model.strip()
+    for model in (
+        os.getenv("GEMINI_MODEL_LADDER")
+        or "gemini-3.8-flash,gemini-3.7-flash,gemini-3.6-flash,gemini-3.5-flash-lite,"
+           "gemini-3.1-flash-lite,gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flash"
+    ).split(",")
+    if model.strip()
+]
 GROQ_API_KEY = (
     os.getenv("GROQ_API_KEY") or
     os.getenv("groq_api_key") or
@@ -134,6 +158,63 @@ ENABLE_DYNAMIC_DUCKING = os.getenv("ENABLE_DYNAMIC_DUCKING", "true").lower() in 
 ENABLE_FILM_GRAIN = os.getenv("ENABLE_FILM_GRAIN", "true").lower() in ("true", "1", "yes")  # Breaks visual pHash
 UNIVERSAL_EDITOR_SHADOW = os.getenv("UNIVERSAL_EDITOR_SHADOW", "true").lower() in ("true", "1", "yes")
 UNIVERSAL_EDITOR_ENFORCE_QA = os.getenv("UNIVERSAL_EDITOR_ENFORCE_QA", "false").lower() in ("true", "1", "yes")
+
+# Director v2: lets a multimodal model choose per-shot layouts from a contact
+# sheet, and executes those choices in the renderer. This is the first feature
+# that gives the director authority over pixels rather than only over a veto.
+#
+# Ships OFF by default on purpose. A wrong layout choice is visible in the
+# output, whereas a wrong *window* choice is invisible until someone watches the
+# clip, so this needs to be switched on deliberately and reviewed before it is
+# trusted in CI. With it off, every path behaves exactly as before.
+DIRECTOR_V2_ENABLED = os.getenv("DIRECTOR_V2_ENABLED", "false").lower() in ("true", "1", "yes")
+DIRECTOR_V2_TILES = max(4, int(os.getenv("DIRECTOR_V2_TILES", "12")))
+
+# Text-region detection tier: auto | ocr | edge.
+# "auto" uses OCR if the package is importable, otherwise the edge heuristic.
+# "edge" pins the original pre-OCR behaviour for A/B runs; "ocr" asks for OCR
+# explicitly and says so loudly on stderr if it cannot be loaded, so a broken
+# setup never degrades silently.
+#
+# There is deliberately no "mser" option. A zero-dependency MSER tier was built
+# and measured first, and rejected: it silently misses glyphs (see the module
+# docstring in src/text_detection.py for the numbers).
+TEXT_DETECTOR = os.getenv("TEXT_DETECTOR", "auto").strip().lower()
+
+# RapidOCR reports confidence per glyph. Below this, a detection is treated as
+# noise; 0.5 keeps decorative marks out of the protected regions without
+# discarding genuinely soft text over a busy background.
+OCR_CONFIDENCE_MIN = float(os.getenv("OCR_CONFIDENCE_MIN", "0.5"))
+
+# Bound on regions kept per frame. The composition planner turns every region
+# into a protected rect, and an unbounded list makes the caption collision check
+# fire on everything, which is worse than not detecting text at all.
+OCR_MAX_REGIONS_PER_FRAME = max(1, int(os.getenv("OCR_MAX_REGIONS_PER_FRAME", "12")))
+
+# Shot boundary detection: auto | transnet | scenedetect.
+# "auto" uses TransNetV2 when its ONNX weights are present at TRANSNET_MODEL_PATH
+# and onnxruntime (or OpenCV DNN) can load them, otherwise PySceneDetect.
+# PySceneDetect's AdaptiveDetector misses hard cuts on low-motion content, which
+# is the common case for a talking-head podcast, so TransNetV2 is the better
+# detector when available -- but it is not required, and nothing changes until
+# the weights are supplied.
+SHOT_DETECTOR = os.getenv("SHOT_DETECTOR", "auto").strip().lower()
+
+# Weights are NEVER downloaded: there is no verified canonical URL for a
+# TransNetV2 ONNX export, and this project does not invent URLs. Export from the
+# soCzech/TransNetV2 reference implementation and drop the file here.
+TRANSNET_MODEL_PATH = os.getenv(
+    "TRANSNET_MODEL_PATH", str(Path(__file__).resolve().parent / "models" / "transnetv2.onnx")
+)
+
+# Minimum per-frame transition probability to accept a cut. TransNetV2 is
+# trained on broadcast material and is over-eager on slow pans, so the default
+# sits above the model's own 0.5 argmax.
+TRANSNET_MIN_CUT_CONFIDENCE = float(os.getenv("TRANSNET_MIN_CUT_CONFIDENCE", "0.6"))
+
+# Frames per inference window. The reference model is trained on 100-frame
+# windows; windows overlap by half so a boundary near an edge is seen whole.
+TRANSNET_WINDOW = max(16, int(os.getenv("TRANSNET_WINDOW", "100")))
 
 # Video & Format Defaults (Ultra HD 60FPS Broadcast Studio)
 IS_CI = os.getenv("GITHUB_ACTIONS", "false").lower() == "true"

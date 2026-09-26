@@ -41,6 +41,11 @@ class ShotPlan:
     margin_v: int = 460
     subtitle_placement: str = "lower_third"
     subtitle_alignment: int = 2
+    # Per-shot camera move. 'drift' is the motion guarantee; 'push_in'/'pull_out'
+    # add an animated zoompan ramp on top of it; 'hold' requests neither (the
+    # drift still applies, because a hold is a preference, not a licence to
+    # freeze). Set by the director via apply_shot_directives.
+    motion: str = "drift"
 
 @dataclass
 class FramingDecision:
@@ -408,6 +413,44 @@ def _is_visual_layout_scene(scene_info: dict) -> bool:
     return bool(scene_info.get("is_presentation") or scene_info.get("has_slide_layout"))
 
 
+# A picture-in-picture host inset must be a small face. Anything larger than this
+# share of the frame is a real co-presenter, not a camera inset, so the existing
+# split-screen and portrait_face layouts keep their behaviour.
+PIP_MAX_HOST_AREA_RATIO = 0.12
+# The host face must persist across most of the shot; a face seen in only one
+# sampled frame is a transition artefact, not a camera inset.
+PIP_MIN_PERSISTENCE = 0.5
+
+
+def _picture_in_picture_host_box(
+    face_samples: List[List["FaceBox"]],
+) -> Optional[Tuple[int, int, int, int]]:
+    """
+    Return a stable (x, y, w, h) host inset box for a slide-with-camera shot.
+
+    Takes the median box across the frames that hold exactly one face, so a
+    single noisy detection cannot move the inset. Returns None when no face
+    persists, when several faces are present, or when the face is implausibly
+    small -- all of which keep the caller on the pre-existing layouts.
+    """
+    if not face_samples:
+        return None
+    single = [faces for faces in face_samples if faces and len(faces) == 1]
+    if not single:
+        return None
+    if len(single) < PIP_MIN_PERSISTENCE * len(face_samples):
+        return None
+    boxes = [(int(f[0].x), int(f[0].y), int(f[0].w), int(f[0].h)) for f in single]
+    median = []
+    for index in range(4):
+        values = sorted(box[index] for box in boxes)
+        median.append(values[len(values) // 2])
+    x, y, w, h = median
+    if w <= 8 or h <= 8:
+        return None
+    return (x, y, w, h)
+
+
 def _frame_window(start_time: float, end_time: float, fps: float) -> Tuple[int, int]:
     safe_fps = max(1.0, float(fps))
     start_frame = max(0, int(math.ceil(start_time * safe_fps)))
@@ -514,7 +557,7 @@ def analyze_faces_in_clip(
     all_cx = [f.center_x for s in timeline_samples for f in s[1] if active_x <= f.center_x <= active_x + active_w]
     global_anchor_cx = int(np.median(all_cx)) if all_cx else (active_x + active_w // 2)
 
-    def is_valid_two_speaker_frame(face_pair: List[FaceBox]) -> bool:
+    def _is_two_speaker_frame(face_pair: List[FaceBox]) -> bool:
         if len(face_pair) != 2:
             return False
         f1, f2 = face_pair[0], face_pair[1]
@@ -554,20 +597,42 @@ def analyze_faces_in_clip(
         pres_ratio = pres_count / max(1, len(shot_samples))
 
         valid_face_samples = [s[1] for s in shot_samples if s[1]]
-        two_speaker_samples = [f for f in valid_face_samples if is_valid_two_speaker_frame(f)]
+        two_speaker_samples = [f for f in valid_face_samples if _is_two_speaker_frame(f)]
+
+        # A slide with the host still on screen (screen-share with a camera inset)
+        # is the single most common podcast visual. Detect the small persistent
+        # host face and keep it as a picture-in-picture inset instead of throwing
+        # the face away and rendering a bare slide.
+        pip_host_box = _picture_in_picture_host_box(valid_face_samples)
+        pip_eligible = pip_host_box is not None and (pip_host_box[2] * pip_host_box[3]) < (
+            active_w * active_h * PIP_MAX_HOST_AREA_RATIO
+        )
 
         # 1. Verified Presentation Slide (strictly requiring visual confirmation, not just lack of frontal faces)
         if pres_ratio >= 0.50:
-            shot_plans.append(ShotPlan(
-                start=rel_s,
-                end=rel_e,
-                mode='presentation_slide',
-                crop_x=active_x,
-                crop_y=active_y,
-                crop_w=active_w,
-                crop_h=active_h,
-                margin_v=400
-            ))
+            if pip_eligible:
+                shot_plans.append(ShotPlan(
+                    start=rel_s,
+                    end=rel_e,
+                    mode='pip_slide',
+                    crop_x=active_x,
+                    crop_y=active_y,
+                    crop_w=active_w,
+                    crop_h=active_h,
+                    speaker1_box=pip_host_box,
+                    margin_v=400
+                ))
+            else:
+                shot_plans.append(ShotPlan(
+                    start=rel_s,
+                    end=rel_e,
+                    mode='presentation_slide',
+                    crop_x=active_x,
+                    crop_y=active_y,
+                    crop_w=active_w,
+                    crop_h=active_h,
+                    margin_v=400
+                ))
         elif not valid_face_samples:
             shot_plans.append(ShotPlan(
                 start=rel_s,
@@ -754,7 +819,11 @@ def analyze_faces_in_clip(
         )
         for s in shot_plans
     )
-    if len(shot_plans) > 1 or has_dynamic_shot_data:
+    # A single picture-in-picture shot must still route through the per-shot
+    # renderer, otherwise it falls through to blur_stack and the host inset is
+    # silently discarded.
+    has_pip_shot = 'pip_slide' in modes
+    if len(shot_plans) > 1 or has_dynamic_shot_data or has_pip_shot:
         return FramingDecision(
             mode='multi_shot_dynamic',
             face_count=len(shot_plans),

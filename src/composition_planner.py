@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from src.edit_director import EditPlan
 from src.source_index import IndexedShot, SourceIndex, TextRegion
@@ -136,6 +136,110 @@ def _shot_crop(shot: IndexedShot) -> NormalizedRect:
 
 def _freeze_hold(shot: IndexedShot) -> float:
     return max((end - start for start, end in shot.freeze_intervals), default=0.0)
+
+
+@dataclass
+class CaptionPlacement:
+    """A concrete, pixel-based caption position resolved from a plan anchor.
+
+    The composition planner reasons in normalised coordinates so it can be tested
+    without a renderer, while ASS subtitles are positioned in output pixels. This
+    is the single conversion point, so the director's decision about *where*
+    text goes can actually reach the renderer.
+    """
+
+    start: float
+    end: float
+    anchor: str
+    shot_id: str
+    # ASS alignment codes: 2 = bottom-centre, 5 = middle-centre, 8 = top-centre
+    alignment: int
+    # Distance from the frame edge named by `alignment`, in output pixels.
+    margin_v: int
+    # True when the anchor exists to dodge source text rather than by preference.
+    collision_avoidance: bool
+
+    def to_dict(self) -> Dict[str, object]:
+        return asdict(self)
+
+
+def _anchor_to_ass(anchor: str, rect: NormalizedRect, width: int, height: int) -> Tuple[int, int, bool]:
+    """
+    Map a normalised caption anchor onto an ASS alignment and vertical margin.
+
+    Returns (alignment, margin_v, collision_avoidance).
+    """
+    # A bottom-anchored caption sits `margin_v` pixels up from the bottom edge,
+    # so the safe zone's bottom padding is the minimum legal value.
+    from_bottom_px = int(round((1.0 - (rect.y + rect.height)) * height))
+    from_top_px = int(round(rect.y * height))
+
+    if anchor == "upper_center":
+        # Explicitly chosen because the lower band is occupied by source text.
+        return 8, from_top_px, True
+    if anchor in ("center", "split_divider"):
+        return 5, from_top_px, False
+    if anchor in ("left_safe", "right_safe"):
+        # ASS cannot horizontally offset a centre-aligned line via margins, so
+        # these keep bottom-centre placement; the anchor still documents intent.
+        return 2, from_bottom_px, False
+    return 2, from_bottom_px, False
+
+
+def _force_collision_avoidance(
+    shot: ShotComposition,
+    rect: NormalizedRect,
+) -> Tuple[str, NormalizedRect]:
+    """
+    Relocate a caption that overlaps the shot's protected source text.
+
+    Used on a repair attempt: QA reported a caption_source_collision, so the
+    caption is moved out of the way rather than re-rendering the same overlapping
+    layout. Returns the anchor name alongside the rect so the reported anchor can
+    never disagree with the geometry that was actually used.
+    """
+    if not shot.protected_regions:
+        return shot.caption_anchor, rect
+    if not any(rect.intersects(region) for region in shot.protected_regions):
+        return shot.caption_anchor, rect
+    for candidate in ("upper_center", "center"):
+        alternative = _caption_rect(candidate, DEFAULT_SAFE_ZONE)
+        if not any(alternative.intersects(region) for region in shot.protected_regions):
+            return candidate, alternative
+    # Every safe band is blocked; keep the original so the QA error still reports.
+    return shot.caption_anchor, rect
+
+
+def build_caption_placements(
+    plan: CompositionPlan,
+    width: int = 1080,
+    height: int = 1920,
+    avoid_collisions: bool = False,
+) -> List[CaptionPlacement]:
+    """Resolve a CompositionPlan into time-ranged caption placements.
+
+    avoid_collisions relocates any caption that still overlaps a shot's protected
+    source text, which is the render-side remedy for a caption_source_collision
+    QA error.
+    """
+    placements: List[CaptionPlacement] = []
+    for shot in plan.shots:
+        anchor = shot.caption_anchor
+        rect = shot.caption_rect
+        if avoid_collisions:
+            anchor, rect = _force_collision_avoidance(shot, rect)
+        alignment, margin_v, avoidance = _anchor_to_ass(anchor, rect, width, height)
+        placements.append(CaptionPlacement(
+            start=shot.start,
+            end=shot.end,
+            anchor=anchor,
+            shot_id=shot.shot_id,
+            alignment=alignment,
+            margin_v=max(0, margin_v),
+            collision_avoidance=avoidance,
+        ))
+    placements.sort(key=lambda item: item.start)
+    return placements
 
 
 def build_composition_plan(

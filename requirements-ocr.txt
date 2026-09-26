@@ -1,0 +1,19 @@
+# Optional: real OCR for text-region detection (Phase 1b).
+#
+# NOT in requirements.txt on purpose. Two reasons:
+#   1. It pulls onnxruntime (~200 MB) plus its own model weights (~84 MB), and
+#      disk is the binding constraint on a 14 GB GitHub runner, not CPU.
+#   2. It could not be installed or executed on the machine this was written on,
+#      so it is unverified end to end.
+#
+# The code already handles both. With this absent, TEXT_DETECTOR=auto logs
+#   [*] RapidOCR not installed; text detection uses the edge heuristic.
+# and everything behaves exactly as it did before Phase 1b. To enable:
+#
+#   pip install -r requirements-ocr.txt        # locally
+#   # or add the line below to requirements.txt for CI
+#
+# Verify the tier actually engaged before trusting it:
+#   python -c "from src.text_detection import get_text_detector as g; print(g(force='ocr').name)"
+#
+rapidocr-onnxruntime>=1.3.0,<2.0.0

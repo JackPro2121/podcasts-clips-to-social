@@ -170,6 +170,121 @@ def _validate_rendered_output(path: Path, expected_duration: float) -> None:
         raise RuntimeError("Rendered output duration is outside the allowed tolerance")
 
 
+# A shot whose face timeline could not be resolved into a moving crop used to be
+# emitted as a fixed integer crop box. Over statically-held source content that
+# renders a literally frozen output, which editorial_qa correctly rejects as a
+# freeze_interval error. The presentation_slide branch already drifted; these
+# values were measured to clear freezedetect n=0.003 (0.765 mean-abs-diff) on both
+# a frozen synthetic frame and the real clip from CI run 36171365900.
+#
+# The wave is a triangle rather than a sine on purpose: a sine's velocity reaches
+# zero at every extremum, which reintroduced sub-threshold runs up to 0.53s. A
+# triangle holds a near-constant speed between its turning points, so the longest
+# sub-threshold run drops to ~0.07s -- below freezedetect's own d=0.5 report floor.
+_STATIC_SHOT_DRIFT_FREQ = 1.8
+_STATIC_SHOT_DRIFT_RATIO = 0.05
+# 2/pi scales a unit sine into a unit-amplitude triangle.
+_STATIC_SHOT_DRIFT_WAVE = "0.6366*asin(sin(t*{freq}))"
+
+# Picture-in-picture inset geometry for the host-over-slide layout.
+# Scaled off the output frame so it tracks OUTPUT_WIDTH/HEIGHT, and placed to
+# clear both the platform UI safe zone and the caption band.
+PIP_INSET_WIDTH = int(OUTPUT_WIDTH * 0.30)
+PIP_INSET_HEIGHT = int(PIP_INSET_WIDTH * 16 / 9) // 2 * 2
+PIP_INSET_X = OUTPUT_WIDTH - PIP_INSET_WIDTH - int(OUTPUT_WIDTH * 0.09)
+PIP_INSET_Y = int(OUTPUT_HEIGHT * 0.17)
+# Fraction of the active region the PiP canvas crop spans. Must stay below 1.0 so
+# the crop keeps positional slack and the motion guarantee still applies.
+PIP_SLIDE_CANVAS_RATIO = 0.94
+
+# Animated punch-zoom. `crop` and `scale` cannot animate width/height per frame
+# in this ffmpeg build, so zoompan is the only per-frame zoom tool available.
+# It is strictly additive: the drift below is what guarantees motion, and the
+# zoom rides on top of an already-moving frame, so a zoom plateau can never
+# reintroduce the frozen-output failure that Phase 0 fixed.
+PUNCH_ZOOM_AMOUNT = 0.12
+PUNCH_ZOOM_RAMP_FRAMES = 36
+
+
+def _punch_zoom_filter(motion: str, shot_frames: int) -> str:
+    """
+    zoompan chain for an animated punch-zoom, or "" when none is wanted.
+
+    `motion` is one of drift / push_in / pull_out / hold. The ramp is expressed
+    over the first PUNCH_ZOOM_RAMP_FRAMES output frames and then plateaus, which
+    is acceptable precisely because the crop drift underneath never stops.
+    """
+    if motion not in ("push_in", "pull_out"):
+        return ""
+    ramp = max(2, min(PUNCH_ZOOM_RAMP_FRAMES, max(2, int(shot_frames))))
+    if motion == "push_in":
+        zoom_expr = f"1+{PUNCH_ZOOM_AMOUNT}*min(1,on/{ramp})"
+    else:
+        zoom_expr = f"1+{PUNCH_ZOOM_AMOUNT}*(1-min(1,on/{ramp}))"
+    return (
+        f"zoompan=z='{zoom_expr}':"
+        f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+        f"d=1:s={OUTPUT_WIDTH}x{OUTPUT_HEIGHT}:fps={FPS},setsar=1:1"
+    )
+
+
+def _drift_axis_expr(
+    base: int,
+    low: int,
+    high: int,
+    extent: int = 0,
+    ratio: float = _STATIC_SHOT_DRIFT_RATIO,
+) -> Optional[str]:
+    """
+    Returns a per-frame crop offset keeping continuous motion inside [low, high].
+
+    Three properties are load-bearing:
+
+    1. The clamp must never bind. A bound clamp flattens part of the wave into a
+       static hold, which is exactly the freeze this guards against. So the
+       oscillation centre is placed far enough from both bounds that the full
+       amplitude fits between them.
+    2. The sweep is capped at `ratio * extent` of the crop dimension, so motion
+       reads as life rather than as a camera mistake.
+    3. A subject sitting against a frame edge still gets motion: the centre is
+       nudged inward by at most the cap, which is invisible next to the crop
+       width, rather than collapsing to zero amplitude.
+
+    Returns None only when the axis has no slack at all, letting the caller keep
+    the exact static integer it emitted before.
+    """
+    if high <= low or base < low or base > high or extent <= 0 or ratio <= 0:
+        return None
+    max_amp = int(extent * ratio)
+    if max_amp < 1:
+        return None
+    if high - low >= 2 * max_amp:
+        centre = min(max(base, low + max_amp), high - max_amp)
+    else:
+        centre = (low + high) // 2
+    amplitude = min(max_amp, centre - low, high - centre)
+    if amplitude < 1:
+        return None
+    wave = _STATIC_SHOT_DRIFT_WAVE.format(freq=_STATIC_SHOT_DRIFT_FREQ)
+    return f"max({low},min({centre}+{amplitude}*{wave},{high}))"
+
+
+def _effective_drift_ratio(motion_gain: float) -> float:
+    """Scale the drift ratio for a repair attempt, clamped to a sane sweep."""
+    try:
+        gain = float(motion_gain)
+    except (TypeError, ValueError):
+        return _STATIC_SHOT_DRIFT_RATIO
+    if not math.isfinite(gain) or gain <= 0:
+        return _STATIC_SHOT_DRIFT_RATIO
+    return min(0.20, _STATIC_SHOT_DRIFT_RATIO * gain)
+
+
+def _crop_position(position: int, expr: Optional[str]) -> str:
+    """Render a crop x/y argument, quoting only genuine ffmpeg expressions."""
+    return f"'{expr}'" if expr else str(position)
+
+
 def _clamp_crop_box(
     box: Tuple[int, int, int, int],
     frame_width: int,
@@ -190,7 +305,8 @@ def build_video_filtergraph(
     burn_subtitles: bool = True,
     broll_inputs: List[Tuple[int, float, float, float]] = [],
     cover_input_idx: Optional[int] = None,
-    cover_duration: float = 0.25
+    cover_duration: float = 0.25,
+    motion_gain: float = 1.0
 ) -> str:
     """
     Constructs the complete FFmpeg video filtergraph with professional upgrades:
@@ -209,15 +325,13 @@ def build_video_filtergraph(
         studio_grade += ",noise=alls=1.2:allf=t"
 
     # Dynamic Zoom Logic (1.2x zoom during peaks)
-    # We use the 'zoompan' filter. Since zoompan is complex, we apply it as a 
-    # pre-crop effect or a layered effect. For simplicity and stability in 
+    # We use the 'zoompan' filter. Since zoompan is complex, we apply it as a
+    # pre-crop effect or a layered effect. For simplicity and stability in
     # the $0 GH Action environment, we'll implement it via an expression in the crop filter
     # where possible, or a separate zoompan filter.
-    
 
-    if ENABLE_FILM_GRAIN:
-        studio_grade += ",noise=alls=1.2:allf=t"
-
+    # A repair attempt can ask for a stronger sweep when QA reports a freeze.
+    drift_ratio = _effective_drift_ratio(motion_gain)
     video_width = max(2, int(getattr(framing, "video_width", 1920)))
     video_height = max(2, int(getattr(framing, "video_height", 1080)))
     active_x = max(0, min(int(getattr(framing, "active_x", 0)), video_width - 2))
@@ -235,8 +349,58 @@ def build_video_filtergraph(
         for i, shot in enumerate(framing.shots):
             label = f"v_shot_{i}"
             shot_labels.append(f"[{label}]")
+            shot_frames = max(2, int(round((shot.end - shot.start) * FPS)))
+            punch = _punch_zoom_filter(str(getattr(shot, "motion", "drift")), shot_frames)
 
-            if shot.mode == "presentation_slide":
+            if shot.mode == "pip_slide" and shot.speaker1_box:
+                s_cx, s_cy, s_cw, s_ch = _clamp_crop_box(
+                    shot.speaker1_box, video_width, video_height
+                )
+                # Picture-in-picture: the slide owns the canvas (over a blurred
+                # fill so any aspect ratio survives) while the host stays visible
+                # in a corner inset. This is the most common podcast visual and
+                # the legacy layout enum had no way to express it.
+                #
+                # The canvas is cropped to PIP_SLIDE_CANVAS_RATIO of the active
+                # region rather than all of it: a crop spanning the entire region
+                # has zero slack on every axis, so no drift can be emitted and the
+                # slide renders frozen. The small inset-zoom is imperceptible on a
+                # slide and buys the slack the motion guarantee needs.
+                cw = max(2, int(active_w * PIP_SLIDE_CANVAS_RATIO))
+                ch = max(2, int(active_h * PIP_SLIDE_CANVAS_RATIO))
+                cw -= cw % 2
+                ch -= ch % 2
+                c_hi_x = active_x + active_w - cw
+                c_hi_y = active_y + active_h - ch
+                c_x = max(active_x, min(active_x + (active_w - cw) // 2, c_hi_x))
+                c_y = max(active_y, min(active_y + (active_h - ch) // 2, c_hi_y))
+                canvas_x = _crop_position(c_x, _drift_axis_expr(c_x, active_x, c_hi_x, cw, drift_ratio))
+                canvas_y = _crop_position(c_y, _drift_axis_expr(c_y, active_y, c_hi_y, ch, drift_ratio))
+                # The host inset has plenty of slack, so it drifts too. A small
+                # inset alone may not move enough pixels to clear the QA gate, so
+                # this is belt-and-braces behind the canvas drift.
+                h_hi_x = active_x + active_w - s_cw
+                h_hi_y = active_y + active_h - s_ch
+                h_x = _crop_position(s_cx, _drift_axis_expr(s_cx, active_x, h_hi_x, s_cw, drift_ratio))
+                h_y = _crop_position(s_cy, _drift_axis_expr(s_cy, active_y, h_hi_y, s_ch, drift_ratio))
+                shot_f = (
+                    f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,split=2[p{i}_c][p{i}_h];"
+                    f"[p{i}_c]crop={cw}:{ch}:{canvas_x}:{canvas_y},"
+                    f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
+                    f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},boxblur=30:5,"
+                    f"eq=brightness=-0.16:contrast=1.12[p{i}_blur];"
+                    f"[p{i}_c]crop={cw}:{ch}:{canvas_x}:{canvas_y},"
+                    f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=decrease[p{i}_slide];"
+                    f"[p{i}_blur][p{i}_slide]overlay=(W-w)/2:(H-h)/2,setsar=1:1,fps={FPS}[p{i}_canvas];"
+                    f"[p{i}_h]crop={s_cw}:{s_ch}:{h_x}:{h_y},"
+                    f"scale={PIP_INSET_WIDTH}:{PIP_INSET_HEIGHT}:"
+                    f"flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[p{i}_host];"
+                    f"[p{i}_canvas][p{i}_host]overlay={PIP_INSET_X}:{PIP_INSET_Y}:format=auto,"
+                    f"drawbox=x={PIP_INSET_X - 6}:y={PIP_INSET_Y - 6}:"
+                    f"w={PIP_INSET_WIDTH + 12}:h={PIP_INSET_HEIGHT + 12}:"
+                    f"color=white@0.85:t=6,setsar=1:1[{label}]"
+                )
+            elif shot.mode == "presentation_slide":
                 s_cx = active_x if getattr(shot, "crop_x", None) is None else shot.crop_x
                 s_cy = active_y if getattr(shot, "crop_y", None) is None else shot.crop_y
                 s_cw = active_w if getattr(shot, "crop_w", None) in (None, 0) else shot.crop_w
@@ -295,15 +459,17 @@ def build_video_filtergraph(
                         shot_f = (
                             f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,"
                             f"crop={eff_w}:{eff_h}:'{crop_x_expr}':{eff_y},"
-                            f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[{label}]"
+                            f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}{',' + punch if punch else ''}[{label}]"
                         )
                     else:
                         base_cx = shot.crop_x + target_crop_w // 2
                         eff_x = max(active_x, min(base_cx - eff_w // 2, active_x + active_w - eff_w))
                         shot_f = (
                             f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,"
-                            f"crop={eff_w}:{eff_h}:{eff_x}:{eff_y},"
-                            f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[{label}]"
+                            f"crop={eff_w}:{eff_h}:"
+                            f"{_crop_position(eff_x, _drift_axis_expr(eff_x, active_x, active_x + active_w - eff_w, eff_w, drift_ratio))}:"
+                            f"{_crop_position(eff_y, _drift_axis_expr(eff_y, active_y, active_y + active_h - eff_h, eff_h, drift_ratio))},"
+                            f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}{',' + punch if punch else ''}[{label}]"
                         )
                 else:
                     shot_dur = max(0.5, shot.end - shot.start)
@@ -316,14 +482,16 @@ def build_video_filtergraph(
                         shot_f = (
                             f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,"
                             f"crop={target_crop_w}:{s_ch}:'{crop_x_expr}':{s_cy},"
-                            f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[{label}]"
+                            f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}{',' + punch if punch else ''}[{label}]"
                         )
                     else:
                         crop_x = max(active_x, min(shot.crop_x, active_x + active_w - target_crop_w))
                         shot_f = (
                             f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,"
-                            f"crop={target_crop_w}:{s_ch}:{crop_x}:{s_cy},"
-                            f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[{label}]"
+                            f"crop={target_crop_w}:{s_ch}:"
+                            f"{_crop_position(crop_x, _drift_axis_expr(crop_x, active_x, active_x + active_w - target_crop_w, target_crop_w, drift_ratio))}:"
+                            f"{_crop_position(s_cy, _drift_axis_expr(s_cy, active_y, active_y + active_h - s_ch, s_ch, drift_ratio))},"
+                            f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}{',' + punch if punch else ''}[{label}]"
                         )
             shot_filters.append(shot_f)
 
@@ -465,7 +633,8 @@ def render_viral_clip(
     sfx_cues: List[Tuple[float, str]] = [],
     broll_cues: List[Tuple[float, float, Path, str]] = [],
     cover_image_path: Optional[Path] = None,
-    cover_duration: float = 0.25
+    cover_duration: float = 0.25,
+    motion_gain: float = 1.0
 ) -> Path:
     requested_duration = end_time - start_time
     if requested_duration <= 0:
@@ -515,7 +684,8 @@ def render_viral_clip(
         burn_subtitles=burn_subtitles,
         broll_inputs=broll_inputs,
         cover_input_idx=cover_input_idx,
-        cover_duration=cover_duration
+        cover_duration=cover_duration,
+        motion_gain=motion_gain,
     )
     try:
         probe_cmd = ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(source_video_path)]

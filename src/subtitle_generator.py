@@ -90,7 +90,6 @@ def generate_ass_header(
     shadow_col = theme["shadow_color"]
     shadow_d = min(float(theme["shadow_depth"]), 2.5)
 
-    alignment = 2
     margin_v = get_subtitle_margin_v(layout_mode)
 
     # Watermark MarginV: dynamically position @allinonepodcastsss right below the purple capsule
@@ -104,7 +103,9 @@ PlayResY: {OUTPUT_HEIGHT}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font_name},{font_size},{primary_col},&H000000FF,{outline_col},{shadow_col},-1,0,0,0,100,100,1.5,0,1,{outline_w},{shadow_d},{alignment},100,100,{margin_v},1
+Style: Default,{font_name},{font_size},{primary_col},&H000000FF,{outline_col},{shadow_col},-1,0,0,0,100,100,1.5,0,1,{outline_w},{shadow_d},2,100,100,{margin_v},1
+Style: DefaultMid,{font_name},{font_size},{primary_col},&H000000FF,{outline_col},{shadow_col},-1,0,0,0,100,100,1.5,0,1,{outline_w},{shadow_d},5,100,100,{margin_v},1
+Style: DefaultTop,{font_name},{font_size},{primary_col},&H000000FF,{outline_col},{shadow_col},-1,0,0,0,100,100,1.5,0,1,{outline_w},{shadow_d},8,100,100,{margin_v},1
 Style: TopHeader,Montserrat Black,42,&H00FFFFFF,&H000000FF,&H00B86B62,&H00000000,-1,0,0,0,100,100,1.2,0,3,11,0,8,100,100,{HOOK_BADGE_MARGIN_V},1
 Style: Watermark,Montserrat Black,24,&H90FFFFFF,&H000000FF,&H90000000,&H00000000,-1,0,0,0,100,100,1.2,0,1,1.5,0.0,7,60,60,90,1
 
@@ -112,6 +113,15 @@ Style: Watermark,Montserrat Black,24,&H90FFFFFF,&H000000FF,&H90000000,&H00000000
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     return header
+
+# ASS stores alignment in the *style*, not the Dialogue line, so a single style
+# cannot express "bottom for this shot, top for the next". One style is emitted
+# per alignment the director can ask for.
+ALIGNMENT_STYLE_NAMES = {2: "Default", 5: "DefaultMid", 8: "DefaultTop"}
+
+
+def style_name_for_alignment(alignment: int) -> str:
+    return ALIGNMENT_STYLE_NAMES.get(int(alignment), "Default")
 
 def create_styled_ass_subtitles(
     segments: List[TranscriptSegment],
@@ -123,6 +133,7 @@ def create_styled_ass_subtitles(
     header_title: Optional[str] = None,
     watermark: Optional[str] = None,
     shots: Optional[List[Any]] = None,
+    caption_placements: Optional[List[Any]] = None,
     keyword_emojis: Optional[Dict[str, str]] = None
 ) -> Path:
     """
@@ -206,6 +217,16 @@ def create_styled_ass_subtitles(
     base_margin_v = default_margin_v(layout_mode)
 
     def get_shot_style(t: float) -> Tuple[int, int, str]:
+        # Director placements win: they are resolved from the composition plan's
+        # text-collision analysis, which the legacy per-shot margin cannot express.
+        if caption_placements:
+            for placement in caption_placements:
+                if placement.start <= t <= placement.end:
+                    return (
+                        max(0, int(placement.margin_v)),
+                        int(placement.alignment),
+                        str(placement.anchor),
+                    )
         if shots:
             for s in shots:
                 s_start = getattr(s, "start", 0.0)
@@ -261,7 +282,8 @@ def create_styled_ass_subtitles(
         active_margin_v, active_alignment, placement = get_shot_style(w_mid)
         placement_prefix = f"{{\\an{active_alignment}}}" if placement == "divider" else ""
         event_name = "estimated" if any(getattr(word, "is_estimated", False) for word in chunk) else ""
-        ass_line = f"Dialogue: 0,{format_ass_timestamp(w_start)},{format_ass_timestamp(w_end)},Default,{event_name},0,0,{active_margin_v},,{placement_prefix}{animation_prefix}{dialogue_text}"
+        active_style = style_name_for_alignment(active_alignment)
+        ass_line = f"Dialogue: 0,{format_ass_timestamp(w_start)},{format_ass_timestamp(w_end)},{active_style},{event_name},0,0,{active_margin_v},,{placement_prefix}{animation_prefix}{dialogue_text}"
         lines.append(ass_line)
 
     has_badge = bool(header_title and ENABLE_TOP_HOOK_BADGE)
