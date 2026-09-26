@@ -430,7 +430,7 @@ def build_video_filtergraph(
                     f"[0:v]trim=start={s_start:.2f}:end={s_end:.2f},setpts=PTS-STARTPTS,split=2[s{i}_p1][s{i}_p2];"
                     f"[s{i}_p1]crop={s1_w}:{s1_h}:{s1_x}:{s1_y},scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd:force_original_aspect_ratio=decrease,pad={OUTPUT_WIDTH}:{half_h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1:1[s{i}_top];"
                     f"[s{i}_p2]crop={s2_w}:{s2_h}:{s2_x}:{s2_y},scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd:force_original_aspect_ratio=decrease,pad={OUTPUT_WIDTH}:{half_h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1:1[s{i}_bot];"
-                    f"[s{i}_top][s{i}_bot]vstack=inputs=2,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[{label}]"
+                    f"[s{i}_top][s{i}_bot]vstack=inputs=2,drawbox=x=0:y={half_h - 3}:w={OUTPUT_WIDTH}:h=6:color=black:t=fill,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[{label}]"
                 )
             else:
                 s_cy = active_y if getattr(shot, "crop_y", None) is None else shot.crop_y
@@ -531,7 +531,7 @@ def build_video_filtergraph(
             f"[0:v]{trim_prefix}split=2[s1_in][s2_in];"
             f"[s1_in]crop={s1_w}:{s1_h}:{s1_x}:{s1_y},scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd:force_original_aspect_ratio=decrease,pad={OUTPUT_WIDTH}:{half_h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1:1,{studio_grade}[top_pane];"
             f"[s2_in]crop={s2_w}:{s2_h}:{s2_x}:{s2_y},scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd:force_original_aspect_ratio=decrease,pad={OUTPUT_WIDTH}:{half_h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1:1,{studio_grade}[bottom_pane];"
-            f"[top_pane][bottom_pane]vstack=inputs=2,fps={FPS}[base]"
+            f"[top_pane][bottom_pane]vstack=inputs=2,drawbox=x=0:y={half_h - 3}:w={OUTPUT_WIDTH}:h=6:color=black:t=fill,fps={FPS}[base]"
         )
     else:
         trim_prefix = f"trim=start={time_offset:.2f},setpts=PTS-STARTPTS," if time_offset > 0.0 else ""

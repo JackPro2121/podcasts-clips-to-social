@@ -698,22 +698,25 @@ def analyze_faces_in_clip(
                 s1_fh = int(np.median([f[0].h for f in two_speaker_samples]))
                 s2_fh = int(np.median([f[1].h for f in two_speaker_samples]))
 
-            # Tight crop: each pane is 3.5x the face width wide and full active_h tall
-            # but capped at 55% of active_w so crops don't overlap / show the other speaker.
+            # Tight crop: each pane maintains 9:8 aspect ratio (matching 1080x960 pane)
+            PANE_ASPECT = 9.0 / 8.0
             min_pane_w = int(active_w * 0.30)  # never narrower than 30% of frame
             max_pane_w = int(active_w * 0.55)  # never wider than 55% (prevent overlap)
             s1_pane_w = max(min_pane_w, min(int(s1_fw * 3.8), max_pane_w))
             s2_pane_w = max(min_pane_w, min(int(s2_fw * 3.8), max_pane_w))
-            # Pane height: maintain 9:16 portrait aspect for each pane (half of 1920 = 960)
-            s1_pane_h = int(s1_pane_w * 16.0 / 9.0)
-            s2_pane_h = int(s2_pane_w * 16.0 / 9.0)
+            s1_pane_h = int(s1_pane_w / PANE_ASPECT)
+            s2_pane_h = int(s2_pane_w / PANE_ASPECT)
             # Cap pane height to active_h
             if s1_pane_h > active_h:
                 s1_pane_h = active_h
-                s1_pane_w = int(s1_pane_h * 9.0 / 16.0)
+                s1_pane_w = int(s1_pane_h * PANE_ASPECT)
             if s2_pane_h > active_h:
                 s2_pane_h = active_h
-                s2_pane_w = int(s2_pane_h * 9.0 / 16.0)
+                s2_pane_w = int(s2_pane_h * PANE_ASPECT)
+            s1_pane_w -= s1_pane_w % 2
+            s1_pane_h -= s1_pane_h % 2
+            s2_pane_w -= s2_pane_w % 2
+            s2_pane_h -= s2_pane_h % 2
 
             # Position: center crop on each speaker's face; keep head in upper third of pane
             s1_y_offset = max(0, int(s1_cy - s1_fh * 1.5))  # start crop 1.5 face-heights above eyes
