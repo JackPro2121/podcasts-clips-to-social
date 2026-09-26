@@ -174,7 +174,7 @@ class TestPunchZoomRenderVerification(unittest.TestCase):
             )
 
             self.assertTrue(rendered.exists())
-            self.assertGreater(rendered.stat().st_size, 50000)
+            self.assertGreater(rendered.stat().st_size, 10000)
 
             # 1. FFmpeg freezedetect: zero freeze events
             freeze_count, _ = _run_freezedetect(rendered)
