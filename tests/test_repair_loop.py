@@ -233,6 +233,7 @@ class TestCaptionCollisionRepair(unittest.TestCase):
         self.assertEqual(after.alignment, 8, "should move to the top safe zone")
         self.assertTrue(after.collision_avoidance)
         self.assertEqual(after.anchor, "upper_center")
+        self.assertEqual(plan.shots[0].caption_anchor, "upper_center")
 
     def test_non_overlapping_caption_is_left_alone(self):
         caption = NormalizedRect(0.08, 0.62, 0.76, 0.14)

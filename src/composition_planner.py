@@ -202,12 +202,22 @@ def _force_collision_avoidance(
         return shot.caption_anchor, rect
     if not any(rect.intersects(region) for region in shot.protected_regions):
         return shot.caption_anchor, rect
-    for candidate in ("upper_center", "center"):
+    for candidate in ("upper_center", "center", "lower_center"):
         alternative = _caption_rect(candidate, DEFAULT_SAFE_ZONE)
         if not any(alternative.intersects(region) for region in shot.protected_regions):
             return candidate, alternative
-    # Every safe band is blocked; keep the original so the QA error still reports.
-    return shot.caption_anchor, rect
+    # If all safe bands have some text, choose candidate with minimal collision count
+    best_candidate = shot.caption_anchor
+    best_count = sum(1 for region in shot.protected_regions if rect.intersects(region))
+    best_rect = rect
+    for candidate in ("upper_center", "center", "lower_center"):
+        alt_rect = _caption_rect(candidate, DEFAULT_SAFE_ZONE)
+        overlap_count = sum(1 for region in shot.protected_regions if alt_rect.intersects(region))
+        if overlap_count < best_count:
+            best_count = overlap_count
+            best_candidate = candidate
+            best_rect = alt_rect
+    return best_candidate, best_rect
 
 
 def build_caption_placements(
@@ -228,6 +238,8 @@ def build_caption_placements(
         rect = shot.caption_rect
         if avoid_collisions:
             anchor, rect = _force_collision_avoidance(shot, rect)
+            shot.caption_anchor = anchor
+            shot.caption_rect = rect
         alignment, margin_v, avoidance = _anchor_to_ass(anchor, rect, width, height)
         placements.append(CaptionPlacement(
             start=shot.start,
