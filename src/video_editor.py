@@ -306,7 +306,8 @@ def build_video_filtergraph(
     broll_inputs: List[Tuple[int, float, float, float]] = [],
     cover_input_idx: Optional[int] = None,
     cover_duration: float = 0.25,
-    motion_gain: float = 1.0
+    motion_gain: float = 1.0,
+    time_offset: float = 0.0,
 ) -> str:
     """
     Constructs the complete FFmpeg video filtergraph with professional upgrades:
@@ -349,6 +350,8 @@ def build_video_filtergraph(
         for i, shot in enumerate(framing.shots):
             label = f"v_shot_{i}"
             shot_labels.append(f"[{label}]")
+            s_start = shot.start + time_offset
+            s_end = shot.end + time_offset
             shot_frames = max(2, int(round((shot.end - shot.start) * FPS)))
             punch = _punch_zoom_filter(str(getattr(shot, "motion", "drift")), shot_frames)
 
@@ -384,7 +387,7 @@ def build_video_filtergraph(
                 h_x = _crop_position(s_cx, _drift_axis_expr(s_cx, active_x, h_hi_x, s_cw, drift_ratio))
                 h_y = _crop_position(s_cy, _drift_axis_expr(s_cy, active_y, h_hi_y, s_ch, drift_ratio))
                 shot_f = (
-                    f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,split=3[p{i}_c][p{i}_s][p{i}_h];"
+                    f"[0:v]trim=start={s_start:.2f}:end={s_end:.2f},setpts=PTS-STARTPTS,split=3[p{i}_c][p{i}_s][p{i}_h];"
                     f"[p{i}_c]crop={cw}:{ch}:{canvas_x}:{canvas_y},"
                     f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
                     f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},boxblur=30:5,"
@@ -409,7 +412,7 @@ def build_video_filtergraph(
                     (s_cx, s_cy, s_cw, s_ch), video_width, video_height
                 )
                 shot_f = (
-                    f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,crop={s_cw}:{s_ch}:{s_cx}:{s_cy},split=2[s{i}_fg_in][s{i}_bg_in];"
+                    f"[0:v]trim=start={s_start:.2f}:end={s_end:.2f},setpts=PTS-STARTPTS,crop={s_cw}:{s_ch}:{s_cx}:{s_cy},split=2[s{i}_fg_in][s{i}_bg_in];"
                     f"[s{i}_bg_in]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},boxblur=30:5,eq=brightness=-0.16:contrast=1.12[s{i}_bg];"
                     f"[s{i}_fg_in]crop=iw*0.92:ih*0.92:x='(iw-iw*0.92)/2+iw*0.03*sin(t*1.8)':y='(ih-ih*0.92)/2',scale={OUTPUT_WIDTH}:-1:force_original_aspect_ratio=decrease,{studio_grade}[s{i}_fg];"
                     f"[s{i}_bg][s{i}_fg]overlay=(W-w)/2:(H-h)/2,setsar=1:1,fps={FPS}[{label}]"
@@ -424,7 +427,7 @@ def build_video_filtergraph(
                 # Crop each speaker at native resolution, then scale each pane to half-height.
                 # This preserves the tight face-relative crop boxes from face_tracker.
                 shot_f = (
-                    f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,split=2[s{i}_p1][s{i}_p2];"
+                    f"[0:v]trim=start={s_start:.2f}:end={s_end:.2f},setpts=PTS-STARTPTS,split=2[s{i}_p1][s{i}_p2];"
                     f"[s{i}_p1]crop={s1_w}:{s1_h}:{s1_x}:{s1_y},scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd:force_original_aspect_ratio=decrease,pad={OUTPUT_WIDTH}:{half_h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1:1[s{i}_top];"
                     f"[s{i}_p2]crop={s2_w}:{s2_h}:{s2_x}:{s2_y},scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd:force_original_aspect_ratio=decrease,pad={OUTPUT_WIDTH}:{half_h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1:1[s{i}_bot];"
                     f"[s{i}_top][s{i}_bot]vstack=inputs=2,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[{label}]"
@@ -457,7 +460,7 @@ def build_video_filtergraph(
                         cx_expr = f"{x_start} + ({x_end}-{x_start})*min(1.0,max(0.0,t/{shot_dur:.2f}))"
                         crop_x_expr = f"max({active_x},min({cx_expr}-{eff_w//2},{active_x + active_w}-{eff_w}))"
                         shot_f = (
-                            f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,"
+                            f"[0:v]trim=start={s_start:.2f}:end={s_end:.2f},setpts=PTS-STARTPTS,"
                             f"crop={eff_w}:{eff_h}:'{crop_x_expr}':{eff_y},"
                             f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}{',' + punch if punch else ''}[{label}]"
                         )
@@ -465,10 +468,10 @@ def build_video_filtergraph(
                         base_cx = shot.crop_x + target_crop_w // 2
                         eff_x = max(active_x, min(base_cx - eff_w // 2, active_x + active_w - eff_w))
                         shot_f = (
-                            f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,"
+                            f"[0:v]trim=start={s_start:.2f}:end={s_end:.2f},setpts=PTS-STARTPTS,"
                             f"crop={eff_w}:{eff_h}:"
                             f"{_crop_position(eff_x, _drift_axis_expr(eff_x, active_x, active_x + active_w - eff_w, eff_w, drift_ratio))}:"
-                            f"{_crop_position(eff_y, _drift_axis_expr(eff_y, active_y, active_y + active_h - eff_h, eff_h, drift_ratio))},"
+                            f"{eff_y},"
                             f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}{',' + punch if punch else ''}[{label}]"
                         )
                 else:
@@ -480,17 +483,17 @@ def build_video_filtergraph(
                         cx_expr = f"{x_start} + ({x_end}-{x_start})*min(1.0,max(0.0,t/{shot_dur:.2f}))"
                         crop_x_expr = f"max({active_x},min({cx_expr}-{target_crop_w//2},{active_x + active_w}-{target_crop_w}))"
                         shot_f = (
-                            f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,"
+                            f"[0:v]trim=start={s_start:.2f}:end={s_end:.2f},setpts=PTS-STARTPTS,"
                             f"crop={target_crop_w}:{s_ch}:'{crop_x_expr}':{s_cy},"
                             f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}{',' + punch if punch else ''}[{label}]"
                         )
                     else:
                         crop_x = max(active_x, min(shot.crop_x, active_x + active_w - target_crop_w))
                         shot_f = (
-                            f"[0:v]trim=start={shot.start:.2f}:end={shot.end:.2f},setpts=PTS-STARTPTS,"
+                            f"[0:v]trim=start={s_start:.2f}:end={s_end:.2f},setpts=PTS-STARTPTS,"
                             f"crop={target_crop_w}:{s_ch}:"
                             f"{_crop_position(crop_x, _drift_axis_expr(crop_x, active_x, active_x + active_w - target_crop_w, target_crop_w, drift_ratio))}:"
-                            f"{_crop_position(s_cy, _drift_axis_expr(s_cy, active_y, active_y + active_h - s_ch, s_ch, drift_ratio))},"
+                            f"{s_cy},"
                             f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}{',' + punch if punch else ''}[{label}]"
                         )
             shot_filters.append(shot_f)
@@ -510,7 +513,8 @@ def build_video_filtergraph(
         else:
             cx = framing.smoothed_center_x or (active_x + active_w // 2)
             static_crop_x = max(active_x, min(cx - crop_w // 2, active_x + active_w - crop_w))
-        v_filter = f"[0:v]crop={crop_w}:{active_h}:{static_crop_x}:{active_y},scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,{studio_grade},fps={FPS}[base]"
+        trim_prefix = f"trim=start={time_offset:.2f},setpts=PTS-STARTPTS," if time_offset > 0.0 else ""
+        v_filter = f"[0:v]{trim_prefix}crop={crop_w}:{active_h}:{static_crop_x}:{active_y},scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,{studio_grade},fps={FPS}[base]"
 
     elif framing.mode == "split_screen" and framing.speaker1_box and framing.speaker2_box:
         s1_x, s1_y, s1_w, s1_h = _clamp_crop_box(
@@ -522,15 +526,17 @@ def build_video_filtergraph(
         half_h = OUTPUT_HEIGHT // 2
         # Crop at native resolution — face boxes are already in source pixel coordinates.
         # Each pane: tight face crop → scale to full output width × half output height.
+        trim_prefix = f"trim=start={time_offset:.2f},setpts=PTS-STARTPTS," if time_offset > 0.0 else ""
         v_filter = (
-            f"[0:v]split=2[s1_in][s2_in];"
+            f"[0:v]{trim_prefix}split=2[s1_in][s2_in];"
             f"[s1_in]crop={s1_w}:{s1_h}:{s1_x}:{s1_y},scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd:force_original_aspect_ratio=decrease,pad={OUTPUT_WIDTH}:{half_h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1:1,{studio_grade}[top_pane];"
             f"[s2_in]crop={s2_w}:{s2_h}:{s2_x}:{s2_y},scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd:force_original_aspect_ratio=decrease,pad={OUTPUT_WIDTH}:{half_h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1:1,{studio_grade}[bottom_pane];"
             f"[top_pane][bottom_pane]vstack=inputs=2,fps={FPS}[base]"
         )
     else:
+        trim_prefix = f"trim=start={time_offset:.2f},setpts=PTS-STARTPTS," if time_offset > 0.0 else ""
         v_filter = (
-            f"[0:v]crop={active_w}:{active_h}:{active_x}:{active_y},split=2[bg_in][fg_in];"
+            f"[0:v]{trim_prefix}crop={active_w}:{active_h}:{active_x}:{active_y},split=2[bg_in][fg_in];"
             f"[bg_in]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
             f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},boxblur=30:5,eq=brightness=-0.16:contrast=1.12[bg];"
             f"[fg_in]scale={OUTPUT_WIDTH}:-1:force_original_aspect_ratio=decrease,{studio_grade}[fg];"
@@ -658,7 +664,19 @@ def render_viral_clip(
     output_clip_path.parent.mkdir(parents=True, exist_ok=True)
 
     current_input_idx = 0
-    input_args = ["-ss", f"{start_time:.2f}", "-t", f"{duration:.2f}", "-i", str(source_video_path)]
+    # For targeted segment downloads (or small start_time < 15.0s), do NOT use fast keyframe
+    # seeking before -i. Keyframe snapping shifts video by 200-500ms relative to audio.
+    # Instead, accurately decode from start with exact presentation timestamp (PTS) trimming.
+    if start_time < 0.02:
+        input_args = ["-t", f"{duration:.2f}", "-i", str(source_video_path)]
+        effective_start = 0.0
+    elif start_time < 15.0:
+        input_args = ["-i", str(source_video_path)]
+        effective_start = start_time
+    else:
+        pre_seek = max(0.0, start_time - 5.0)
+        input_args = ["-ss", f"{pre_seek:.3f}", "-i", str(source_video_path)]
+        effective_start = start_time - pre_seek
 
     # Cover image overlay input (embed 0.25s flash thumbnail at start of video)
     cover_input_idx = None
@@ -686,6 +704,7 @@ def render_viral_clip(
         cover_input_idx=cover_input_idx,
         cover_duration=cover_duration,
         motion_gain=motion_gain,
+        time_offset=effective_start,
     )
     try:
         probe_cmd = ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(source_video_path)]
@@ -734,11 +753,16 @@ def render_viral_clip(
         audio_subfilters = []
         mix_inputs = ["[voice]"]
 
+        atrim_part = (
+            f"atrim=start={effective_start:.3f}:duration={duration_text}"
+            if effective_start > 0.0
+            else f"atrim=duration={duration_text}"
+        )
         # High-definition vocal chain: 80Hz rumble cut + 3kHz presence + 10kHz air
         voice_filter = (
             f"[{voice_input_idx}:a]aformat=channel_layouts=stereo,"
             f"aresample=48000:async=1:first_pts=0,asetpts=PTS-STARTPTS,"
-            f"atrim=duration={duration_text},apad=whole_dur={duration_text},"
+            f"{atrim_part},apad=whole_dur={duration_text},"
             f"highpass=f={HIGHPASS_FREQ},"
             f"equalizer=f={VOCAL_PRESENCE_FREQ}:width_type=h:width=1000:g=2.5,"
             f"equalizer=f={VOCAL_AIR_FREQ}:width_type=h:width=2500:g=1.8"

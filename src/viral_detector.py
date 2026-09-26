@@ -486,13 +486,13 @@ def detect_viral_moments(
 
     prompt = f"""
 You are the world's top viral short-form video editor and content strategist specializing in {profile["focus"]} (on TikTok, Instagram Reels, and YouTube Shorts).
-Your goal is to analyze the following podcast transcript and extract the top {num_clips} most VIRAL standalone moments.
+Your goal is to analyze the following podcast transcript and extract EXACTLY {num_clips} distinct, non-overlapping VIRAL moments.
 
 ### VIRALITY CRITERIA:
 1. **Immediate Hook (0-3s)**: The clip MUST start directly on an impactful sentence about {profile["focus"]}. Never start on pauses, host chitchat, or filler words ('um', 'uh', 'so', 'you know', 'yeah'). The first 3 seconds decide viral retention on TikTok, YouTube Shorts, and Reels. Start at the exact second the core argument begins.
 2. **High Emotional Intensity or Insight**: Heated debt arguments, shocking income numbers, millionaire habits, counter-intuitive financial advice, or psychological money breakdowns.
 3. **Standalone Cohesion**: The clip must make complete sense on its own without needing the rest of the 2-hour podcast.
-4. **Optimal Duration**: Each clip MUST be between 30 and 140 seconds. Use the shortest coherent story that completes the thought; do not pad with repetition.
+4. **Optimal Duration (30-60s Sweet Spot)**: The viral sweet spot for TikTok, Reels, and Shorts is strictly **30 to 60 seconds** (maximum 65 seconds). Never select a clip over 65 seconds. Pick concise, high-retention stories with rapid payoff.
 5. **Complete Boundaries**: The start must begin at a complete thought and the end must land after a complete sentence or question. Never end on a partial word, a dangling conjunction, or a sentence fragment.
 6. **Exact Timestamps**: Use the provided transcript timestamps to specify precise start_time and end_time.
 7. **Punchy Curiosity-Gap Title**: Give each clip an engaging, high-CTR hook title in ALL CAPS (e.g., "THE $100,000 CREDIT CARD MISTAKE", "WHY YOU WILL NEVER RETIRE RICH", "THE 3 MONEY RULES OF MILLIONAIRES"). Max 5-7 words. Never include filler words ("um", "uh", "yeah"), and strictly DO NOT include emojis or special symbols.
@@ -501,25 +501,26 @@ Your goal is to analyze the following podcast transcript and extract the top {nu
    - Identify 1-3 "Peak Intensity" segments for automatic 1.2x zoom. Provide relative start and end seconds.
    - Suggest sound effect triggers in "sfx_cues": e.g. [[0.1, "whoosh"], [15.2, "pop"], [32.0, "ding"]].
    - Select 2-5 high-impact keywords for "keyword_emojis" (e.g. {{"money": "💰", "focus": "🎯"}}).
+10. **STRICT CLIP COUNT**: You MUST return EXACTLY {num_clips} items in the "clips" array (not 1, but {num_clips} distinct, non-overlapping moments from across the podcast).
 
 ### PODCAST TRANSCRIPT:
 {transcript_text}
 
 ### OUTPUT FORMAT:
-Output MUST be valid JSON only matching this schema:
+Output MUST be valid JSON only matching this schema with EXACTLY {num_clips} items in "clips":
 {{
   "clips": [
     {{
-      "title": "PUNCHY VIRAL TITLE",
+      "title": "PUNCHY VIRAL TITLE ONE",
       "start_time": 124.5,
-      "end_time": 172.0,
-      "duration": 47.5,
+      "end_time": 168.0,
+      "duration": 43.5,
       "viral_score": 95,
       "hook_reason": "Opens with a shocking contrarian statement about wealth.",
       "social_caption": "This perspective changes everything. Drop your thoughts below.",
       "hashtags": ["#mindset", "#podcast", "#success", "#reels"],
-      "peak_intensity_segments": [[5.0, 12.0], [30.5, 38.0]],
-      "sfx_cues": [[0.1, "whoosh"], [5.0, "whoosh"], [20.4, "pop"], [45.0, "ding"]],
+      "peak_intensity_segments": [[5.0, 12.0], [25.0, 32.0]],
+      "sfx_cues": [[0.1, "whoosh"], [5.0, "whoosh"], [20.4, "pop"], [40.0, "ding"]],
       "keyword_emojis": {{"wealth": "💰", "mindset": "🧠"}}
     }}
   ]
