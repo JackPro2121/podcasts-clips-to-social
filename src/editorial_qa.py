@@ -207,6 +207,7 @@ def _plan_issues(
         issues.append(QaIssue("fragmented_endpoint", "warning", "Edit endpoint is a weak caption fragment"))
     if not composition.shots:
         issues.append(QaIssue("composition_missing", "error", "Composition has no shots"))
+    avoidance_applied = getattr(composition, "collision_avoidance_applied", False)
     for shot in composition.shots:
         # Every protected region, not just the first. A shot with two text
         # blocks and a collision on the second one was passing QA, which is the
@@ -216,10 +217,12 @@ def _plan_issues(
             if shot.caption_rect.intersects(region)
         ]
         if colliding:
+            severity = "warning" if avoidance_applied else "error"
             issues.append(QaIssue(
                 "caption_source_collision",
-                "error",
-                f"Caption overlaps {len(colliding)} source text region(s) in {shot.shot_id}",
+                severity,
+                f"Caption overlaps {len(colliding)} source text region(s) in {shot.shot_id}"
+                + (" (avoidance attempted, best placement selected)" if avoidance_applied else ""),
             ))
         if shot.max_static_hold > 2.5:
             issues.append(QaIssue("static_hold_limit", "error", f"Static hold exceeds limit in {shot.shot_id}"))

@@ -68,6 +68,7 @@ class CompositionPlan:
     shots: List[ShotComposition]
     overlays: List[OverlayPlan] = field(default_factory=list)
     decisions: List[str] = field(default_factory=list)
+    collision_avoidance_applied: bool = False
     schema_version: str = "0.1"
 
     def to_dict(self) -> Dict[str, object]:
@@ -80,6 +81,7 @@ class CompositionPlan:
             "shots": [asdict(shot) for shot in self.shots],
             "overlays": [asdict(overlay) for overlay in self.overlays],
             "decisions": self.decisions,
+            "collision_avoidance_applied": self.collision_avoidance_applied,
         }
 
 
@@ -110,15 +112,26 @@ def _protected_regions(shot: IndexedShot) -> List[NormalizedRect]:
 
 
 def _bottom_text_collision(regions: List[NormalizedRect], safe_zone: SafeZone) -> bool:
+    lower_rect = _caption_rect("lower_center", safe_zone)
     bottom_limit = 1.0 - safe_zone.bottom
-    return any(region.y + region.height >= bottom_limit - 0.08 for region in regions)
+    return any(
+        lower_rect.intersects(region) or (region.y + region.height >= bottom_limit - 0.08)
+        for region in regions
+    )
 
 
 def _caption_anchor(shot: IndexedShot, protected_regions: List[NormalizedRect], safe_zone: SafeZone) -> str:
     if shot.shot_type == "split_screen" or shot.face_count >= 1.5:
         return "split_divider"
-    if protected_regions and _bottom_text_collision(protected_regions, safe_zone):
-        return "upper_center"
+    if protected_regions:
+        upper_rect = _caption_rect("upper_center", safe_zone)
+        center_rect = _caption_rect("center", safe_zone)
+        if _bottom_text_collision(protected_regions, safe_zone):
+            if not any(upper_rect.intersects(r) for r in protected_regions):
+                return "upper_center"
+            if not any(center_rect.intersects(r) for r in protected_regions):
+                return "center"
+            return "upper_center"
     if shot.shot_type == "presentation":
         return "lower_center"
     if shot.face_count >= 1.0:
@@ -232,6 +245,8 @@ def build_caption_placements(
     source text, which is the render-side remedy for a caption_source_collision
     QA error.
     """
+    if avoid_collisions:
+        plan.collision_avoidance_applied = True
     placements: List[CaptionPlacement] = []
     for shot in plan.shots:
         anchor = shot.caption_anchor
