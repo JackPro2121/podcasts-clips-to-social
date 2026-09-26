@@ -11,19 +11,21 @@ from src.transcriber import TranscriptSegment, WordTimestamp
 
 MONEY_KEYWORDS = {
     "money", "cash", "dollar", "dollars", "wealth", "invest", "investing", "saving", "savings",
-    "profit", "net", "worth", "assets", "million", "millions", "billion", "billions", "income",
-    "tax", "taxes", "crypto", "salary", "rich", "fund", "budget", "bank", "credit", "paycheck",
-    "paid", "earn", "earning"
+    "profit", "profits", "net", "worth", "assets", "million", "millions", "billion", "billions",
+    "income", "tax", "taxes", "crypto", "bitcoin", "salary", "rich", "fund", "funds", "budget",
+    "bank", "credit", "paycheck", "paid", "earn", "earning", "revenue", "mrr", "valuation", "equity", "roi"
 }
 DANGER_KEYWORDS = {
     "broke", "debt", "lie", "lied", "hate", "hater", "scam", "lost", "lose", "losing",
-    "risk", "danger", "stupid", "mistake", "zero", "fail", "failed", "crash", "boredom",
-    "worst", "unemployment", "seduction", "fool", "stop", "bad", "cut", "terrible"
+    "risk", "danger", "stupid", "mistake", "zero", "fail", "failed", "crash", "crashed", "boredom",
+    "worst", "unemployment", "seduction", "fool", "stop", "bad", "cut", "terrible", "crisis", "warning", "collapse"
 }
 POWER_KEYWORDS = {
     "rules", "rule", "game", "secret", "never", "always", "truth", "master", "power",
-    "double", "boss", "timing", "how", "much", "left", "win", "winning"
+    "double", "boss", "timing", "how", "much", "left", "win", "winning", "growth", "scale",
+    "exponential", "billionaire", "millionaire", "blueprint", "framework", "insane"
 }
+
 
 
 def normalize_caption_text(text: Any) -> str:

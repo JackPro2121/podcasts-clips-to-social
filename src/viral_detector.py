@@ -27,8 +27,9 @@ except ImportError:
 from src.config import (
     GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY,
     OLLAMA_API_KEY, OLLAMA_MODEL, OLLAMA_BASE_URL, GEMINI_MODEL_LADDER,
-    MIN_CLIP_DURATION, MAX_CLIP_DURATION,
+    GROQ_MODEL_LADDER, MIN_CLIP_DURATION, MAX_CLIP_DURATION,
 )
+
 from src.transcriber import TranscriptSegment
 
 # Suppress the non-blocking AFC function-calling advisory notice from google.genai
@@ -173,8 +174,7 @@ def query_gemini_models(
 
 def query_groq_free_models(prompt: str, key: str) -> Optional[str]:
     """Queries Groq free tier models (ultra-fast inference, $0 budget)."""
-    # Verified Groq-hosted model IDs (free tier). Update if Groq changes its catalog.
-    models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "gemma2-9b-it"]
+    models = list(GROQ_MODEL_LADDER)
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     for m in models:
         print(f"[*] Trying Groq Free Model ({m})...")

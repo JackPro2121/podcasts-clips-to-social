@@ -344,6 +344,9 @@ def _skin_tone_center_x(frame: np.ndarray, active_x: int, active_y: int, active_
     except Exception:
         return None
 
+_MIN_SPEECH_LIP_MOTION = 2.0
+_DOMINANT_SPEAKER_RATIO = 1.6
+
 def _estimate_mouth_motion(prev_patch: Optional[np.ndarray], frame: np.ndarray, f: FaceBox) -> Tuple[float, Optional[np.ndarray]]:
     """Calculates normalized pixel displacement in the mouth region (lower 35% of face box) for active speaker detection."""
     try:
@@ -652,8 +655,8 @@ def analyze_faces_in_clip(
             avg_m1 = float(np.mean(s1_motions)) if s1_motions else 0.0
             avg_m2 = float(np.mean(s2_motions)) if s2_motions else 0.0
 
-            # If Speaker 1 is speaking dominantly (> 2.8x higher activity than Speaker 2)
-            if avg_m1 > 5.5 and avg_m1 > 2.8 * max(1.0, avg_m2):
+            # If Speaker 1 is speaking dominantly
+            if avg_m1 >= _MIN_SPEECH_LIP_MOTION and avg_m1 >= _DOMINANT_SPEAKER_RATIO * max(0.5, avg_m2):
                 s1_cx = int(np.median([f[0].center_x for f in two_speaker_samples]))
                 crop_x = max(active_x, min(s1_cx - target_crop_w // 2, active_x + active_w - target_crop_w))
                 shot_plans.append(ShotPlan(
@@ -668,8 +671,8 @@ def analyze_faces_in_clip(
                     margin_v=460
                 ))
                 continue
-            # If Speaker 2 is speaking dominantly (> 2.8x higher activity than Speaker 1)
-            elif avg_m2 > 5.5 and avg_m2 > 2.8 * max(1.0, avg_m1):
+            # If Speaker 2 is speaking dominantly
+            elif avg_m2 >= _MIN_SPEECH_LIP_MOTION and avg_m2 >= _DOMINANT_SPEAKER_RATIO * max(0.5, avg_m1):
                 s2_cx = int(np.median([f[1].center_x for f in two_speaker_samples]))
                 crop_x = max(active_x, min(s2_cx - target_crop_w // 2, active_x + active_w - target_crop_w))
                 shot_plans.append(ShotPlan(

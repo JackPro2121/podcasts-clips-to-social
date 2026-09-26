@@ -537,7 +537,9 @@ class TestDirectorPrompt(unittest.TestCase):
 
 class TestPlanShotDirectives(unittest.TestCase):
     def test_disabled_by_config_returns_nothing(self):
-        with mock.patch.object(director_v2, "build_contact_sheet") as sheet:
+        # Explicitly disable director-v2 — default changed to True (Pillar 3)
+        with mock.patch("src.config.DIRECTOR_V2_ENABLED", False), \
+             mock.patch.object(director_v2, "build_contact_sheet") as sheet:
             review = plan_shot_directives(
                 video_path=Path("v.mp4"),
                 source_index=None,

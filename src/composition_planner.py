@@ -120,7 +120,7 @@ def _caption_anchor(shot: IndexedShot, protected_regions: List[NormalizedRect], 
     if protected_regions and _bottom_text_collision(protected_regions, safe_zone):
         return "upper_center"
     if shot.shot_type == "presentation":
-        return "center"
+        return "lower_center"
     if shot.face_count >= 1.0:
         return "lower_center"
     return "center"

@@ -93,6 +93,17 @@ GROQ_API_KEY = (
     os.getenv("groq_api_key") or
     ""
 )
+# Groq model ladder. Ordered strongest-first; query_groq_free_models walks the
+# ladder and rotates on errors so a deprecating or rate-limited model never fails a run.
+# Override with GROQ_MODEL_LADDER="llama-3.3-70b-versatile,llama-3.1-8b-instant,gemma2-9b-it".
+GROQ_MODEL_LADDER = [
+    model.strip()
+    for model in (
+        os.getenv("GROQ_MODEL_LADDER")
+        or "llama-3.3-70b-versatile,llama-3.1-8b-instant,gemma2-9b-it"
+    ).split(",")
+    if model.strip()
+]
 OPENROUTER_API_KEY = (
     os.getenv("OPENROUTER_API_KEY") or
     os.getenv("openrouter_api_key") or
@@ -167,7 +178,7 @@ UNIVERSAL_EDITOR_ENFORCE_QA = os.getenv("UNIVERSAL_EDITOR_ENFORCE_QA", "false").
 # output, whereas a wrong *window* choice is invisible until someone watches the
 # clip, so this needs to be switched on deliberately and reviewed before it is
 # trusted in CI. With it off, every path behaves exactly as before.
-DIRECTOR_V2_ENABLED = os.getenv("DIRECTOR_V2_ENABLED", "false").lower() in ("true", "1", "yes")
+DIRECTOR_V2_ENABLED = os.getenv("DIRECTOR_V2_ENABLED", "true").lower() in ("true", "1", "yes")
 DIRECTOR_V2_TILES = max(4, int(os.getenv("DIRECTOR_V2_TILES", "12")))
 
 # Text-region detection tier: auto | ocr | edge.

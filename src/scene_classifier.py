@@ -143,6 +143,8 @@ def classify_frame_scene(frame: np.ndarray) -> Dict[str, Any]:
     
     # 2. Check for human speaker presence via face detection
     person_detected = False
+    max_face_area_ratio = 0.0
+    total_frame_area = float(max(1, w * h))
     try:
         from src.face_tracker import get_face_detector, detect_faces_in_frame
         detector = get_face_detector()
@@ -150,6 +152,9 @@ def classify_frame_scene(frame: np.ndarray) -> Dict[str, Any]:
             faces = detect_faces_in_frame(detector, frame, w, h)
             if faces:
                 person_detected = True
+                max_face_area_ratio = max(
+                    float(f.w * f.h) / total_frame_area for f in faces
+                )
     except Exception:
         pass
 
@@ -165,13 +170,17 @@ def classify_frame_scene(frame: np.ndarray) -> Dict[str, Any]:
                 haar_faces: Any = cascade.detectMultiScale(gray, 1.2, 3, minSize=(30, 30))
                 if len(haar_faces) > 0:
                     person_detected = True
+                    max_face_area_ratio = max(
+                        float(fw * fh) / total_frame_area for (_, _, fw, fh) in haar_faces
+                    )
         except Exception:
             pass
 
-    # 3. Decision: If a human is in the scene (e.g. host talking at whiteboard/desk),
-    # it is a human talk, NEVER a static presentation slide.
-    # Only pure graphics, charts, and slides without a human speaker qualify as presentation.
-    if person_detected:
+    # 3. Decision:
+    # A large human face (> 12% frame) indicates a normal interview / talking-head shot.
+    # A small corner face (<= 12% frame) on top of slide heuristics indicates
+    # a presentation with a presenter inset (PiP slide).
+    if person_detected and max_face_area_ratio > 0.12:
         is_presentation = False
     else:
         is_presentation = has_slide_layout
@@ -180,8 +189,10 @@ def classify_frame_scene(frame: np.ndarray) -> Dict[str, Any]:
         "is_presentation": is_presentation,
         "person_detected": person_detected,
         "has_slide_layout": has_slide_layout,
-        "yolo_presentation": False
+        "yolo_presentation": False,
+        "max_face_area_ratio": max_face_area_ratio,
     }
+
 
 def analyze_clip_presentation_ratio(video_path: Path, start_sec: float, end_sec: float) -> float:
     """
