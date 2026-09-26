@@ -107,16 +107,19 @@ class TestDirectorMotionWiring(unittest.TestCase):
 
 
 def _create_synthetic_test_video(path: Path, duration_sec: float = 2.0, fps: int = 30) -> None:
-    """Create a 1920x1080 synthetic video with a distinctive white marker."""
+    """Create a 1920x1080 textured synthetic video with a distinctive white marker."""
     width, height = 1920, 1080
     total_frames = int(round(duration_sec * fps))
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     out = cv2.VideoWriter(str(path), fourcc, fps, (width, height))
+    # Checkerboard pattern ensures camera drift shifts contrast edges across the entire frame
+    y_coords, x_coords = np.mgrid[0:height, 0:width]
+    pattern = (((x_coords // 32) + (y_coords // 32)) % 2 * 60 + 40).astype(np.uint8)
+    frame = np.stack([pattern, pattern, pattern], axis=-1)
+    # Distinct bright block at (800, 400)
+    frame[380:440, 780:840] = 240
     try:
         for _ in range(total_frames):
-            frame = np.full((height, width, 3), 30, dtype=np.uint8)
-            # Distinct bright block at (800, 400)
-            frame[380:440, 780:840] = 240
             out.write(frame)
     finally:
         out.release()
