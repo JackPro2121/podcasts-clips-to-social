@@ -425,7 +425,8 @@ class TestFiltergraphValidity(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr[-600:])
             image = Image.open(frame_path).convert("RGB")
-            bright_pixels = sum(1 for pixel in image.getdata() if max(pixel) > 180)
+            pixel_data = getattr(image, "get_flattened_data", image.getdata)()
+            bright_pixels = sum(1 for pixel in pixel_data if max(pixel) > 180)
             self.assertGreater(bright_pixels, 10)
 
     def test_requested_missing_ass_file_fails_before_render(self):

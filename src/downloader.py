@@ -532,13 +532,25 @@ def download_segment_via_apify(
 
 # Deduplicated format selectors (were copy-pasted across 7 strategies).
 # Strictly prefer avc1 (H.264) to avoid AV1 decoding loops on GitHub Actions runners.
+# Enforce English/original audio track priority so multi-dub videos do not download foreign audio.
+_AUDIO_EN_PREF = (
+    'bestaudio[language=en]/'
+    'bestaudio[language^=en]/'
+    'bestaudio[format_id*=original]/'
+    'bestaudio'
+)
 _HD_FORMAT = (
-    'bestvideo[vcodec^=avc1][height>=720][height<=1080]+bestaudio/'
-    'bestvideo[vcodec^=avc1][height<=1080]+bestaudio/'
+    f'bestvideo[vcodec^=avc1][height>=720][height<=1080]+{_AUDIO_EN_PREF}/'
+    f'bestvideo[vcodec^=avc1][height<=1080]+{_AUDIO_EN_PREF}/'
+    f'bestvideo[height<=1080]+{_AUDIO_EN_PREF}/'
     'best[ext=mp4][height<=1080]/best'
 )
-_ANY_FORMAT = 'bestvideo[vcodec^=avc1][height<=1080]+bestaudio/best[ext=mp4][height<=1080]/best[vcodec^=avc1]/best'
-_FAILSAFE_FORMAT = 'bestvideo[vcodec^=avc1]+bestaudio/best'
+_ANY_FORMAT = (
+    f'bestvideo[vcodec^=avc1][height<=1080]+{_AUDIO_EN_PREF}/'
+    f'bestvideo[height<=1080]+{_AUDIO_EN_PREF}/'
+    'best[ext=mp4][height<=1080]/best[vcodec^=avc1]/best'
+)
+_FAILSAFE_FORMAT = f'bestvideo[vcodec^=avc1]+{_AUDIO_EN_PREF}/bestvideo+{_AUDIO_EN_PREF}/best'
 # Local bgutil POT provider. This is only configured after its health check
 # succeeds in CI; otherwise yt-dlp must use its normal client fallback.
 _POT_ARGS = (

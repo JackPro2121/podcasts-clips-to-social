@@ -174,7 +174,7 @@ def query_gemini_models(
 def query_groq_free_models(prompt: str, key: str) -> Optional[str]:
     """Queries Groq free tier models (ultra-fast inference, $0 budget)."""
     # Verified Groq-hosted model IDs (free tier). Update if Groq changes its catalog.
-    models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b", "groq/compound"]
+    models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "gemma2-9b-it"]
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     for m in models:
         print(f"[*] Trying Groq Free Model ({m})...")
@@ -199,7 +199,7 @@ def query_groq_free_models(prompt: str, key: str) -> Optional[str]:
 
 def query_openrouter_free_models(prompt: str, key: str) -> Optional[str]:
     """Queries OpenRouter verified 100% free models (:free tier)."""
-    models = ["nvidia/nemotron-3.5-lightning:free", "liquid/lfm-2.5-2.6b:free", "nex-agi/nex-n2.5-pro:free"]
+    models = ["meta-llama/llama-3.3-70b-instruct:free", "qwen/qwen-2.5-72b-instruct:free"]
     headers = {
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",

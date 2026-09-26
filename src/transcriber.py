@@ -91,11 +91,13 @@ def verify_audio_language(
     detected = str(getattr(info, "language", "") or "")
     probability = float(getattr(info, "language_probability", 0.0) or 0.0)
     if not is_english_language_code(detected) or probability < min_probability:
-        if transcript_text and looks_like_english_text(transcript_text):
+        # If the detector is confident (>= 0.70) that the audio is non-English, do not bypass:
+        # this catches foreign dubs (e.g. Bengali, Spanish) where metadata transcript was English.
+        if transcript_text and looks_like_english_text(transcript_text) and probability < 0.70:
             print(
                 f"[!] Language detector suggested '{detected or 'unknown'}' "
-                f"(confidence={probability:.2f}) but the clip transcript is clearly English. "
-                "Treating the detector result as a false positive."
+                f"(marginal confidence={probability:.2f}) but the clip transcript is clearly English. "
+                "Treating the detector result as ambiguous."
             )
             return detected
         raise RuntimeError(

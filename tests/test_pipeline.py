@@ -1,8 +1,15 @@
 import unittest
 from pathlib import Path
 from src.config import TARGET_LUFS, OUTPUT_WIDTH, OUTPUT_HEIGHT
-from src.downloader import extract_youtube_id
-from src.transcriber import is_english_language_code, looks_like_english_text, parse_native_transcript, TranscriptSegment, WordTimestamp
+from src.downloader import extract_youtube_id, _AUDIO_EN_PREF, _HD_FORMAT, _ANY_FORMAT, _FAILSAFE_FORMAT
+from src.transcriber import (
+    is_english_language_code,
+    looks_like_english_text,
+    parse_native_transcript,
+    TranscriptSegment,
+    WordTimestamp,
+    verify_audio_language,
+)
 from src.viral_detector import fallback_rule_based_detector, parse_clips_json
 from src.face_tracker import FramingDecision
 from src.subtitle_generator import (
@@ -49,6 +56,33 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertFalse(looks_like_english_text("আজকের বাজারে অনেক চড়াচড়ি হয়েছে।"))
         self.assertFalse(looks_like_english_text("hola mundo como estas amigo mio hoy"))
         self.assertFalse(looks_like_english_text("too short"))
+
+    def test_downloader_formats_enforce_english_audio(self):
+        self.assertIn("language=en", _AUDIO_EN_PREF)
+        self.assertIn(_AUDIO_EN_PREF, _HD_FORMAT)
+        self.assertIn(_AUDIO_EN_PREF, _ANY_FORMAT)
+        self.assertIn(_AUDIO_EN_PREF, _FAILSAFE_FORMAT)
+
+    def test_language_verification_rejects_confident_foreign_audio_despite_english_transcript(self):
+        from src import transcriber
+        transcriber._WHISPER_MODELS.clear()
+        with unittest.mock.patch("faster_whisper.WhisperModel") as mock_model_cls:
+            mock_instance = unittest.mock.MagicMock()
+            mock_model_cls.return_value = mock_instance
+            # Simulate detecting Bengali with 0.99 confidence
+            mock_info = unittest.mock.MagicMock()
+            mock_info.language = "bn"
+            mock_info.language_probability = 0.99
+            mock_instance.transcribe.return_value = ([], mock_info)
+
+            # Even if transcript text looks like English, confident foreign detection MUST raise
+            english_transcript = "How I built a 500 million dollar empire from scratch."
+            with self.assertRaises(RuntimeError) as ctx:
+                verify_audio_language(
+                    Path("fake.mp4"),
+                    transcript_text=english_transcript,
+                )
+            self.assertIn("Audio language is not English", str(ctx.exception))
 
     def test_loudness_pass_ladder_falls_back_to_dynamic_normalization(self):
         self.assertTrue(_LOUDNESS_PASS_LADDER[0][0])

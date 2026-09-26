@@ -54,3 +54,5 @@ src/models/*.onnx
 analysis_*/
 test_*.ass
 
+# Documentation & notes (keep private)
+*.md

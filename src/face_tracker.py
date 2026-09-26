@@ -568,14 +568,14 @@ def analyze_faces_in_clip(
         if area1 == 0 or area2 == 0:
             return False
         area_ratio = area1 / area2
-        # Require faces to be at least 30% of frame width apart (prevents treating
+        # Require faces to be at least 25% of frame width apart (prevents treating
         # a single face detected twice as two speakers)
-        # Also require both faces to be reasonably large (> 2% of frame area)
-        min_face_area = (active_w * active_h) * 0.02
+        # Also allow smaller faces in wide-angle studio podcast sets (down to 0.3% of frame area, ~80x80px)
+        min_face_area = (active_w * active_h) * 0.003
         return (
-            x_dist >= active_w * 0.28 and
-            y_dist <= active_h * 0.28 and
-            0.28 <= area_ratio <= 3.6 and
+            x_dist >= active_w * 0.25 and
+            y_dist <= active_h * 0.35 and
+            0.25 <= area_ratio <= 4.0 and
             area1 >= min_face_area and
             area2 >= min_face_area
         )
@@ -740,8 +740,23 @@ def analyze_faces_in_clip(
                 single_faces = [min(faces, key=lambda f: abs(f.center_y - eye_level_y)) for faces in valid_face_samples]
 
             if single_faces:
-                avg_cx = int(np.median([f.center_x for f in single_faces]))
-                avg_cy = int(np.median([f.center_y for f in single_faces]))
+                # If detected faces are split across left and right halves of the frame (bimodal),
+                # taking np.median produces the empty midpoint between two people (e.g. centering on a car or empty wall).
+                # Instead, cluster into left and right, and focus on one speaker's face.
+                left_faces = [f for f in single_faces if f.center_x < active_x + active_w * 0.45]
+                right_faces = [f for f in single_faces if f.center_x > active_x + active_w * 0.55]
+                if left_faces and right_faces and len(left_faces) + len(right_faces) >= len(single_faces) * 0.7:
+                    if last_known_cx is not None:
+                        left_dist = abs(np.median([f.center_x for f in left_faces]) - last_known_cx)
+                        right_dist = abs(np.median([f.center_x for f in right_faces]) - last_known_cx)
+                        chosen_faces = left_faces if left_dist <= right_dist else right_faces
+                    else:
+                        chosen_faces = left_faces if len(left_faces) >= len(right_faces) else right_faces
+                    avg_cx = int(np.median([f.center_x for f in chosen_faces]))
+                    avg_cy = int(np.median([f.center_y for f in chosen_faces]))
+                else:
+                    avg_cx = int(np.median([f.center_x for f in single_faces]))
+                    avg_cy = int(np.median([f.center_y for f in single_faces]))
                 last_known_cx = avg_cx
             else:
                 # Skin-tone heatmap fallback: verified against known speaker anchors.

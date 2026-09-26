@@ -86,7 +86,7 @@ def _detect_intervals(path: Path, filter_name: str, pattern: str) -> List[Dict[s
         "-an",
         "-f",
         "null",
-        "NUL",
+        "-",
     ])
     events: List[Dict[str, float]] = []
     active_start: Optional[float] = None
@@ -117,7 +117,7 @@ def _loudness_metrics(path: Path) -> Dict[str, float]:
         "[0:a]ebur128=framelog=verbose:peak=true",
         "-f",
         "null",
-        "NUL",
+        "-",
     ])
     metrics: Dict[str, float] = {}
     for line in result.stderr.splitlines():

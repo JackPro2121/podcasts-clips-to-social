@@ -8,7 +8,7 @@ import requests
 
 MODEL_DIR = Path(__file__).resolve().parent / "models"
 YOLO_MODEL_PATH = MODEL_DIR / "yolov8n.onnx"
-YOLO_URL = "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8n.onnx"
+YOLO_URL = "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolov8n.onnx"
 
 COCO_CLASSES = [
     "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
@@ -58,6 +58,12 @@ def get_yolo_net() -> Optional[Any]:
     if _yolo_attempted:
         return _yolo_net
     _yolo_attempted = True
+
+    if YOLO_MODEL_PATH.exists() and YOLO_MODEL_PATH.stat().st_size < 1000000:
+        try:
+            YOLO_MODEL_PATH.unlink()
+        except OSError:
+            pass
 
     if not YOLO_MODEL_PATH.exists():
         try:

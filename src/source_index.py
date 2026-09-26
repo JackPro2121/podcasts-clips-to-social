@@ -277,7 +277,7 @@ def _audio_events(video_path: Path, start_time: float, end_time: float) -> List[
             "silencedetect=n=-35dB:d=0.35",
             "-f",
             "null",
-            "NUL",
+            "-",
         ],
         capture_output=True,
         text=True,
