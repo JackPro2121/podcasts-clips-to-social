@@ -54,5 +54,14 @@ src/models/*.onnx
 analysis_*/
 test_*.ass
 
+# Local virtualenv. Created by:
+#   C:\...\uv\python\cpython-3.11.15-...\python.exe -m venv .venv
+# Pinned to 3.11 because it must match CI exactly -- rapidocr_onnxruntime
+# requires Python <3.13, so a 3.14 local interpreter silently loses OCR and the
+# mirror detector degrades to "not measurable".
+.venv/
+venv/
+env/
+
 # Documentation & notes (keep private)
 *.md

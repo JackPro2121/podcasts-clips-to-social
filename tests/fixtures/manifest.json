@@ -1,0 +1,172 @@
+{
+  "_comment": [
+    "Golden-master corpus: the actual clips published by successful CI runs.",
+    "These are the reproduction assets for the visual defects found in the",
+    "AGENTS.md compliance audit. Each entry records what a human sees when",
+    "scrubbing the timeline, so the verifier's verdict can be checked against",
+    "ground truth rather than against itself.",
+    "",
+    "The MP4s are NOT tracked in git (~140 MB). Fetch them with:",
+    "  python tools/fetch_fixtures.py",
+    "Every file is verified by SHA-256 on fetch. A hash mismatch is a hard error:",
+    "a silently different fixture would make every visual regression test lie."
+  ],
+  "schema_version": 1,
+  "release_base": "https://github.com/JackPro2121/podcasts-clips-to-social/releases/download",
+  "clips": [
+    {
+      "id": "broke_1",
+      "file": "clip_1_THE_REAL_FEAR_OF_GOING_BROKE.mp4",
+      "release_tag": "clips-20260926-232801-1ced950a",
+      "run_id": 36278776052,
+      "sha256": "d80f43c2dd0768a08e66faed599d67905dff6ad733d37568b033a991b7b47fd5",
+      "bytes": 18826208,
+      "human_assessment": {
+        "verdict": "FAIL",
+        "layout": "portrait_face for most of the clip; a broken pip_slide/split segment around 36 s",
+        "defects": [
+          "B3 caption_on_face: caption baseline at y~490/1920 = 25.5% of frame height, directly across the subject's eyebrows and eyes",
+          "B4 hook_badge: the two-line badge renders as two staggered, overlapping plates forming a jagged staircase block; not a capsule",
+          "B7 mirrored: the SHURE SM7B microphone label is horizontally reversed at t=1.2s, 14.0s and 31.0s",
+          "B6 source_graphic_collision: source ships its own vertical layout with a baked-in 'JOE HUDSON' lower-third; the burned caption lands on it",
+          "watermark typo: '@allinonepodcastsss' (three s) is visible top-left"
+        ],
+        "clean": [
+          "1080x1920, aspect 0.5625",
+          "-14.1 LUFS, -1.7 dBTP",
+          "no freeze events at n=0.003 d=0.5",
+          "no black intervals"
+        ]
+      }
+    },
+    {
+      "id": "grinding_2",
+      "file": "clip_2_THE_MYTH_OF_GRINDING_FOR_WEALT.mp4",
+      "release_tag": "clips-20260926-232809-87c34fd7",
+      "run_id": 36278776052,
+      "sha256": "5d00b390b8e728cf551857d2b741e900c55a279e5f8e0db5c3a894091b0303e4",
+      "bytes": 15840916,
+      "human_assessment": {
+        "verdict": "FAIL",
+        "layout": "portrait_face; brief 954x1688 pillarboxed segment early in the clip",
+        "defects": [
+          "B1 pillarbox: a segment renders content at 954x1688 offset (62,140) leaving ~6% black on the left and right",
+          "B3 caption_on_face: captions sit high, across the forehead/eye line"
+        ],
+        "clean": [
+          "1080x1920, aspect 0.5625",
+          "-14.3 LUFS, -1.4 dBTP",
+          "no freeze events at n=0.003 d=0.5"
+        ]
+      }
+    },
+    {
+      "id": "hardwork_3",
+      "file": "clip_3_WHY_HARD_WORK_DOES_NOT_GUARANT.mp4",
+      "release_tag": "clips-20260926-232816-e62360f6",
+      "run_id": 36278776052,
+      "sha256": "5f7e295869a0059d347fbea81475294648b385684dc0aa98e396f36cd763a566",
+      "bytes": 13661191,
+      "human_assessment": {
+        "verdict": "FAIL",
+        "layout": "portrait_face",
+        "defects": [
+          "B3 caption_on_face: caption baseline at y~490/1920 = 25.5%, on the subject's eyes",
+          "B4 hook_badge: staggered two-line plate"
+        ],
+        "clean": [
+          "1080x1920, aspect 0.5625",
+          "-14.2 LUFS, -1.5 dBTP",
+          "no freeze events at n=0.003 d=0.5",
+          "no black intervals"
+        ]
+      }
+    },
+    {
+      "id": "four_hundred_k_1",
+      "file": "clip_1_HOW_I_MADE_400000_IN_A_MONTH.mp4",
+      "release_tag": "clips-20260926-225506-a316e0fa",
+      "run_id": 36277030701,
+      "sha256": "8b1d2234c07129884568b9c0d1a544ddad57d5dd2e15a776ee8da31f2a0d6f05",
+      "bytes": 17120724,
+      "human_assessment": {
+        "verdict": "FAIL",
+        "layout": "portrait_face, collapsing into a broken two-pane split at the end",
+        "defects": [
+          "B2 freeze: freezedetect n=0.003 d=0.5 reports THREE events - 41.1s (0.533s), 41.633s (0.6s), 42.867s (0.5s) - 1.63s cumulative frozen video, 3.7% of the clip, in the published artifact",
+          "B1 pillarbox: the frozen segment renders each pane at 540x960 (9:16, not 9:8) at x=270..809, leaving 270px of pure black on each side = 50% of frame width dead",
+          "B3 caption_on_divider: caption at y~960, exactly on the pane divider"
+        ],
+        "notes": [
+          "QA reported passed=True on this clip. The freeze events are all below the 0.8s max_freeze_duration gate, and no black-bar check exists."
+        ],
+        "clean": [
+          "1080x1920, aspect 0.5625",
+          "-14.3 LUFS, -1.5 dBTP"
+        ]
+      }
+    },
+    {
+      "id": "disney_2",
+      "file": "clip_2_WHY_DISNEY_PAY_IS_A_TRAP.mp4",
+      "release_tag": "clips-20260926-225512-5ebbbe7b",
+      "run_id": 36277030701,
+      "sha256": "50d32d7fb4c855e8fb8585f2d16e832ddf30f29cd05f8391f20c70e11b07d862",
+      "bytes": 21461246,
+      "human_assessment": {
+        "verdict": "PASS",
+        "layout": "portrait_face for most of the clip; a blur_stack slide occupies roughly the final 0.4s",
+        "defects": [],
+        "notes": [
+          "NON-BLOCKING GEOMETRY OBSERVATION: geometry.analyse reports worst_vertical_bar_pct=4.1% over the last 7 of 240 samples. Inspected the frame at t=50.0s by hand: this is the blur_stack layout's blurred background, which is a near-black coffee-cup line pattern (per-column max 0-6) and is DESIGNED to be dark. Not padding, not a defect.",
+          "This is why the geometry check is graded (WARNING_BAR_PCT=3.0, BLOCKING_BAR_PCT=8.0) rather than binary. A naive content-box detector flags any blur_stack shot by construction.",
+          "B19 (found during verification, not in the original audit): the final blur_stack shot renders a screenshot of a news-article page whose headline is cropped mid-word at the left edge ('...l Disney Channel' / '...er star is accused of' / '...mare neighbor'), on a blurred background, with the burned caption 'I JUST' sitting mid-frame at roughly 74% height. The slide content is CROPPED rather than FIT, so on-screen text is cut off. Confirmed by full-resolution frame extraction."
+        ],
+        "clean": [
+          "1080x1920, aspect 0.5625, full-bleed for the portrait_face shots",
+          "-14.4 LUFS, -1.4 dBTP",
+          "no freeze events at n=0.003 d=0.5 or at n=0.001 d=0.3",
+          "no black intervals",
+          "no blocking geometry finding"
+        ]
+      }
+    },
+    {
+      "id": "sixty_k_1",
+      "file": "clip_1_PAID_OFF_60000_ON_50000_SALARY.mp4",
+      "release_tag": "clips-20260926-221257-e4dc5015",
+      "run_id": 36274579761,
+      "sha256": "bdd90d7317dabf7ddd9ba6904837bda3b7dd8e5f09e798e282ef4c37e2f1cb7c",
+      "bytes": 61949466,
+      "human_assessment": {
+        "verdict": "FAIL",
+        "layout": "multi_shot_dynamic, two stacked 16:9 sources pillarboxed into 1080x1920",
+        "defects": [
+          "C4 duration: 102.14s. AGENTS.md section 2.C specifies 30-50s with a 55s maximum",
+          "3.5 clip count: this run was invoked with --num-clips 3, Gemini returned 1 candidate, and the run printed 'ALL CLIPS PROCESSED SUCCESSFULLY!'",
+          "B1 pillarbox: content is inset, with black bars on the left and right"
+        ],
+        "notes": [
+          "QA reported passed=True. duration_out_of_contract (>140s) did not fire because the clip is 102s, which is under the 140s code cap but far over the 55s spec."
+        ],
+        "clean": [
+          "1080x1920, aspect 0.5625",
+          "-14.0 LUFS, -1.6 dBTP",
+          "no freeze events at n=0.003 d=0.5"
+        ]
+      }
+    }
+  ],
+  "synthetic": [
+    {
+      "id": "static_hold_1080",
+      "why": "A 3s 1920x1080 source holding one still frame. The canonical reproduction for the freeze class of defect; render it through any static renderer branch and freezedetect must report nothing.",
+      "generated_by": "tests/test_shot_motion_guarantee.py::TestRenderedShotIsNeverFrozen"
+    },
+    {
+      "id": "textured_1080",
+      "why": "A textured 1920x1080 source. Used where a still frame would make freezedetect ambiguous because there is genuinely no motion to detect.",
+      "generated_by": "tests/test_punch_zoom.py"
+    }
+  ]
+}

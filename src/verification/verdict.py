@@ -1,0 +1,457 @@
+"""The single authority on whether a rendered clip is publishable.
+
+Why this module exists
+----------------------
+Three independent opinions existed about every clip: the ``EditPlan``, the
+renderer, and ``editorial_qa``. Nothing compared what the renderer produced
+against what the spec asked for, and the verifier was the weakest of the three
+because it inspected a plan the same code had just written. Agreement between it
+and the renderer was guaranteed by construction.
+
+The measured consequence, on six real published clips:
+
+* 370 tests green, editorial QA ``passed=True``, CI run ``success``
+* yet one clip shipped with 1.63 s of frozen video inside a frame that was 50%
+  dead black
+* four of six shipped with audio and video streams disagreeing about their own
+  duration by 34-200 ms
+
+Every one of those is visible in a rendered frame or a stream header. None of
+them was in the plan the QA checked.
+
+Design
+------
+``verdict.json`` is the output. It is:
+
+* **complete** -- every metric from every module, pass or fail, not just the
+  failures, so a regression is visible as a number moving rather than as an
+  absence;
+* **machine-readable** -- so CI can gate on it, a later run can diff against it,
+  and a human can read it;
+* **graded** -- ``error`` blocks publication, ``warning`` is surfaced, ``info`` is
+  recorded. Collapsing these into one boolean is how the original gate managed to
+  be both too lax (0.8 s per-event freeze tolerance) and unreadable.
+
+This module does not decide what is acceptable; the thresholds live in each
+metric module and, ultimately, in ``src.creative_spec``. It decides what is
+*blocking*, and it is the only thing ``main.py`` is permitted to consult before
+uploading or scheduling.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from . import av_sync, fixtures, geometry, loudness, mirror, motion, probe
+
+SCHEMA_VERSION = 1
+
+# Codes are stable strings so a later run can diff them. They deliberately
+# mirror the existing editorial_qa vocabulary where one applies, so the log
+# output reads consistently with what the pipeline already prints.
+CODE_OUTPUT_UNREADABLE = "output_unreadable"
+CODE_ASPECT_WRONG = "aspect_wrong"
+CODE_PILLARBOX = "pillarbox"
+CODE_LETTERBOX = "letterbox"
+CODE_FREEZE = "freeze_cumulative"
+CODE_FREEZE_UNTERMINATED = "freeze_unterminated"
+CODE_BLACK_INTERVAL = "black_interval"
+CODE_AV_STRUCTURAL_DRIFT = "av_structural_drift"
+CODE_LOUDNESS = "loudness"
+CODE_MIRRORED = "mirrored_source"
+CODE_DURATION = "duration_out_of_contract"
+
+# AGENTS.md 2.C: "Strictly 30 to 50 seconds (sweet spot). Maximum 55 seconds."
+# Note the gap with the code, which caps at 140s (config.MAX_CLIP_DURATION) and
+# 148s after main._extend_moment_to_complete_transcript. See
+# AGENTS_COMPLIANCE_AUDIT.md section 2.C.
+CONTRACT_MIN_DURATION_S = 30.0
+CONTRACT_MAX_DURATION_S = 55.0
+
+
+@dataclass
+class Finding:
+    """One graded observation about a rendered clip."""
+
+    code: str
+    severity: str  # error | warning | info
+    message: str
+    spec_clause: str = ""
+    metrics: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def blocks(self) -> bool:
+        return self.severity == "error"
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "code": self.code,
+            "severity": self.severity,
+            "message": self.message,
+            "spec_clause": self.spec_clause,
+            "metrics": self.metrics,
+        }
+
+
+@dataclass
+class Verdict:
+    """Everything known about one rendered clip."""
+
+    path: str = ""
+    passed: bool = True
+    readable: bool = True
+    reason: str = ""
+    duration_s: float = 0.0
+    dimensions: Dict[str, int] = field(default_factory=dict)
+    findings: List[Finding] = field(default_factory=list)
+    metrics: Dict[str, Any] = field(default_factory=dict)
+
+    def add(self, finding: Finding) -> None:
+        self.findings.append(finding)
+        if finding.blocks:
+            self.passed = False
+
+    @property
+    def blocking(self) -> List[Finding]:
+        return [finding for finding in self.findings if finding.blocks]
+
+    @property
+    def warnings(self) -> List[Finding]:
+        return [finding for finding in self.findings if finding.severity == "warning"]
+
+    @property
+    def blocking_codes(self) -> List[str]:
+        return [finding.code for finding in self.blocking]
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "path": self.path,
+            "passed": self.passed,
+            "readable": self.readable,
+            "reason": self.reason,
+            "duration_s": round(self.duration_s, 3),
+            "dimensions": self.dimensions,
+            "blocking_codes": self.blocking_codes,
+            "findings": [finding.as_dict() for finding in self.findings],
+            "metrics": self.metrics,
+        }
+
+    def to_json(self, indent: int = 2) -> str:
+        return json.dumps(self.as_dict(), indent=indent, sort_keys=False)
+
+    def write(self, destination: Path) -> Path:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(self.to_json() + "\n", encoding="utf-8")
+        return destination
+
+    def summary(self) -> str:
+        """One block of human-readable text, for the CI job summary."""
+        state = "PASS" if self.passed else "FAIL"
+        lines = [
+            f"### Video verdict: {state}",
+            "",
+            f"- file: `{self.path}`",
+            f"- duration: {self.duration_s:.2f}s",
+            f"- dimensions: {self.dimensions.get('width')}x{self.dimensions.get('height')}",
+            "",
+        ]
+        if not self.findings:
+            lines.append("No findings.")
+        else:
+            lines.append("| severity | code | message |")
+            lines.append("| --- | --- | --- |")
+            for finding in self.findings:
+                message = finding.message.replace("|", "/")
+                lines.append(f"| {finding.severity} | `{finding.code}` | {message} |")
+        return "\n".join(lines)
+
+
+def _duration_finding(duration_s: float) -> Optional[Finding]:
+    if duration_s <= 0.0:
+        return None
+    if CONTRACT_MIN_DURATION_S <= duration_s <= CONTRACT_MAX_DURATION_S:
+        return None
+    return Finding(
+        code=CODE_DURATION,
+        severity="error",
+        message=(
+            f"duration {duration_s:.2f}s is outside the "
+            f"{CONTRACT_MIN_DURATION_S:.0f}-{CONTRACT_MAX_DURATION_S:.0f}s contract"
+        ),
+        spec_clause="AGENTS.md 2.C",
+        metrics={"duration_s": round(duration_s, 3)},
+    )
+
+
+def verify(
+    path: Path,
+    with_correlation: bool = False,
+    with_mirror: bool = True,
+    expected_width: Optional[int] = None,
+    expected_height: Optional[int] = None,
+) -> Verdict:
+    """Run every check against a rendered clip and return a single verdict.
+
+    Every module is best-effort: a module that cannot measure reports ``info``
+    rather than blocking, because a verifier that blocks on its own failure to
+    run trains people to disable it.
+    """
+    verdict = Verdict(path=str(path))
+
+    if not path.exists():
+        verdict.readable = False
+        verdict.passed = False
+        verdict.reason = f"file not found: {path}"
+        verdict.add(
+            Finding(CODE_OUTPUT_UNREADABLE, "error", verdict.reason, "internal")
+        )
+        return verdict
+
+    width, height = probe.dimensions(path)
+    verdict.dimensions = {"width": width, "height": height}
+    verdict.duration_s = probe.duration_seconds(path)
+
+    if width <= 0 or height <= 0 or verdict.duration_s <= 0.0:
+        verdict.readable = False
+        verdict.passed = False
+        verdict.reason = "no decodable video stream"
+        verdict.add(
+            Finding(
+                CODE_OUTPUT_UNREADABLE,
+                "error",
+                f"{verdict.reason} (ffprobe reported {width}x{height}, "
+                f"{verdict.duration_s:.2f}s)",
+                "internal",
+            )
+        )
+        return verdict
+
+    # --- geometry -----------------------------------------------------------
+    geometry_report = geometry.analyse(path)
+    verdict.metrics["geometry"] = geometry_report.as_dict()
+    if not geometry_report.ok:
+        verdict.add(
+            Finding(
+                CODE_OUTPUT_UNREADABLE,
+                "error",
+                f"geometry could not be measured: {geometry_report.reason}",
+                "internal",
+                geometry_report.as_dict(),
+            )
+        )
+    else:
+        if geometry_report.blocking:
+            verdict.add(
+                Finding(
+                    CODE_PILLARBOX,
+                    "error",
+                    (
+                        f"{geometry_report.worst_vertical_bar_pct:.1f}% of the frame "
+                        f"width is dead black, sustained across "
+                        f"{geometry_report.bar_samples}/{geometry_report.samples} "
+                        f"samples"
+                    ),
+                    "AGENTS.md 3.3",
+                    geometry_report.as_dict(),
+                )
+            )
+        elif geometry_report.warning:
+            verdict.add(
+                Finding(
+                    CODE_PILLARBOX,
+                    "warning",
+                    (
+                        f"{geometry_report.worst_vertical_bar_pct:.1f}% inset, below "
+                        f"the {geometry.BLOCKING_BAR_PCT}% blocking threshold. For a "
+                        f"blur_stack shot this is the designed dark background"
+                    ),
+                    "AGENTS.md 3.3",
+                    geometry_report.as_dict(),
+                )
+            )
+        if geometry_report.worst_horizontal_bar_pct >= geometry.BLOCKING_BAR_PCT:
+            verdict.add(
+                Finding(
+                    CODE_LETTERBOX,
+                    "error",
+                    f"{geometry_report.worst_horizontal_bar_pct:.1f}% of the frame "
+                    f"height is dead black",
+                    "AGENTS.md 3.3",
+                    geometry_report.as_dict(),
+                )
+            )
+        if expected_width and expected_height and (
+            width != expected_width or height != expected_height
+        ):
+            verdict.add(
+                Finding(
+                    CODE_ASPECT_WRONG,
+                    "error",
+                    f"expected {expected_width}x{expected_height}, got {width}x{height}",
+                    "AGENTS.md 3.3",
+                    {"width": width, "height": height},
+                )
+            )
+
+    # --- motion -------------------------------------------------------------
+    motion_report = motion.analyse(path, clip_duration=verdict.duration_s)
+    verdict.metrics["motion"] = motion_report.as_dict()
+    if motion_report.cumulative_freeze_s > 0.0:
+        verdict.add(
+            Finding(
+                CODE_FREEZE,
+                "error" if motion_report.cumulative_freeze_s > 0.3 else "warning",
+                (
+                    f"{motion_report.cumulative_freeze_s:.2f}s of frozen video across "
+                    f"{motion_report.event_count} events "
+                    f"({motion_report.freeze_fraction:.1%} of the clip); longest "
+                    f"{motion_report.longest_freeze_s:.2f}s"
+                ),
+                "AGENTS.md 3.1",
+                motion_report.as_dict(),
+            )
+        )
+    if motion_report.has_unterminated_freeze:
+        verdict.add(
+            Finding(
+                CODE_FREEZE_UNTERMINATED,
+                "error",
+                "a freeze runs to end-of-file and was not closed by freezedetect",
+                "AGENTS.md 3.1",
+                motion_report.as_dict(),
+            )
+        )
+    if motion_report.cumulative_black_s > 0.5:
+        verdict.add(
+            Finding(
+                CODE_BLACK_INTERVAL,
+                "error",
+                f"{motion_report.cumulative_black_s:.2f}s of full-frame black",
+                "AGENTS.md 3.1",
+                motion_report.as_dict(),
+            )
+        )
+
+    # --- A/V sync -----------------------------------------------------------
+    sync_report = av_sync.analyse(path, with_correlation=with_correlation)
+    verdict.metrics["av_sync"] = sync_report.as_dict()
+    if not sync_report.structural_ok:
+        verdict.add(
+            Finding(
+                CODE_AV_STRUCTURAL_DRIFT,
+                "error",
+                (
+                    f"audio is {sync_report.duration_delta_ms:+.0f}ms "
+                    f"{'longer' if sync_report.duration_delta_ms > 0 else 'shorter'} "
+                    f"than video; start delta {sync_report.start_delta_ms:+.0f}ms. "
+                    f"AGENTS.md 3.2 claims 0ms drift."
+                ),
+                "AGENTS.md 3.2",
+                sync_report.as_dict(),
+            )
+        )
+
+    # --- loudness -----------------------------------------------------------
+    loudness_report = loudness.analyse(path)
+    verdict.metrics["loudness"] = loudness_report.as_dict()
+    if loudness_report.measured and not loudness_report.ok:
+        verdict.add(
+            Finding(
+                CODE_LOUDNESS,
+                "error",
+                loudness_report.reason,
+                loudness_report.spec_clause,
+                loudness_report.as_dict(),
+            )
+        )
+
+    # --- mirror -------------------------------------------------------------
+    if with_mirror:
+        mirror_report = mirror.analyse(path)
+        verdict.metrics["mirror"] = mirror_report.as_dict()
+        if mirror_report.mirrored:
+            verdict.add(
+                Finding(
+                    CODE_MIRRORED,
+                    "error",
+                    mirror_report.reason,
+                    "output quality",
+                    mirror_report.as_dict(),
+                )
+            )
+        elif not mirror_report.measurable:
+            verdict.add(
+                Finding(
+                    CODE_MIRRORED,
+                    "info",
+                    mirror_report.reason,
+                    "output quality",
+                    mirror_report.as_dict(),
+                )
+            )
+
+    # --- duration contract --------------------------------------------------
+    duration_finding = _duration_finding(verdict.duration_s)
+    if duration_finding is not None:
+        verdict.add(duration_finding)
+
+    return verdict
+
+
+def verify_corpus(
+    master_ids: Optional[List[str]] = None,
+    with_mirror: bool = True,
+    **kwargs: Any,
+) -> Dict[str, Verdict]:
+    """Verify every golden master. Used by the CI visual-verification job."""
+    results: Dict[str, Verdict] = {}
+    for master in fixtures.available():
+        if master_ids and master.id not in master_ids:
+            continue
+        results[master.id] = verify(
+            master.path,
+            with_mirror=with_mirror,
+            expected_width=1080,
+            expected_height=1920,
+            **kwargs,
+        )
+    return results
+
+
+def corpus_report(results: Dict[str, Verdict]) -> Dict[str, Any]:
+    """Aggregate corpus results, including whether the verifier agrees with humans.
+
+    The agreement check is the important part. The golden-master manifest records
+    what a person saw on the timeline. If the verifier's verdict does not match,
+    then the *verifier* is wrong -- not the human, and not the threshold.
+    """
+    rows: List[Dict[str, Any]] = []
+    disagreements: List[Dict[str, Any]] = []
+    for master_id, verdict in sorted(results.items()):
+        master = fixtures.by_id(master_id)
+        expected_pass = master.expects_pass if master is not None else None
+        agrees = (expected_pass is None) or (expected_pass == verdict.passed)
+        row = {
+            "id": master_id,
+            "file": master.file if master is not None else "",
+            "duration_s": round(verdict.duration_s, 2),
+            "verifier_passed": verdict.passed,
+            "human_verdict": expected_pass,
+            "agrees": agrees,
+            "blocking_codes": verdict.blocking_codes,
+        }
+        rows.append(row)
+        if not agrees:
+            disagreements.append(row)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "clips": rows,
+        "disagreements": disagreements,
+        "agreement_rate": (
+            1.0 - (len(disagreements) / len(rows)) if rows else 0.0
+        ),
+    }

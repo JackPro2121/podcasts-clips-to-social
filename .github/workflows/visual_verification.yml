@@ -1,0 +1,193 @@
+name: Visual Verification
+
+# Ground truth for rendered output.
+#
+# This job exists because the audit found that 370 unit tests were green,
+# editorial QA returned passed=True, and the CI run reported success -- while a
+# published clip still contained 1.63s of frozen video inside a frame that was
+# 50% dead black, and four of six published clips had audio and video streams
+# disagreeing about their duration by 34-200ms.
+#
+# None of those were visible to `verify`, because `verify` only ran unit tests and
+# the first pixel render happened in the 90-minute publish job. So a visual defect
+# could not be caught before it was published. This job closes that gap: it
+# installs the render/verify toolchain, fetches the real published artifacts, and
+# runs the pixel-level verifier against them.
+#
+# It needs NO secrets. The golden-master clips are the project's own public
+# GitHub Release assets, fetched by URL and verified by SHA-256. That is
+# deliberate: a verification gate that needs credentials is a gate that stops
+# running the moment a secret expires, and then it silently stops verifying.
+
+on:
+  workflow_dispatch:
+    inputs:
+      with_mirror:
+        description: 'Run mirror detection (needs RapidOCR, slower)'
+        type: boolean
+        default: true
+  push:
+    branches: [main]
+    paths:
+      - 'src/video_editor.py'
+      - 'src/face_tracker.py'
+      - 'src/subtitle_generator.py'
+      - 'src/editorial_qa.py'
+      - 'src/config.py'
+      - 'src/verification/**'
+      - 'tests/test_visual_regressions.py'
+      - 'tests/fixtures/manifest.json'
+      - 'tools/fetch_fixtures.py'
+      - 'tools/install_deps.sh'
+      - 'requirements.txt'
+      - 'requirements-dev.txt'
+      - '.github/workflows/visual_verification.yml'
+  schedule:
+    # Weekly, so a drift in the ffmpeg or dependency resolution surfaces even
+    # when no code changed.
+    - cron: '17 5 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: visual-verification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-render:
+    name: Pixel-level verification of published clips
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # MUST match what contributors develop against. rapidocr_onnxruntime
+          # requires Python <3.13, so a 3.14 interpreter silently loses OCR and
+          # the mirror detector degrades to "not measurable" without failing.
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install render and verify dependencies
+        # Single deterministic path, shared with local development. Also
+        # collapses the three OpenCV distributions that otherwise fight over one
+        # cv2/ directory, which made the effective build depend on install order.
+        run: bash tools/install_deps.sh --dev
+
+      - name: Confirm the toolchain
+        run: |
+          set -euo pipefail
+          ffmpeg -version | head -1
+          ffprobe -version | head -1
+          python - <<'PY'
+          import cv2, numpy
+          print(f"cv2 {cv2.__version__}  numpy {numpy.__version__}")
+          PY
+          echo "--- text detector tier ---"
+          python -c "from src.text_detection import get_text_detector as g; print(g().name)"
+
+      - name: Fetch the golden-master corpus
+        # The real published artifacts, by public URL, SHA-256 verified. A hash
+        # mismatch is a hard error: a silently different fixture would make every
+        # visual assertion in the suite meaningless.
+        run: python tools/fetch_fixtures.py --verify || python tools/fetch_fixtures.py
+
+      - name: Report which verifier capabilities are live
+        # Explicit, so a capability that silently stopped working is visible in
+        # the log rather than inferred from an absence of findings.
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from src.verification import mirror
+          from src.text_detection import get_text_detector
+          name = str(get_text_detector().name)
+          print(f"[verifier] text detection tier: {name}")
+          if "ocr" in name.lower():
+              print("[verifier] mirror detection: AVAILABLE")
+          else:
+              print("[verifier] mirror detection: UNAVAILABLE (needs TEXT_DETECTOR=ocr)")
+              print("[verifier] this is a capability gap, not a pass")
+          PY
+
+      - name: Run the visual regression suite
+        continue-on-error: true
+        run: python -m pytest tests/test_visual_regressions.py -v --tb=short
+
+      - name: Verify the whole corpus and emit a verdict
+        # The aggregate artefact. `continue-on-error` because the two
+        # reproduction tests are *expected* to fail until the renderer is fixed;
+        # what matters is that this step always runs and always produces a
+        # verdict, so the numbers can be compared run over run.
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p verification-out
+          python - <<'PY' 2>&1 | tee verification-out/verdict.txt
+          import json
+          from pathlib import Path
+          from src.verification import verdict as V
+
+          results = V.verify_corpus(with_mirror=True)
+          if not results:
+              raise SystemExit("no golden masters available; fetch_fixtures.py must run first")
+
+          out = Path("verification-out")
+          for clip_id, item in results.items():
+              item.write(out / f"verdict_{clip_id}.json")
+              print(item.summary())
+              print()
+
+          corpus = V.corpus_report(results)
+          (out / "corpus_report.json").write_text(
+              json.dumps(corpus, indent=2) + "\n", encoding="utf-8"
+          )
+
+          print("### Corpus report")
+          print()
+          print("| clip | duration | human | verifier | agrees | blocking codes |")
+          print("| --- | --- | --- | --- | --- | --- |")
+          for row in corpus["clips"]:
+              print("| `{}` | {:.1f}s | {} | {} | {} | {} |".format(
+                  row["file"] or row["id"],
+                  row["duration_s"],
+                  "PASS" if row["human_verdict"] else "FAIL",
+                  "PASS" if row["verifier_passed"] else "FAIL",
+                  "yes" if row["agrees"] else "**NO**",
+                  ", ".join(f"`{c}`" for c in row["blocking_codes"]) or "-",
+              ))
+          print()
+          print(f"Agreement with human assessment: {corpus['agreement_rate']:.0%}")
+          PY
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "## Pixel-level verification"
+            echo
+            if [ -f verification-out/verdict.txt ]; then
+              cat verification-out/verdict.txt
+            else
+              echo "verdict.txt was not produced; see the step above for the failure."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload verdicts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-verdicts
+          path: verification-out/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Archive the golden-master manifest
+        # Uploaded rather than committed: the clips are ~140MB and the manifest's
+        # human_assessment is the ground truth this job is measured against.
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-master-manifest
+          path: tests/fixtures/manifest.json
+          retention-days: 90

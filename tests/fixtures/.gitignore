@@ -1,0 +1,8 @@
+# Golden-master media is not tracked. Fetch it with:
+#   python tools/fetch_fixtures.py
+# The files are the real published artifacts, downloadable from public GitHub
+# Release URLs and verified against tests/fixtures/manifest.json by SHA-256.
+*.mp4
+*.jpg
+*.wav
+*.mkv
