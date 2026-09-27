@@ -489,8 +489,11 @@ You are the world's top viral short-form video editor and content strategist spe
 Your goal is to analyze the following podcast transcript and extract EXACTLY {num_clips} distinct, non-overlapping VIRAL moments.
 
 ### VIRALITY CRITERIA:
-1. **Immediate Hook (0-3s)**: The clip MUST start directly on an impactful sentence about {profile["focus"]}. Never start on pauses, host chitchat, or filler words ('um', 'uh', 'so', 'you know', 'yeah'). The first 3 seconds decide viral retention on TikTok, YouTube Shorts, and Reels. Start at the exact second the core argument begins.
-2. **High Emotional Intensity or Insight**: Heated debt arguments, shocking income numbers, millionaire habits, counter-intuitive financial advice, or psychological money breakdowns.
+1. **Immediate Scroll-Stopping Hook (0-3s)**: The clip MUST open directly on an immediate attention-grabbing line about {profile["focus"]}. Prioritize either:
+   (A) SHOCK & CURIOSITY: An unbelievable revelation, shocking dollar/income number, counter-intuitive statistic, or massive realization (e.g. 'I lost $400,000 in one week doing this').
+   (B) CONTRARIAN DEBATE / CONTROVERSY: A heated disagreement, provocative stance, or intense debate that triggers strong opinions and comments.
+   Never start on host greetings, pleasantries, chitchat, or filler words ('um', 'uh', 'so', 'you know', 'yeah'). The first 3 seconds decide viral retention on TikTok, Shorts, and Reels. Start at the exact second the core hook begins.
+2. **High Emotional Intensity & Retention Pacing**: Fast-paced payoff, intense debate, or shocking breakdown that keeps the audience glued until the final second.
 3. **Standalone Cohesion**: The clip must make complete sense on its own without needing the rest of the 2-hour podcast.
 4. **Optimal Duration (30-60s Sweet Spot)**: The viral sweet spot for TikTok, Reels, and Shorts is strictly **30 to 60 seconds** (maximum 65 seconds). Never select a clip over 65 seconds. Pick concise, high-retention stories with rapid payoff.
 5. **Complete Boundaries**: The start must begin at a complete thought and the end must land after a complete sentence or question. Never end on a partial word, a dangling conjunction, or a sentence fragment.

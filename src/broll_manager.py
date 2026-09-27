@@ -221,7 +221,7 @@ def find_broll_cues_for_clip(
                 if best_url:
                     broll_file = download_broll_clip(best_url, w_text)
                     if broll_file and broll_file.exists():
-                        broll_dur = min(3.5, clip_duration - w_start - 0.5)
+                        broll_dur = min(1.4, max(1.2, clip_duration - w_start - 0.5))
                         broll_end = w_start + broll_dur
                         cues.append((round(w_start, 2), round(broll_end, 2), broll_file, w_text))
                         last_broll_end = broll_end + min_spacing
