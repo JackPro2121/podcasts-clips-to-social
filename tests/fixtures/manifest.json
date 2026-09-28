@@ -31,11 +31,16 @@
           "B6 source_graphic_collision: source ships its own vertical layout with a baked-in 'JOE HUDSON' lower-third; the burned caption lands on it",
           "watermark typo: '@allinonepodcastsss' (three s) is visible top-left"
         ],
+        "verifier_confirmation": {
+          "caption_on_face_pct": 100.0,
+          "note": "measures 100% of burned-in caption pixels on the upper face (brow through eyes), which is a stronger statement than the visual assessment. The whole-face metric also saturates at 100% because this is a tight portrait crop, which is why the gate uses the upper-face band."
+        },
         "clean": [
           "1080x1920, aspect 0.5625",
           "-14.1 LUFS, -1.7 dBTP",
           "no freeze events at n=0.003 d=0.5",
-          "no black intervals"
+          "no black intervals",
+          "audio and video streams agree on duration (0 ms delta)"
         ]
       }
     },
@@ -114,20 +119,32 @@
       "sha256": "50d32d7fb4c855e8fb8585f2d16e832ddf30f29cd05f8391f20c70e11b07d862",
       "bytes": 21461246,
       "human_assessment": {
-        "verdict": "PASS",
+        "verdict": "FAIL",
+        "verdict_origin": "updated_from_visual_PASS_after_verifier_finding",
         "layout": "portrait_face for most of the clip; a blur_stack slide occupies roughly the final 0.4s",
-        "defects": [],
+        "defects": [
+          "A20 av_structural_drift: audio stream is +116.7ms longer than the video stream (start delta 0.0ms). Invisible on a visual scrub. AGENTS.md 3.2 claims 0ms."
+        ],
+        "geometry_clean_control": true,
         "notes": [
           "NON-BLOCKING GEOMETRY OBSERVATION: geometry.analyse reports worst_vertical_bar_pct=4.1% over the last 7 of 240 samples. Inspected the frame at t=50.0s by hand: this is the blur_stack layout's blurred background, which is a near-black coffee-cup line pattern (per-column max 0-6) and is DESIGNED to be dark. Not padding, not a defect.",
           "This is why the geometry check is graded (WARNING_BAR_PCT=3.0, BLOCKING_BAR_PCT=8.0) rather than binary. A naive content-box detector flags any blur_stack shot by construction.",
-          "B19 (found during verification, not in the original audit): the final blur_stack shot renders a screenshot of a news-article page whose headline is cropped mid-word at the left edge ('...l Disney Channel' / '...er star is accused of' / '...mare neighbor'), on a blurred background, with the burned caption 'I JUST' sitting mid-frame at roughly 74% height. The slide content is CROPPED rather than FIT, so on-screen text is cut off. Confirmed by full-resolution frame extraction."
+          "B19 (found during verification, not in the original audit): the final blur_stack shot renders a screenshot of a news-article page whose headline is cropped mid-word at the left edge ('...l Disney Channel' / '...er star is accused of' / '...mare neighbor'), on a blurred background, with the burned caption 'I JUST' sitting mid-frame at roughly 74% height. The slide content is CROPPED rather than FIT, so on-screen text is cut off. Confirmed by full-resolution frame extraction.",
+          "SUPERSEDED BY VERIFIER -- this is the corpus's one remaining human/verifier disagreement, and the verifier is right. Visually the clip looked clean, so it was recorded as PASS. av_sync then found the audio stream is +117ms longer than the video (start delta 0.0ms, so the drift accumulates across the clip, the signature of a resampling or re-encode stage rather than a seeking bug). That is invisible on a scrub and is a real AGENTS.md 3.2 violation. The verdict below is updated to FAIL to match, and the original visual assessment is preserved here for provenance."
         ],
+        "verifier_confirmation": {
+          "caption_on_face_pct": 0.0,
+          "av_duration_delta_ms": 116.7,
+          "note": "caption sits low on the wall art, clear of the face, so the upper-face metric reads 0% even though whole-face overlap is 100%. Confirms the upper-face band is the informative measure."
+        },
         "clean": [
           "1080x1920, aspect 0.5625, full-bleed for the portrait_face shots",
           "-14.4 LUFS, -1.4 dBTP",
           "no freeze events at n=0.003 d=0.5 or at n=0.001 d=0.3",
           "no black intervals",
-          "no blocking geometry finding"
+          "no blocking geometry finding",
+          "no caption over the face",
+          "visually clean on a full timeline scrub -- which is the point: the only defect here is invisible to a human watching the clip"
         ]
       }
     },

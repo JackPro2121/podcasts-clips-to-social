@@ -62,7 +62,24 @@ CODE_BLACK_INTERVAL = "black_interval"
 CODE_AV_STRUCTURAL_DRIFT = "av_structural_drift"
 CODE_LOUDNESS = "loudness"
 CODE_MIRRORED = "mirrored_source"
+CODE_CAPTION_ON_FACE = "caption_on_face"
 CODE_DURATION = "duration_out_of_contract"
+
+# A caption covering more than this fraction of the **upper** face (brow through
+# eyes) is unreadable. Measured on the golden masters:
+#
+#   broke_1       100.0%   caption entirely across the brow and eyes
+#   grinding_2    100.0%
+#   hardwork_3    100.0%
+#   four_hundred_k 37.3%
+#   disney_2        0.0%   caption sits low, on the wall art, not the face
+#   sixty_k_1       0.0%   faces are small in a two-pane split
+#
+# The band is deliberately the upper face rather than the whole face. In a tight
+# portrait crop the face fills the frame, so whole-face overlap saturates at 100%
+# on five of six clips and distinguishes nothing.
+CAPTION_ON_FACE_BLOCK_PCT = 15.0
+CAPTION_ON_FACE_WARN_PCT = 5.0
 
 # AGENTS.md 2.C: "Strictly 30 to 50 seconds (sweet spot). Maximum 55 seconds."
 # Note the gap with the code, which caps at 140s (config.MAX_CLIP_DURATION) and
@@ -191,6 +208,7 @@ def verify(
     path: Path,
     with_correlation: bool = False,
     with_mirror: bool = True,
+    with_captions: bool = True,
     expected_width: Optional[int] = None,
     expected_height: Optional[int] = None,
 ) -> Verdict:
@@ -419,6 +437,63 @@ def verify(
                 f"ran without caption exclusion and may under-report"
             )
 
+    # --- captions vs faces --------------------------------------------------
+    # The check editorial_qa cannot make. It compares shot.caption_rect against
+    # shot.protected_regions, both written by the same code minutes apart, so it
+    # confirms the plan. The caption that lands on the face is produced by the
+    # collision-avoidance *relocation* those same regions triggered, so no
+    # plan-only check can see it.
+    caption_payload: Dict[str, Any] = {}
+    if with_captions:
+        try:
+            from . import captions as captions_module
+            from . import faces as faces_module
+
+            face_report = faces_module.analyse(path, samples=14)
+            caption_payload["faces"] = face_report.as_dict()
+            if face_report.any_faces:
+                avoid = faces_module.avoid_rects(face_report, upper_only=True)
+                on_face, at, measured = captions_module.measure_on_face(
+                    path, avoid, max_samples=20
+                )
+                caption_payload["on_face_pct"] = round(on_face, 2)
+                caption_payload["on_face_at_pct"] = round(at, 1)
+                caption_payload["frames_measured"] = measured
+                caption_payload["region"] = "upper face (brow through eyes)"
+                if on_face > CAPTION_ON_FACE_BLOCK_PCT:
+                    verdict.add(
+                        Finding(
+                            CODE_CAPTION_ON_FACE,
+                            "error",
+                            (
+                                f"{on_face:.0f}% of burned-in caption pixels sit on the "
+                                f"subject's brow/eyes (worst at {at:.0f}% through the "
+                                f"clip). Captions are unreadable there."
+                            ),
+                            "AGENTS.md 2.A / 3.4",
+                            caption_payload,
+                        )
+                    )
+                elif on_face > CAPTION_ON_FACE_WARN_PCT:
+                    verdict.add(
+                        Finding(
+                            CODE_CAPTION_ON_FACE,
+                            "warning",
+                            f"{on_face:.0f}% of caption pixels touch the upper face",
+                            "AGENTS.md 2.A / 3.4",
+                            caption_payload,
+                        )
+                    )
+            else:
+                caption_payload["on_face_pct"] = None
+                caption_payload["note"] = (
+                    f"no faces detected ({face_report.reason}); caption placement "
+                    f"not measurable"
+                )
+        except Exception as error:  # pragma: no cover - defensive
+            caption_payload["error"] = str(error)
+    verdict.metrics["captions"] = caption_payload
+
     # --- duration contract --------------------------------------------------
     duration_finding = _duration_finding(verdict.duration_s)
     if duration_finding is not None:
@@ -430,6 +505,7 @@ def verify(
 def verify_corpus(
     master_ids: Optional[List[str]] = None,
     with_mirror: bool = True,
+    with_captions: bool = True,
     **kwargs: Any,
 ) -> Dict[str, Verdict]:
     """Verify every golden master. Used by the CI visual-verification job."""
@@ -440,6 +516,7 @@ def verify_corpus(
         results[master.id] = verify(
             master.path,
             with_mirror=with_mirror,
+            with_captions=with_captions,
             expected_width=1080,
             expected_height=1920,
             **kwargs,

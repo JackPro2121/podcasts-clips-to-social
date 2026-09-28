@@ -469,12 +469,19 @@ class TestGoldenMasterMotion(unittest.TestCase):
 
 
 class TestGoldenMasterCleanBaseline(unittest.TestCase):
-    """L3: a clip the human assessment calls clean must verify clean.
+    """L3: a clip that is visually clean must verify clean **for geometry**.
 
     This is the other half of the gate. A verifier that flags everything is as
     useless as one that flags nothing, so at least one golden master has to come
-    back with no blocking findings -- otherwise the suite is measuring its own
-    thresholds rather than the renderer.
+    back with no blocking geometry finding -- otherwise the suite is measuring its
+    own thresholds rather than the renderer.
+
+    Note the scope. `disney_2` is *visually* clean and that is exactly why it is
+    the right control: its only defect is +117ms of A/V drift, which no amount of
+    scrubbing reveals. Its verdict in the manifest is FAIL for that reason, so
+    this test deliberately does **not** assert `expects_pass`. Asserting that would
+    couple a geometry check to a non-visual finding and make the control
+    useless the moment an unrelated defect appears.
     """
 
     def setUp(self) -> None:
@@ -485,7 +492,12 @@ class TestGoldenMasterCleanBaseline(unittest.TestCase):
         master = fixtures.by_id("disney_2")
         self.assertIsNotNone(master)
         assert master is not None
-        self.assertTrue(master.expects_pass, "fixture was reclassified as defective")
+        # The manifest records the *visual* assessment as clean for geometry
+        # purposes, even though the overall verdict is FAIL on A/V drift.
+        self.assertFalse(
+            [d for d in master.human_defects if d.startswith("B1")],
+            "disney_2 is meant to be the geometry-clean control",
+        )
 
         report = geometry.analyse(master.path)
         self.assertTrue(report.ok, report.reason)
@@ -538,6 +550,125 @@ class TestGoldenMasterCleanBaseline(unittest.TestCase):
             self.assertTrue(
                 master.sha256, f"{master.file} has no recorded sha256"
             )
+
+
+class TestCaptionOnFace(unittest.TestCase):
+    """L3: captions must not sit on the subject's brow and eyes.
+
+    REPRODUCTION -- fails against the published artifacts by design.
+
+    Measured on the corpus with the upper-face band (brow through eyes):
+
+    ==================  =========
+    clip                 on-face
+    ==================  =========
+    broke_1              100.0%
+    grinding_2           100.0%
+    hardwork_3           100.0%
+    four_hundred_k_1      37.3%
+    disney_2               0.0%
+    sixty_k_1              0.0%
+    ==================  =========
+
+    This is the defect `editorial_qa` structurally cannot catch. It compares
+    `shot.caption_rect` against `shot.protected_regions`, and both are written by
+    the same code minutes apart, so it confirms the plan rather than the video.
+    The caption that lands on the face is produced by the collision-avoidance
+    *relocation* that those same regions triggered: `upper_center` resolves to
+    roughly 25% of frame height, which clears the 240px platform UI band and lands
+    squarely on the eyes.
+    """
+
+    def setUp(self) -> None:
+        if not fixtures.all_present():
+            self.skipTest(fixtures.fetch_hint())
+
+    def test_broke_clip_captions_must_clear_the_face(self) -> None:
+        from src.verification import captions, faces, verdict
+
+        master = fixtures.by_id("broke_1")
+        self.assertIsNotNone(master)
+        assert master is not None
+
+        face_report = faces.analyse(master.path, samples=12)
+        self.assertTrue(face_report.any_faces, face_report.reason)
+        avoid = faces.avoid_rects(face_report, upper_only=True)
+        on_face, at, measured = captions.measure_on_face(
+            master.path, avoid, max_samples=16
+        )
+        self.assertGreater(
+            measured,
+            5,
+            msg="expected caption pixels to be found in several frames",
+        )
+        self.assertLessEqual(
+            on_face,
+            verdict.CAPTION_ON_FACE_BLOCK_PCT,
+            msg=(
+                f"{master.file}: {on_face:.0f}% of burned-in caption pixels sit on "
+                f"the subject's brow/eyes (worst at {at:.0f}% through the clip). "
+                f"AGENTS.md 2.A requires readable captions."
+            ),
+        )
+
+    def test_disney_clip_captions_are_clear_of_the_face(self) -> None:
+        """The negative control: a low number must be achievable, or the gate is noise."""
+        from src.verification import captions, faces
+
+        master = fixtures.by_id("disney_2")
+        self.assertIsNotNone(master)
+        assert master is not None
+
+        face_report = faces.analyse(master.path, samples=12)
+        if not face_report.any_faces:
+            self.skipTest(face_report.reason)
+        on_face, _at, _measured = captions.measure_on_face(
+            master.path, faces.avoid_rects(face_report, upper_only=True), max_samples=16
+        )
+        self.assertLessEqual(
+            on_face,
+            15.0,
+            msg=f"{master.file}: {on_face:.0f}% of caption pixels on the upper face",
+        )
+
+
+class TestUpperFaceBandL1(unittest.TestCase):
+    """L1: the avoidance band must be the upper face, not the whole face.
+
+    Mutation guard: switching `avoid_rects` to `padded()` fails
+    `test_upper_band_is_much_smaller_than_the_whole_face` and would make five of
+    six golden masters report 100% regardless of where the caption actually is.
+    """
+
+    def test_upper_band_is_much_smaller_than_the_whole_face(self) -> None:
+        from src.verification import faces
+
+        box = faces.FaceBox(x=182.8, y=9.8, width=407.7, height=303.5, score=0.9)
+        upper = box.upper_face()
+        whole = box.padded()
+        self.assertLess(upper[3], whole[3] * 0.6)
+        self.assertAlmostEqual(upper[1], box.y, places=3, msg="band must start at the face top")
+        self.assertAlmostEqual(upper[3], box.height * 0.55, places=3)
+
+    def test_upper_band_keeps_the_eye_line(self) -> None:
+        from src.verification import faces
+
+        # Eyes sit at roughly 40% of face height from the top.
+        box = faces.FaceBox(x=0.0, y=100.0, width=200.0, height=300.0, score=0.9)
+        _x, y, _w, h = box.upper_face()
+        eye_line = 100.0 + 0.40 * 300.0
+        self.assertLessEqual(y, eye_line)
+        self.assertGreaterEqual(y + h, eye_line)
+
+    def test_avoid_rects_defaults_to_upper_only(self) -> None:
+        from src.verification import faces
+
+        report = faces.FaceReport(detector="test", samples=1, frames_with_faces=1)
+        report.boxes = [faces.FaceBox(x=100.0, y=50.0, width=200.0, height=200.0, score=0.9)]
+        upper = faces.avoid_rects(report)
+        whole = faces.avoid_rects(report, upper_only=False)
+        self.assertEqual(len(upper), 1)
+        self.assertLess(upper[0].height, whole[0].height)
 
 
 if __name__ == "__main__":  # pragma: no cover

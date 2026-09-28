@@ -509,6 +509,58 @@ def detect_caption_regions(
     return [union], ""
 
 
+def measure_on_face(
+    path: Path,
+    avoid_rects: Sequence[Rect],
+    face_space: Tuple[int, int] = (640, 360),
+    max_samples: int = 40,
+) -> Tuple[float, float, int]:
+    """Fraction of burned-in caption pixels that fall on a face.
+
+    Works from the rendered pixels, so it applies to clips published before the
+    ASS file was retained.
+
+    Returns ``(worst_on_face_pct, worst_at_pct, frames_measured)``. This is the
+    measurement that the existing QA cannot make: ``editorial_qa`` compares a plan
+    rect against plan regions, and the caption that lands on the face is produced
+    by the *relocation* that those same regions triggered.
+    """
+    import numpy as np
+
+    if not avoid_rects:
+        return 0.0, 0.0, 0
+
+    width, height = face_space
+    frames, reason = probe.decode_colour_frames(
+        path, width, height, max_frames=max_samples
+    )
+    if not frames:
+        return 0.0, 0.0, 0
+
+    worst = 0.0
+    worst_at = 0.0
+    measured = 0
+    for index, frame in enumerate(frames):
+        mask = outlined_text_mask(frame)
+        total = int(mask.sum())
+        if total == 0:
+            continue
+        measured += 1
+        inside = np.zeros(mask.shape, dtype=bool)
+        for rect in avoid_rects:
+            x0 = max(0, min(width, rect.x))
+            y0 = max(0, min(height, rect.y))
+            x1 = max(0, min(width, rect.right))
+            y1 = max(0, min(height, rect.bottom))
+            if x1 > x0 and y1 > y0:
+                inside[y0:y1, x0:x1] = True
+        overlap = int((mask & inside).sum()) / float(total)
+        if overlap > worst:
+            worst = overlap
+            worst_at = 100.0 * index / max(1, len(frames) - 1)
+    return worst * 100.0, worst_at, measured
+
+
 def analyse(
     ass_path: Path,
     duration: float,

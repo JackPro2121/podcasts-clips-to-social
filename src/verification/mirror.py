@@ -22,19 +22,60 @@ Whichever orientation OCR reads better is the correct one. There is no absolute
 threshold to tune and no content that can produce a false positive, because the
 comparison is against the same content in both orientations.
 
-Requirements and limits, stated plainly:
+Honest limits, established by measurement rather than assumption
+----------------------------------------------------------------
+CI run 1, without caption exclusion, on the six golden masters: the detector
+returned a **false negative** on a clip that is demonstrably mirrored. It found 11
+OCR boxes at 0.98 confidence in the original orientation against 10 at 0.88 in the
+mirrored one, and concluded "correct".
+
+The cause is structural. Ten of those eleven boxes are the pipeline's own
+burned-in captions, which libass renders after the frame is assembled and which
+are therefore correctly oriented no matter what the source was. One genuinely
+mirrored element cannot outvote ten correct ones.
+
+CI run 2, with the caption band excluded: **every clip now reports "no readable
+text in either orientation"**, including the mirrored one. Excluding the captions
+left nothing, because the captions were the only text RapidOCR could read. The
+"SHURE SM7B" microphone label is small, curved and low-contrast, and RapidOCR does
+not return a box for it.
+
+So the conclusion is not "the detector is broken". It is this:
+
+    **For podcast footage, the burned-in captions are the only reliably
+    machine-readable text, and they carry no information about source
+    orientation. Pixel-level mirror detection on rendered output is therefore not
+    viable for this content type.**
+
+That is a fundamental limit, not a tuning problem. There is no way to detect
+mirroring from pixels alone unless the content is orientation-dependent, and text
+is the only such content; if the text cannot be read, the question is
+unanswerable.
+
+The viable place to check is therefore **the source**, before the render:
+
+* the renderer contains no flip filter (verified: no ``hflip``/``vflip``/
+  ``transpose`` anywhere in the pipeline), so ``mirrored(output) ==
+  mirrored(source)`` exactly;
+* the source has the channel's own text, not our captions, so there is nothing to
+  exclude;
+* it is one check per download rather than per render.
+
+:func:`analyse` therefore takes an optional ``source_path``: pass it when the
+source segment is available and the measurement is exact, and omit it for
+historical artifacts, where the honest answer is "not determinable".
+
+Requirements:
 
 * **Needs OCR.** Without RapidOCR the answer is "not measurable". It is not
-  guessed from symmetry, because a guessed answer here is worse than none.
-* **Needs text in frame.** A clip with no text at all is not measurable, and that
-  is most podcast footage. This is a best-effort check, not a gate on its own.
+  guessed from symmetry or face-shape priors, because a guessed answer here is
+  worse than none.
 * **Reuses** :mod:`src.text_detection` rather than calling RapidOCR directly.
   That module already contains the fix for HANDOFF section 4 bug 12, where the
   OCR response was parsed as ``(box, text, confidence)`` but ``entry[1]`` -- the
   recognised *text* -- was read as the confidence. ``float("MOST PEOPLE")``
   raised, the handler swallowed it, and the detector silently produced zero
-  regions while appearing to work. Reusing the adapter means that bug cannot be
-  reintroduced here.
+  regions while appearing to work.
 """
 
 from __future__ import annotations
@@ -176,14 +217,24 @@ def analyse(
     path: Path,
     samples: int = DEFAULT_SAMPLES,
     exclude_rects: Optional[List[Any]] = None,
+    source_path: Optional[Path] = None,
 ) -> MirrorReport:
-    """Detect selfie-flipped source footage by comparing OCR across orientations.
+    """Detect selfie-flipped footage by comparing OCR across orientations.
+
+    Pass ``source_path`` when the un-rendered segment is available. That is the
+    exact measurement: the renderer never flips anything, so the output's
+    orientation equals the source's, and the source carries the channel's own text
+    rather than our captions.
 
     ``exclude_rects`` are regions, in the decode resolution used here, to leave
     out of the comparison. Pass the caption band from
-    :func:`src.verification.captions.detect_caption_regions` at the same
-    resolution. See the module docstring for why this is not optional.
+    :func:`src.verification.captions.detect_caption_regions` when checking output
+    directly. See the module docstring for why that exclusion is required, and for
+    why output-only checking is not viable for this content type.
     """
+    target = source_path if source_path is not None else path
+    checking_source = source_path is not None
+
     try:
         import numpy as np
     except ImportError:  # pragma: no cover
@@ -200,7 +251,7 @@ def analyse(
         return MirrorReport(ok=False, reason=f"no text detector: {error}")
 
     frames, reason = probe.decode_colour_frames(
-        path, OCR_WIDTH, OCR_HEIGHT, max_frames=samples * 8
+        target, OCR_WIDTH, OCR_HEIGHT, max_frames=samples * 8
     )
     if not frames:
         return MirrorReport(ok=False, reason=reason or "no frames decoded")
@@ -306,6 +357,11 @@ def analyse(
     )
     report.detector = str(detector_name)
     report.suppressed_boxes = suppressed
+    if checking_source:
+        report.notes.append(
+            "measured on the source segment: the renderer contains no flip "
+            "filter, so the output inherits the source's orientation exactly"
+        )
     if mask is not None:
         report.notes.append(
             f"excluded {suppressed} OCR box(es) covering the pipeline's own "
@@ -313,6 +369,12 @@ def analyse(
             f"exclusion the verdict is meaningless: libass renders captions after "
             f"the frame is assembled, so they are correctly oriented no matter "
             f"what the source was, and they outvote genuinely mirrored source text."
+        )
+    elif not checking_source:
+        report.notes.append(
+            "no source segment supplied, so the pipeline's own captions were "
+            "included in the comparison. On a rendered clip that usually makes the "
+            "verdict meaningless; check the source instead."
         )
     elif report_mask_note:
         report.notes.append(report_mask_note)
