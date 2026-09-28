@@ -64,6 +64,19 @@ class IndexedShot:
     text_regions: List[TextRegion] = field(default_factory=list)
     freeze_intervals: List[Tuple[float, float]] = field(default_factory=list)
     confidence: float = 0.5
+    # Faces seen in this shot, in source pixels, largest first, as
+    # (x, y, w, h). Populated from the renderer's framing decision when one is
+    # available.
+    #
+    # Added because caption collision avoidance only knew about *text* regions, so
+    # a face was invisible to it and the "move the caption up, away from the
+    # on-screen text" path moved captions directly onto the subject's brow and
+    # eyes -- 100% of burned-in caption pixels in three of the six published
+    # golden-master clips.
+    face_boxes: List[Tuple[int, int, int, int]] = field(default_factory=list)
+    # Source frame size, needed to normalise face boxes for the planner.
+    source_width: int = 0
+    source_height: int = 0
 
 
 @dataclass
@@ -261,6 +274,69 @@ def _face_count(frame: np.ndarray, detect_faces: bool) -> float:
         return 0.0
 
 
+def _face_boxes(frame: np.ndarray, detect_faces: bool) -> List[Tuple[int, int, int, int]]:
+    """Face boxes in the frame's own pixel space, largest first.
+
+    ``frame`` here is one of the analysis samples, which are decoded at a reduced
+    size, so these boxes are in *sample* coordinates rather than source
+    coordinates. :func:`_dominant_shot_face_boxes` scales them back up before they
+    reach the plan.
+    """
+    if not detect_faces:
+        return []
+    try:
+        from src.face_tracker import detect_faces_in_frame, get_face_detector
+        detector = get_face_detector()
+        if detector is None:
+            return []
+        height, width = frame.shape[:2]
+        faces = detect_faces_in_frame(detector, frame, width, height)
+    except Exception:
+        return []
+    boxes = [
+        (int(f.x), int(f.y), int(f.w), int(f.h))
+        for f in faces
+        if getattr(f, "w", 0) > 0 and getattr(f, "h", 0) > 0
+    ]
+    boxes.sort(key=lambda box: box[2] * box[3], reverse=True)
+    return boxes
+
+
+def _dominant_shot_face_boxes(
+    per_frame: List[List[Tuple[int, int, int, int]]],
+    limit: int = 3,
+) -> List[Tuple[int, int, int, int]]:
+    """Median face boxes for a shot, largest first.
+
+    Median rather than mean, because a box is a geometric quantity and one
+    spurious detection at the edge of a frame would drag a mean to somewhere no
+    face actually was.
+    """
+    flattened = [box for frame in per_frame for box in frame]
+    if not flattened:
+        return []
+    flattened.sort(key=lambda box: box[2] * box[3], reverse=True)
+    out: List[Tuple[int, int, int, int]] = []
+    for box in flattened[:limit]:
+        near = [
+            candidate
+            for candidate in flattened
+            if abs((candidate[0] + candidate[2] / 2) - (box[0] + box[2] / 2)) < box[2] * 1.5
+            and abs((candidate[1] + candidate[3] / 2) - (box[1] + box[3] / 2)) < box[3] * 1.5
+        ]
+        if not near:
+            near = [box]
+        out.append(
+            (
+                int(np.median([b[0] for b in near])),
+                int(np.median([b[1] for b in near])),
+                int(np.median([b[2] for b in near])),
+                int(np.median([b[3] for b in near])),
+            )
+        )
+    return out
+
+
 def _audio_events(video_path: Path, start_time: float, end_time: float) -> List[AudioEvent]:
     result = subprocess.run(
         [
@@ -359,6 +435,24 @@ def build_source_index(
         ]))
         face_values = [_face_count(frame, detect_faces) for _, frame in shot_samples]
         face_count = float(np.mean(face_values)) if face_values else 0.0
+        # Face *boxes*, not just a count. Caption placement needs to know where
+        # the face is, because a count cannot be avoided -- only a position can.
+        # Boxes come out in sample coordinates, so they are scaled back to source
+        # pixels before they leave this function.
+        shot_face_boxes_sample: List[List[Tuple[int, int, int, int]]] = []
+        sample_width = sample_height = 0
+        for sample_time, sample_frame in shot_samples:
+            shot_face_boxes_sample.append(_face_boxes(sample_frame, detect_faces))
+            if sample_frame.ndim >= 2:
+                sample_height, sample_width = sample_frame.shape[:2]
+        shot_face_boxes: List[Tuple[int, int, int, int]] = []
+        if sample_width > 0 and sample_height > 0 and media.width > 0 and media.height > 0:
+            scale_x = media.width / float(sample_width)
+            scale_y = media.height / float(sample_height)
+            shot_face_boxes = [
+                (int(x * scale_x), int(y * scale_y), int(w * scale_x), int(h * scale_y))
+                for (x, y, w, h) in _dominant_shot_face_boxes(shot_face_boxes_sample)
+            ]
         # Merge text regions across the whole shot by overlap. The previous
         # exact-coordinate de-duplication happened to work for the edge
         # heuristic's stable boxes, but a real detector jitters per frame and
@@ -384,6 +478,9 @@ def build_source_index(
             face_count=round(face_count, 2),
             text_regions=shot_text,
             freeze_intervals=shot_freezes,
+            face_boxes=shot_face_boxes,
+            source_width=media.width,
+            source_height=media.height,
             confidence=0.65 if samples else 0.2,
         ))
     quality = {

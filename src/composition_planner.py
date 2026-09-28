@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from src.edit_director import EditPlan
 from src.source_index import IndexedShot, SourceIndex, TextRegion
@@ -121,22 +121,134 @@ def _bottom_text_collision(regions: List[NormalizedRect], safe_zone: SafeZone) -
 
 
 def _caption_anchor(shot: IndexedShot, protected_regions: List[NormalizedRect], safe_zone: SafeZone) -> str:
+    """Choose where the caption goes for this shot.
+
+    Two changes here, both from measured defects.
+
+    **Faces are protected regions.** Previously the only protected regions came
+    from OCR and the edge heuristic, i.e. *text*. A face is not text, so moving a
+    caption to avoid on-screen text moved it straight onto the presenter's face.
+    That is what produced the golden-master measurements of **100% of burned-in
+    caption pixels on the subject's brow and eyes** in three of six published
+    clips. `_face_avoidance_regions` adds the upper face -- brow through eyes --
+    to the protected set, which is the band that makes a caption unreadable.
+
+    **The split-screen early return is gone.** It returned "split_divider" before
+    any collision checking ran, so AGENTS.md 3.4's requirement that captions
+    "never sit raw on split cuts" was violated on every split-screen shot. Split
+    shots now take part in the same avoidance search as everything else.
+    """
+    avoid = list(protected_regions) + list(_face_avoidance_regions(shot, safe_zone))
+
+    if avoid:
+        for candidate in _anchor_search_order(shot):
+            rect = _caption_rect(candidate, safe_zone)
+            if not _conflicts(rect, avoid):
+                return candidate
+
     if shot.shot_type == "split_screen" or shot.face_count >= 1.5:
+        # Nothing is free. Between the panes is at least not on a face, and the
+        # panes are where a two-speaker shot is least likely to be unreadable.
         return "split_divider"
-    if protected_regions:
-        upper_rect = _caption_rect("upper_center", safe_zone)
-        center_rect = _caption_rect("center", safe_zone)
-        if _bottom_text_collision(protected_regions, safe_zone):
-            if not any(upper_rect.intersects(r) for r in protected_regions):
-                return "upper_center"
-            if not any(center_rect.intersects(r) for r in protected_regions):
-                return "center"
-            return "upper_center"
     if shot.shot_type == "presentation":
         return "lower_center"
     if shot.face_count >= 1.0:
         return "lower_center"
     return "center"
+
+
+# Ordered by how much of the subject they obscure. `lower_center` first because
+# for a talking head the lower chest area is the least destructive place for text,
+# and it is also where Hormozi-style captions conventionally sit.
+#
+# `center` is last on purpose for a human shot: at 0.42-0.56 of frame height it
+# sits over the mouth and chin, which is worse than the alternatives.
+_CENTRE_LAST_ORDER = ("lower_center", "upper_center", "center")
+
+# A split-screen shot gets the divider band first, because the gap between the two
+# panes is the one place that is over neither speaker. The divider anchor is a
+# narrow central sliver (x 0.48-0.52), which is nonsense for a single-subject
+# shot -- it would put the caption in a thin column over the subject's chest -- so
+# it is only ever a candidate when there really are two panes.
+_SPLIT_ORDER = ("split_divider", "lower_center", "center", "upper_center")
+
+
+def _anchor_search_order(shot: IndexedShot) -> Sequence[str]:
+    if shot.shot_type == "split_screen" or shot.face_count >= 1.5:
+        return _SPLIT_ORDER
+    return _CENTRE_LAST_ORDER
+
+
+# A candidate band is treated as blocked when a protected region comes within this
+# fraction of the frame height, not only when it strictly overlaps.
+#
+# The previous code had this tolerance in `_bottom_text_collision`
+# (`region.y + region.height >= bottom_limit - 0.08`) and dropping it was a real
+# regression: a source lower-third spanning 0.80-0.92 barely misses a
+# `lower_center` band that ends at 0.802, and strict intersection accepted it, so
+# the caption landed on the text. A near miss is still a collision.
+_PROXIMITY_MARGIN = 0.08
+
+
+def _conflicts(
+    rect: NormalizedRect, regions: Sequence[NormalizedRect], margin: float = _PROXIMITY_MARGIN
+) -> bool:
+    """True when ``rect`` overlaps, or comes within ``margin`` of, any region."""
+    if not regions:
+        return False
+    if any(rect.intersects(region) for region in regions):
+        return True
+    grown = NormalizedRect(
+        x=max(0.0, rect.x - margin),
+        y=max(0.0, rect.y - margin),
+        width=min(1.0, rect.width + 2 * margin),
+        height=min(1.0, rect.height + 2 * margin),
+    )
+    return any(grown.intersects(region) for region in regions)
+
+# Fraction of a face box treated as the unreadable band. Eyes sit at roughly 40% of
+# face height from the top, and the brow is just above, so 0.55 covers both while
+# leaving the chin and neck free.
+_FACE_AVOIDANCE_TOP_FRACTION = 0.55
+_FACE_AVOIDANCE_SIDE_FRACTION = 0.30
+
+
+def _face_avoidance_regions(shot: IndexedShot, safe_zone: SafeZone) -> List[NormalizedRect]:
+    """Normalised rectangles covering the unreadable part of each detected face.
+
+    Pure in the sense that it takes plain numbers, so the geometry is unit-testable
+    without a detector. ``shot.face_boxes`` is populated by face_tracker's
+    ``ShotPlan.face_boxes``, which holds source-pixel boxes for the largest faces
+    in the shot; an empty list means no face was detected, and this returns
+    nothing rather than guessing.
+    """
+    source_width = float(getattr(shot, "source_width", 0) or 0)
+    source_height = float(getattr(shot, "source_height", 0) or 0)
+    if source_width <= 0 or source_height <= 0:
+        return []
+
+    regions: List[NormalizedRect] = []
+    for box in list(getattr(shot, "face_boxes", []) or [])[:3]:
+        try:
+            x, y, width, height = (float(value) for value in box)
+        except (TypeError, ValueError):
+            continue
+        if width <= 0 or height <= 0:
+            continue
+        # Only the upper face is protected. Protecting the whole face would make
+        # every candidate anchor collide in a tight portrait crop, where the face
+        # fills the frame, and the search would have nowhere left to go.
+        protected_height = height * _FACE_AVOIDANCE_TOP_FRACTION
+        pad = width * _FACE_AVOIDANCE_SIDE_FRACTION
+        regions.append(
+            NormalizedRect(
+                x=max(0.0, (x - pad) / source_width),
+                y=max(0.0, y / source_height),
+                width=min(1.0, (width + 2 * pad) / source_width),
+                height=min(1.0, protected_height / source_height),
+            )
+        )
+    return regions
 
 
 def _shot_crop(shot: IndexedShot) -> NormalizedRect:
@@ -181,17 +293,31 @@ def _anchor_to_ass(anchor: str, rect: NormalizedRect, width: int, height: int) -
     Map a normalised caption anchor onto an ASS alignment and vertical margin.
 
     Returns (alignment, margin_v, collision_avoidance).
+
+    The `\an5` branch was wrong. ASS alignment 5 is *middle-centre*, and for
+    alignment 5 `MarginV` is measured **from the vertical centre of the frame**,
+    not from the top. The old code fed it a top-anchored offset:
+
+        from_top_px = int(round(rect.y * height))       # e.g. 806 for rect.y=0.42
+        return 5, from_top_px                            # interpreted as centre+806
+
+    so a caption intended for 42% frame height rendered at
+    960 + 806 = 1766px of 1920 -- inside the bottom platform UI band, on top of
+    the TikTok/Reels handle and caption block. Every centre-anchored and
+    split-divider caption was landing in the worst possible place, and
+    `tests/test_caption_placement_bridge.py` only asserted the alignment codes,
+    never the margin, so the suite stayed green.
     """
-    # A bottom-anchored caption sits `margin_v` pixels up from the bottom edge,
-    # so the safe zone's bottom padding is the minimum legal value.
     from_bottom_px = int(round((1.0 - (rect.y + rect.height)) * height))
-    from_top_px = int(round(rect.y * height))
 
     if anchor == "upper_center":
-        # Explicitly chosen because the lower band is occupied by source text.
-        return 8, from_top_px, True
+        # Alignment 8 is top-centre, so MarginV is measured from the top here.
+        # This is the only anchor whose margin needs a top-relative value.
+        return 8, int(round(rect.y * height)), True
     if anchor in ("center", "split_divider"):
-        return 5, from_top_px, False
+        # Alignment 5 is middle-centre: MarginV is an offset FROM the middle.
+        centre_offset = int(round((rect.y + rect.height / 2.0 - 0.5) * height))
+        return 5, centre_offset, False
     if anchor in ("left_safe", "right_safe"):
         # ASS cannot horizontally offset a centre-aligned line via margins, so
         # these keep bottom-centre placement; the anchor still documents intent.
