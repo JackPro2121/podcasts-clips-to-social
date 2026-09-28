@@ -315,6 +315,80 @@ def _evaluate_universal_qa(
     return True, []
 
 
+def _evaluate_rendered_pixels(
+    run_id: str,
+    state_store: RunStateStore,
+    clip_index: int,
+    rendered_path: Path,
+) -> Tuple[bool, List[str]]:
+    """Judge the rendered clip by its pixels, and refuse to publish one that fails.
+
+    This exists because of a measured failure, not a hypothetical one. With 370
+    unit tests green, editorial QA returning ``passed=True`` and the CI run
+    reporting ``success``, the pipeline published
+    ``clip_1_HOW_I_MADE_400000_IN_A_MONTH.mp4`` containing 1.63s of frozen video
+    inside a frame that was 50% dead black; captions sitting entirely across the
+    subject's brow and eyes in three other clips; and audio and video streams
+    disagreeing about their own duration by up to 200ms.
+
+    None of that was visible to ``_evaluate_universal_qa``, and the reason is
+    structural rather than a tuning mistake: that function compares
+    ``shot.caption_rect`` against ``shot.protected_regions``, and both are written
+    by the same code minutes apart. It confirms the plan, not the video. The
+    caption that lands on the face is produced by the collision-avoidance
+    *relocation* that those same regions triggered, so no plan-only check can see
+    it.
+
+    Two deliberate properties:
+
+    1. **Not switchable.** Unlike ``UNIVERSAL_EDITOR_ENFORCE_QA``, there is no
+       environment variable that turns this off. A quality gate that can be
+       disabled by a repository variable stops being one the moment that variable
+       goes missing, and then it silently stops verifying.
+    2. **Writes its evidence.** ``verdict.json`` is saved as a run artifact before
+       anything is decided, so a rejection is always inspectable afterwards.
+
+    Mirror detection is off here and runs in the dedicated
+    ``visual_verification`` workflow instead. Measured on the golden-master
+    corpus, excluding the pipeline's own captions leaves no machine-readable
+    source text, so mirror state is undecidable from rendered output for this
+    content type; paying for a dozen OCR passes per clip to learn that is not
+    worth it in the publish path.
+    """
+    from src.verification import verdict as pixel_verdict
+
+    print(f"[*] Pixel verification of clip #{clip_index} ({rendered_path.name})...")
+    result = pixel_verdict.verify(
+        rendered_path,
+        with_mirror=False,
+        with_captions=True,
+        expected_width=OUTPUT_WIDTH,
+        expected_height=OUTPUT_HEIGHT,
+    )
+
+    verdict_path = DATA_DIR / "runs" / run_id / f"clip_{clip_index}_verdict.json"
+    try:
+        result.write(verdict_path)
+        state_store.record_artifact(run_id, f"clip_{clip_index}_verdict", verdict_path)
+    except Exception as error:
+        print(f"[!] Could not persist the pixel verdict: {error}")
+
+    if result.passed:
+        print(f"[+] Pixel verdict for clip #{clip_index}: PASS")
+        for finding in result.warnings:
+            print(f"[!]   {finding.code}: {finding.message}")
+        return True, []
+
+    print(f"[-] PIXEL VERDICT BLOCKED clip #{clip_index}: {result.blocking_codes}")
+    print("    These frames are not publishable:")
+    for finding in result.blocking:
+        print(f"      - {finding.code} [{finding.spec_clause or 'n/a'}]: {finding.message}")
+    for finding in result.warnings:
+        print(f"      ! {finding.code}: {finding.message}")
+    print(f"    Full evidence: {verdict_path}")
+    return False, result.blocking_codes
+
+
 def _run_universal_qa(
     run_id: str,
     state_store: RunStateStore,
@@ -666,6 +740,14 @@ def run_pipeline(
                 )
                 if rendered_path is None:
                     continue
+                pixel_ok, _pixel_codes = _evaluate_rendered_pixels(
+                    run_id=run_id,
+                    state_store=state_store,
+                    clip_index=idx,
+                    rendered_path=rendered_path,
+                )
+                if not pixel_ok:
+                    continue
                 rendered_clips.append({
                     "path": str(rendered_path),
                     "thumbnail": thumb_path,
@@ -860,6 +942,14 @@ def run_pipeline(
                                 )
                                 if rendered_path is None:
                                     continue
+                                pixel_ok, _pixel_codes = _evaluate_rendered_pixels(
+                                    run_id=run_id,
+                                    state_store=state_store,
+                                    clip_index=idx,
+                                    rendered_path=rendered_path,
+                                )
+                                if not pixel_ok:
+                                    continue
                                 rendered_clips.append({"path": str(rendered_path), "thumbnail": thumb_path, "moment": moment})
                             except Exception as e:
                                 print(f"[-] Probe clip #{idx} failed: {e}")
@@ -1053,6 +1143,14 @@ def run_pipeline(
                     )
                     if rendered_path is None:
                         continue
+                    pixel_ok, _pixel_codes = _evaluate_rendered_pixels(
+                        run_id=run_id,
+                        state_store=state_store,
+                        clip_index=idx,
+                        rendered_path=rendered_path,
+                    )
+                    if not pixel_ok:
+                        continue
                     rendered_clips.append({"path": str(rendered_path), "thumbnail": thumb_path, "moment": moment})
                 except Exception as e:
                     print(f"[-] Full-download clip #{idx} failed: {e}")
@@ -1062,6 +1160,49 @@ def run_pipeline(
         raise RuntimeError(
             "No clips were rendered. Refusing to report a successful run without publishable output."
         )
+
+    # Strict clip count. AGENTS.md section 3.5: "The pipeline must deliver exactly
+    # the requested number of clips (default 3) to Buffer. QA repairs issues; it
+    # must never silently delete viable clips."
+    #
+    # Measured violation, run 36274579761:
+    #
+    #   [+] Gemini identified 1 viral clips:
+    #   [render_metadata] {"output_duration": 102.12, ...}
+    #   [+] Clip rendered successfully: clip_1_PAID_OFF_60000... (59.08 MB)
+    #   [+] Editorial QA report for clip #1: passed=True
+    #   ALL CLIPS PROCESSED SUCCESSFULLY!
+    #
+    # One clip of three requested, 102 seconds long against a 55-second maximum,
+    # published, and reported as a complete success. `if not rendered_clips` only
+    # catches zero, and the success banner printed unconditionally.
+    #
+    # This does not abort on a shortfall -- a run that produced two good clips out
+    # of three has still produced value, and discarding it to satisfy an exactness
+    # rule would be its own kind of waste. It states the shortfall prominently and
+    # records it, so the operator can decide.
+    requested_clips = num_clips
+    delivered_clips = len(rendered_clips)
+    if delivered_clips < requested_clips:
+        shortfall = requested_clips - delivered_clips
+        state_store.record_settings(
+            run_id,
+            {
+                "requested_clips": requested_clips,
+                "delivered_clips": delivered_clips,
+                "shortfall": shortfall,
+            },
+        )
+        print(
+            f"[!] CLIP COUNT SHORTFALL: {delivered_clips} of {requested_clips} clips "
+            f"were publishable ({shortfall} lost). AGENTS.md 3.5 requires exactly "
+            f"{requested_clips}. Every loss is a bare `continue` in the render loop "
+            f"-- a failed download, an audio-language rejection, a QA veto, or a "
+            f"pixel-verdict veto -- and none of them request a replacement "
+            f"candidate."
+        )
+    else:
+        print(f"[+] Clip count: {delivered_clips}/{requested_clips} as requested.")
 
     # Step 6: Release Hosting & Buffer Social Distribution
     print("\n--- [6/6] RELEASE HOSTING & BUFFER SOCIAL PUBLISHING ---")
@@ -1146,9 +1287,20 @@ def run_pipeline(
         print(f"[-] History record warning: {e}")
 
     state_store.set_stage(run_id, "pipeline", StageStatus.COMPLETED)
-    state_store.set_status(run_id, "completed")
+    if delivered_clips < requested_clips:
+        state_store.set_status(run_id, "completed_with_shortfall")
+    else:
+        state_store.set_status(run_id, "completed")
     print("\n" + "=" * 70)
-    print("✨ ALL CLIPS PROCESSED SUCCESSFULLY!")
+    if delivered_clips < requested_clips:
+        # Never print an unqualified success banner. The run that published a
+        # single 102-second clip out of three requested, and printed
+        # "ALL CLIPS PROCESSED SUCCESSFULLY!", is the single most misleading
+        # line in the pipeline: it converts a contract violation into a green
+        # checkmark.
+        print(f"⚠️  COMPLETED WITH SHORTFALL: {delivered_clips}/{requested_clips} clips published.")
+    else:
+        print(f"✨ ALL {delivered_clips} CLIPS PROCESSED SUCCESSFULLY!")
     print(f"📂 Output clips saved to: {CLIPS_DIR.resolve()}")
     print("=" * 70)
 

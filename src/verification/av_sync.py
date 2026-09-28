@@ -164,7 +164,7 @@ def _stream_float(stream: Optional[Dict[str, Any]], key: str) -> Optional[float]
     if raw in (None, "", "N/A"):
         return None
     try:
-        return float(raw)
+        return float(str(raw))
     except (TypeError, ValueError):
         return None
 

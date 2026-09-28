@@ -92,6 +92,23 @@ class RunStateStore:
         self.save(manifest)
         return manifest
 
+    def record_settings(self, run_id: str, values: dict) -> RunManifest:
+        """Merge keys into the manifest's settings block.
+
+        Needed because the run's settings are written once at creation, but facts
+        only known later -- such as how many clips were actually delivered against
+        how many were requested -- have nowhere to go. Recording them means a
+        shortfall is visible in the manifest rather than only in a log line that
+        scrolls past.
+        """
+        manifest = self.load(run_id)
+        if manifest.settings is None:
+            manifest.settings = {}
+        manifest.settings.update(values)
+        manifest.touch()
+        self.save(manifest)
+        return manifest
+
     def mark_failed(self, run_id: str, error: str) -> RunManifest:
         manifest = self.load(run_id)
         manifest.status = "failed"

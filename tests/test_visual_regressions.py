@@ -22,7 +22,6 @@ Fixture clips are skipped when absent. Run ``python tools/fetch_fixtures.py``.
 from __future__ import annotations
 
 import unittest
-from pathlib import Path
 
 from src.verification import fixtures, geometry, motion, probe
 

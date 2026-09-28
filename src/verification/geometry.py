@@ -271,11 +271,11 @@ def analyse(
     boxes: List[ContentBox] = []
     verdicts: List[BarVerdict] = []
     for frame in frames:
-        box = geometry_box = content_box(frame, threshold=threshold)
-        if geometry_box is None:
+        fitted = content_box(frame, threshold=threshold)
+        if fitted is None:
             continue
-        verdict = classify_bars(frame, geometry_box, threshold=threshold)
-        boxes.append(box)
+        verdict = classify_bars(frame, fitted, threshold=threshold)
+        boxes.append(fitted)
         verdicts.append(verdict)
         if not verdict.is_real_bar and verdict.reason.startswith("edges track"):
             report.fades_discarded += 1

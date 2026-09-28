@@ -940,28 +940,51 @@ class TestPodcastClipperPipeline(unittest.TestCase):
             clip_path = Path(tmpdir) / "probe.mp4"
             clip_path.write_bytes(b"video")
             probe_info = {"video_path": clip_path}
-            with patch.object(main, "APIFY_API_TOKEN", "test-token"), \
-                 patch.object(main, "CLIP_ONLY_MODE", True), \
-                 patch.object(main, "fetch_transcript_only", return_value=None), \
-                 patch.object(main, "download_clip_segment", side_effect=[probe_info, probe_info]), \
-                 patch.object(main, "transcribe_audio_whisper", return_value=[TranscriptSegment(0.0, 30.0, "test", [])]), \
-                 patch.object(main, "verify_audio_language", return_value="en"), \
-                 patch.object(main, "detect_viral_moments", return_value=[moment]), \
-                 patch.object(main, "analyze_faces_in_clip", return_value=FramingDecision(mode="blur_stack", face_count=0)) as analyze_faces, \
-                 patch.object(main, "generate_clip_thumbnail", return_value=None), \
-                 patch.object(main, "render_viral_clip", return_value=str(clip_path)), \
-                 patch.object(main, "upload_clip_to_github_release", return_value=None), \
-                 patch("src.release_cleaner.clean_old_releases"), \
-                 patch.object(main, "record_history"), \
-                 patch.object(main, "SlackNotifier"):
-                main.run_pipeline(
-                    "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-                    num_clips=1,
-                    framing_mode="auto",
-                    subtitles_mode="skip",
-                )
+            # The pixel gate is stubbed, not disabled, and its invocation is
+            # asserted below.
+            #
+            # This test's subject is whether the framing range passed to
+            # analyze_faces_in_clip is clip-local rather than probe-global. It
+            # stubs the "rendered clip" with five bytes of literal b"video",
+            # which was fine while nothing inspected the output. Now that the
+            # pipeline refuses to publish a clip that is not decodable, the fake
+            # is correctly rejected and the run exits.
+            #
+            # Pixel verification is covered properly elsewhere -- by
+            # tests/test_visual_regressions.py against the real published
+            # artifacts, and by tests/test_publication_gate.py for the wiring.
+            # Re-encoding a real video here would add ffmpeg to a test that is
+            # about framing arithmetic. So the gate is stubbed and, crucially,
+            # asserted to have run, so this test cannot quietly stop exercising it.
+            with patch.object(main, "_evaluate_rendered_pixels", return_value=(True, [])) as pixel_gate:
+                with patch.object(main, "APIFY_API_TOKEN", "test-token"), \
+                     patch.object(main, "CLIP_ONLY_MODE", True), \
+                     patch.object(main, "fetch_transcript_only", return_value=None), \
+                     patch.object(main, "download_clip_segment", side_effect=[probe_info, probe_info]), \
+                     patch.object(main, "transcribe_audio_whisper", return_value=[TranscriptSegment(0.0, 30.0, "test", [])]), \
+                     patch.object(main, "verify_audio_language", return_value="en"), \
+                     patch.object(main, "detect_viral_moments", return_value=[moment]), \
+                     patch.object(main, "analyze_faces_in_clip", return_value=FramingDecision(mode="blur_stack", face_count=0)) as analyze_faces, \
+                     patch.object(main, "generate_clip_thumbnail", return_value=None), \
+                     patch.object(main, "render_viral_clip", return_value=str(clip_path)), \
+                     patch.object(main, "upload_clip_to_github_release", return_value=None), \
+                     patch("src.release_cleaner.clean_old_releases"), \
+                     patch.object(main, "record_history"), \
+                     patch.object(main, "SlackNotifier"):
+                    main.run_pipeline(
+                        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                        num_clips=1,
+                        framing_mode="auto",
+                        subtitles_mode="skip",
+                    )
 
             analyze_faces.assert_called_once_with(clip_path, 0.0, 30.0)
+            self.assertGreaterEqual(
+                pixel_gate.call_count,
+                1,
+                "the pixel gate must run on the probe branch; if this is failing, "
+                "the gate was removed rather than stubbed",
+            )
 
 if __name__ == "__main__":
     unittest.main()
