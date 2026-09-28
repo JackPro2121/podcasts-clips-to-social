@@ -64,6 +64,7 @@ CODE_LOUDNESS = "loudness"
 CODE_MIRRORED = "mirrored_source"
 CODE_CAPTION_ON_FACE = "caption_on_face"
 CODE_DURATION = "duration_out_of_contract"
+CODE_CHECK_UNRUNNABLE = "check_unrunnable"
 
 # A caption covering more than this fraction of the **upper** face (brow through
 # eyes) is unreadable. Measured on the golden masters:
@@ -422,11 +423,19 @@ def verify(
                 )
             )
         elif not mirror_report.measurable:
+            # Warning, not info. Measured: with the pipeline's own captions
+            # excluded, no clip in the corpus has any machine-readable source
+            # text, so mirror state is undecidable from rendered output. That is
+            # a real capability gap and it must not read as a pass.
             verdict.add(
                 Finding(
                     CODE_MIRRORED,
-                    "info",
-                    mirror_report.reason,
+                    "warning",
+                    (
+                        f"mirror state not determinable from rendered output: "
+                        f"{mirror_report.reason} Selfie-flipped source footage would "
+                        f"not be caught by this report."
+                    ),
                     "output quality",
                     mirror_report.as_dict(),
                 )
@@ -486,9 +495,32 @@ def verify(
                     )
             else:
                 caption_payload["on_face_pct"] = None
-                caption_payload["note"] = (
-                    f"no faces detected ({face_report.reason}); caption placement "
-                    f"not measurable"
+                # A check that could not run is reported as a WARNING, not as
+                # info and not as a pass. This is the single most important
+                # behaviour in the module.
+                #
+                # The first CI run of the caption check reported nothing at all
+                # on every clip, because faces.py opened the YuNet model path
+                # directly and the file tracked in git is named
+                # `face_detection_yunen_2023mar.onnx` -- transposed letters --
+                # while the loader looks for `face_detection_yunet.onnx`. The
+                # check silently did nothing on a gate that looked green, which
+                # is the exact failure this package was written to end.
+                #
+                # So: any check that cannot run says so at warning severity, and
+                # names the capability that is lost.
+                verdict.add(
+                    Finding(
+                        CODE_CHECK_UNRUNNABLE,
+                        "warning",
+                        (
+                            f"caption placement could not be measured: "
+                            f"{face_report.reason}. Captions may be overlapping the "
+                            f"subject and nothing in this report would show it."
+                        ),
+                        "internal",
+                        caption_payload,
+                    )
                 )
         except Exception as error:  # pragma: no cover - defensive
             caption_payload["error"] = str(error)

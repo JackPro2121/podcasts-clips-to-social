@@ -147,39 +147,60 @@ class FaceReport:
 def _load_yunet() -> Tuple[Optional[Any], str]:
     """Load the tracked YuNet model. Returns ``(detector, reason)``.
 
-    The model path is imported from :mod:`src.face_tracker` rather than
-    ``src.config``, because that is where it is defined and where the download
-    fallback lives. Reusing it means this module cannot drift from the detector
-    the renderer actually uses, which matters: if the two disagreed about which
-    blobs count as faces, a caption could be "on a face" here and "not on a face"
-    in the renderer.
+    Delegates to :func:`src.face_tracker.get_face_detector`, which owns the
+    model path *and* the download fallback, and falls back through MediaPipe to
+    Haar. Re-implementing the load here was a real bug: the first version of this
+    module opened the model path directly and reported "not present" on CI,
+    because the file tracked in git is named ``face_detection_yunen_2023mar.onnx``
+    (note the transposed letters) while the loader looks for
+    ``face_detection_yunet.onnx`` and fetches it at runtime. The caption check
+    therefore silently did nothing in CI while reporting nothing wrong.
+
+    That is precisely the failure this whole package exists to prevent -- a gate
+    that cannot run and does not say so -- so the fix is twofold: reuse the loader,
+    and make an unrunnable check report a warning rather than passing quietly.
     """
-    import cv2
-
-    from src.face_tracker import YUNET_MODEL_PATH
-
-    path = Path(YUNET_MODEL_PATH)
-    if not path.exists():
-        return None, f"YuNet model not present at {path}"
     try:
-        return (
-            cv2.FaceDetectorYN.create(
-                str(path), "", (DETECT_WIDTH, DETECT_HEIGHT),
-                SCORE_THRESHOLD, NMS_THRESHOLD, 5000,
-            ),
-            "",
-        )
+        import cv2
+    except ImportError:
+        return None, "OpenCV is not installed"
+
+    if not hasattr(cv2, "FaceDetectorYN"):
+        return None, "this OpenCV build has no FaceDetectorYN (OpenCV >= 4.5.4 required)"
+
+    try:
+        from src.face_tracker import get_face_detector
     except Exception as error:
-        return None, f"YuNet failed to construct: {error}"
+        return None, f"face_tracker unavailable: {error}"
+
+    try:
+        detector = get_face_detector()
+    except Exception as error:
+        return None, f"no face detector could be constructed: {error}"
+    if detector is None:
+        return None, "face_tracker returned no detector"
+    return detector, ""
 
 
 def detect_in_frame(frame: Any, detector: Any) -> List[FaceBox]:
-    """Detect faces in one BGR frame. Pure enough to test with a stub detector."""
+    """Detect faces in one BGR frame.
+
+    ``face_tracker.get_face_detector`` constructs YuNet at a fixed 320x320 input,
+    and MediaPipe's legacy detector is fixed at 640x640, so the frame is resized
+    to whatever the detector was built for. ``detect_in_frame`` stays pure enough
+    to test with a stub detector.
+    """
     import cv2
 
     height, width = frame.shape[:2]
-    if (width, height) != (DETECT_WIDTH, DETECT_HEIGHT):
-        resized = cv2.resize(frame, (DETECT_WIDTH, DETECT_HEIGHT))
+    target = getattr(detector, "_input_size", None)
+    if not isinstance(target, (tuple, list)) or len(target) != 2:
+        # YuNet, the only detector that matters here. face_tracker creates it at
+        # (320, 320); YuNet accepts the frame size it is given.
+        target = (320, 320)
+    target = (int(target[0]), int(target[1]))
+    if (width, height) != target:
+        resized = cv2.resize(frame, target)
     else:
         resized = frame
     try:
@@ -196,6 +217,14 @@ def detect_in_frame(frame: Any, detector: Any) -> List[FaceBox]:
             score = float(face[14]) if len(face) > 14 else 1.0
         except (TypeError, ValueError, IndexError):
             continue
+        # Rescale back into the caller's coordinate space.
+        if (width, height) != target:
+            scale_x = width / float(target[0])
+            scale_y = height / float(target[1])
+            x *= scale_x
+            box_width *= scale_x
+            y *= scale_y
+            box_height *= scale_y
         boxes.append(FaceBox(x=x, y=y, width=box_width, height=box_height, score=score))
     return boxes
 

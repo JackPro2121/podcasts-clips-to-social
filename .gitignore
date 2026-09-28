@@ -50,7 +50,27 @@ venv.bak/
 Thumbs.db
 scratch/
 *.mp4
+# Model weights are ignored by default, with one deliberate exception below.
 src/models/*.onnx
+
+# EXCEPTION: the YuNet face detector is tracked.
+#
+# It is 232 KB, and it is the one model the pipeline cannot work without. This
+# line exists because a fresh clone otherwise has no face detector at all: the
+# file in git was named `face_detection_yunen_2023mar.onnx` (transposed letters)
+# while the loader looks for `face_detection_yunet.onnx` and fetched it at
+# runtime. The consequence was that any check depending on faces silently did
+# nothing on CI -- verified: the caption-over-face check reported no findings on
+# any clip in the first CI run because the model was absent.
+#
+# Tracking it removes a network dependency from a gate that has to be reliable,
+# and both files on disk were byte-identical (sha256 8f2383e4dd3cfbb4553ea871),
+# so nothing is lost.
+!src/models/face_detection_yunet.onnx
+
+# transnetv2.onnx stays ignored. It is a 300+ MB optional shot detector that
+# nothing downloads, so every run silently falls back to PySceneDetect. Either
+# ship the weights or drop the branch; do not leave it looking enabled.
 analysis_*/
 test_*.ass
 
