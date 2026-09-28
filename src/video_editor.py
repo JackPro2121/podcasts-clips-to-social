@@ -426,10 +426,26 @@ def build_video_filtergraph(
                 )
                 # Crop each speaker at native resolution, then scale each pane to half-height.
                 # This preserves the tight face-relative crop boxes from face_tracker.
+                #
+                # The scale fills and then crops, rather than fitting and then padding.
+                # AGENTS.md 3.3 requires each pane to be 1080x960 with *zero black
+                # side bars*, and the old `decrease` + `pad` chain could not
+                # guarantee it: a pane that came out of face_tracker at 9:16 rather
+                # than 9:8 was fitted inside 1080x960, scaled to 540x960, and then
+                # padded -- 270 pixels of dead black on each side, 50% of the frame
+                # width. That is not a tuning issue, it is a structural one, and it
+                # shipped: `clip_1_HOW_I_MADE_400000_IN_A_MONTH.mp4` measures
+                # exactly 24.8% dead frame per side, sustained across 34 of 240
+                # sampled frames.
+                #
+                # `increase` + `crop` cannot produce bars under any circumstances. It
+                # costs at most a pixel or two of content at one edge, which is a
+                # trade worth making: a viewer cannot read a cropped eyebrow, but
+                # they certainly notice half the frame going black.
                 shot_f = (
                     f"[0:v]trim=start={s_start:.2f}:end={s_end:.2f},setpts=PTS-STARTPTS,split=2[s{i}_p1][s{i}_p2];"
-                    f"[s{i}_p1]crop={s1_w}:{s1_h}:{s1_x}:{s1_y},scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd:force_original_aspect_ratio=decrease,pad={OUTPUT_WIDTH}:{half_h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1:1[s{i}_top];"
-                    f"[s{i}_p2]crop={s2_w}:{s2_h}:{s2_x}:{s2_y},scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd:force_original_aspect_ratio=decrease,pad={OUTPUT_WIDTH}:{half_h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1:1[s{i}_bot];"
+                    f"[s{i}_p1]crop={s1_w}:{s1_h}:{s1_x}:{s1_y},scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd:force_original_aspect_ratio=increase,crop={OUTPUT_WIDTH}:{half_h},setsar=1:1[s{i}_top];"
+                    f"[s{i}_p2]crop={s2_w}:{s2_h}:{s2_x}:{s2_y},scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd:force_original_aspect_ratio=increase,crop={OUTPUT_WIDTH}:{half_h},setsar=1:1[s{i}_bot];"
                     f"[s{i}_top][s{i}_bot]vstack=inputs=2,drawbox=x=0:y={half_h - 3}:w={OUTPUT_WIDTH}:h=6:color=black:t=fill,scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}[{label}]"
                 )
             else:
@@ -525,12 +541,16 @@ def build_video_filtergraph(
         )
         half_h = OUTPUT_HEIGHT // 2
         # Crop at native resolution — face boxes are already in source pixel coordinates.
-        # Each pane: tight face crop → scale to full output width × half output height.
+        # Each pane: tight face crop -> scale to full output width x half output height.
+        #
+        # `increase` + `crop` rather than `decrease` + `pad`, for the reason given on
+        # the per-shot split_screen branch above: the pad chain is what put 270px of
+        # black on each side of a mis-proportioned pane in the published artifact.
         trim_prefix = f"trim=start={time_offset:.2f},setpts=PTS-STARTPTS," if time_offset > 0.0 else ""
         v_filter = (
             f"[0:v]{trim_prefix}split=2[s1_in][s2_in];"
-            f"[s1_in]crop={s1_w}:{s1_h}:{s1_x}:{s1_y},scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd:force_original_aspect_ratio=decrease,pad={OUTPUT_WIDTH}:{half_h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1:1,{studio_grade}[top_pane];"
-            f"[s2_in]crop={s2_w}:{s2_h}:{s2_x}:{s2_y},scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd:force_original_aspect_ratio=decrease,pad={OUTPUT_WIDTH}:{half_h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1:1,{studio_grade}[bottom_pane];"
+            f"[s1_in]crop={s1_w}:{s1_h}:{s1_x}:{s1_y},scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd:force_original_aspect_ratio=increase,crop={OUTPUT_WIDTH}:{half_h},setsar=1:1,{studio_grade}[top_pane];"
+            f"[s2_in]crop={s2_w}:{s2_h}:{s2_x}:{s2_y},scale={OUTPUT_WIDTH}:{half_h}:flags=lanczos+accurate_rnd:force_original_aspect_ratio=increase,crop={OUTPUT_WIDTH}:{half_h},setsar=1:1,{studio_grade}[bottom_pane];"
             f"[top_pane][bottom_pane]vstack=inputs=2,drawbox=x=0:y={half_h - 3}:w={OUTPUT_WIDTH}:h=6:color=black:t=fill,fps={FPS}[base]"
         )
     else:

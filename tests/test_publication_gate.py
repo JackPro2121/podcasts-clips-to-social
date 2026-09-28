@@ -167,7 +167,7 @@ class TestRunStateSettings(unittest.TestCase):
     """A shortfall has to land in the manifest, not only in a scrolling log."""
 
     def test_record_settings_exists_and_merges(self) -> None:
-        from src.run_state import RunManifest, RunStateStore
+        from src.run_state import RunStateStore
 
         self.assertTrue(hasattr(RunStateStore, "record_settings"))
         signature = RunStateStore.record_settings.__doc__ or ""

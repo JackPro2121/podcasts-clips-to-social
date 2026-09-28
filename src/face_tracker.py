@@ -146,6 +146,61 @@ _yunet_detector = None
 _mediapipe_detector = None
 _haar_detector = None
 
+# AGENTS.md 3.3. A split-screen pane must be 9:8 so that it scales to 1080x960 with
+# no black bars. Exposed as a module constant so tests and the renderer can agree
+# on one number rather than each restating 1.125.
+PANE_ASPECT = 9.0 / 8.0
+
+
+def _pane_dimensions(
+    target_width: int, max_height: int, max_width: int | None = None
+) -> tuple[int, int]:
+    """Even width and height at 9:8, within a pixel, inside the available region.
+
+    Both dimensions must be even: ffmpeg's yuv420p output needs chroma-aligned
+    dimensions, and an odd value is a class of bug this codebase has already hit
+    twice (``main.py:60`` producing 607, and ``face_tracker`` producing 607 for a
+    9:16 crop).
+
+    The previous implementation evened the width and the height independently,
+    which is what breaks the ratio. 1055 -> 1054 and 937 -> 936 gives 1.1261
+    instead of 1.125, and the renderer then padded the difference into a black
+    bar. Here only the *width* is the free variable: the height is derived from
+    it, and if the derived height is odd it is nudged up and the width recomputed
+    from the height, so the ratio stays correct to within one pixel.
+
+    ``max_width`` matters because the odd-height correction can return a width up
+    to two pixels *larger* than asked for. An uncapped result can exceed the source
+    width, and the position clamp elsewhere then yields a negative right edge, so
+    ffmpeg is handed a crop wider than the frame and fails outright.
+    """
+    ceiling_h = max(2, int(max_height))
+    ceiling_h -= ceiling_h % 2
+    ceiling_w = None
+    if max_width is not None:
+        ceiling_w = max(2, int(max_width))
+        ceiling_w -= ceiling_w % 2
+
+    width = max(2, int(target_width))
+    width -= width % 2
+    height = int(round(width * 8.0 / 9.0))
+    if height % 2:
+        height += 1
+        width = int(round(height * 9.0 / 8.0))
+        width -= width % 2
+    if height > ceiling_h:
+        height = ceiling_h
+        width = int(round(height * 9.0 / 8.0))
+        width -= width % 2
+    if ceiling_w is not None and width > ceiling_w:
+        width = ceiling_w
+        height = int(round(width * 8.0 / 9.0))
+        if height % 2:
+            height -= 1
+        height = max(2, min(height, ceiling_h))
+    return max(2, width), max(2, height)
+
+
 def get_face_detector():
     """Initializes Face Detection with robust multi-tiered fallbacks (YuNet -> MediaPipe -> Haar Cascade)."""
     global _yunet_attempted, _yunet_detector, _mediapipe_detector, _haar_detector
@@ -699,24 +754,41 @@ def analyze_faces_in_clip(
                 s2_fh = int(np.median([f[1].h for f in two_speaker_samples]))
 
             # Tight crop: each pane maintains 9:8 aspect ratio (matching 1080x960 pane)
-            PANE_ASPECT = 9.0 / 8.0
+            #
+            # AGENTS.md 3.3: "Crop boxes must maintain PANE_ASPECT = 9.0 / 8.0 so
+            # each speaker pane scales to 1080x960 with zero black bars on the
+            # sides."
+            #
+            # The old code evened the width and the height *independently*, which
+            # perturbs the ratio. 1055->1054 and 937->936 gives 1.1261 instead of
+            # 1.125; the renderer then fitted that into 1080x960 with
+            # `force_original_aspect_ratio=decrease` and padded the remainder,
+            # reintroducing the black bar the clause forbids. Deriving one
+            # dimension from the other keeps the ratio to within a pixel while
+            # both stay even, which ffmpeg requires for yuv420p chroma alignment.
+            #
+            # The video_editor side now also scales with `increase` + `crop`, so a
+            # pane that is a pixel out cannot produce bars even so. Both fixes are
+            # needed: this one makes the framing correct, that one makes bars
+            # structurally impossible.
             min_pane_w = int(active_w * 0.30)  # never narrower than 30% of frame
-            max_pane_w = int(active_w * 0.55)  # never wider than 55% (prevent overlap)
-            s1_pane_w = max(min_pane_w, min(int(s1_fw * 3.8), max_pane_w))
-            s2_pane_w = max(min_pane_w, min(int(s2_fw * 3.8), max_pane_w))
-            s1_pane_h = int(s1_pane_w / PANE_ASPECT)
-            s2_pane_h = int(s2_pane_w / PANE_ASPECT)
-            # Cap pane height to active_h
-            if s1_pane_h > active_h:
-                s1_pane_h = active_h
-                s1_pane_w = int(s1_pane_h * PANE_ASPECT)
-            if s2_pane_h > active_h:
-                s2_pane_h = active_h
-                s2_pane_w = int(s2_pane_h * PANE_ASPECT)
-            s1_pane_w -= s1_pane_w % 2
-            s1_pane_h -= s1_pane_h % 2
-            s2_pane_w -= s2_pane_w % 2
-            s2_pane_h -= s2_pane_h % 2
+            # NOTE: the old comment here claimed 55% "prevent[s] overlap". It does
+            # not, and it never could: 0.55 + 0.55 = 1.10. It is also not an
+            # overlap problem at all, because the panes are stacked vertically by
+            # vstack and never share screen space. The real risk of letting panes
+            # drift to the same position is that both panes show the same speaker,
+            # so the guard is now on the *positions* rather than the widths.
+            max_pane_w = int(active_w * 0.55)
+            s1_pane_w, s1_pane_h = _pane_dimensions(
+                max(min_pane_w, min(int(s1_fw * 3.8), max_pane_w)),
+                active_h,
+                max_width=active_w,
+            )
+            s2_pane_w, s2_pane_h = _pane_dimensions(
+                max(min_pane_w, min(int(s2_fw * 3.8), max_pane_w)),
+                active_h,
+                max_width=active_w,
+            )
 
             # Position: center crop on each speaker's face; keep head in upper third of pane
             s1_y_offset = max(0, int(s1_cy - s1_fh * 1.5))  # start crop 1.5 face-heights above eyes

@@ -98,7 +98,24 @@ class TestFramingAndAspect(unittest.TestCase):
         self.assertEqual(w, 640)
 
     def test_split_screen_aspect_ratio_preservation(self):
-        """Split screen bounding boxes must maintain 9:8 aspect ratio."""
+        """Split screen panes must fill 1080x960 with no padding.
+
+        This test used to assert the opposite:
+
+            self.assertIn("force_original_aspect_ratio=decrease", fg)
+            self.assertIn("pad=1080:960:(ow-iw)/2:(oh-ih)/2:color=black", fg)
+
+        Its name claimed to check that panes maintain 9:8, while its assertions
+        required the fit-then-pad chain that produces black bars whenever a pane
+        is *not* 9:8. It passed for years because the boxes it used, 900x800, are
+        9:8 exactly -- so the padding it insisted on was always inert on the only
+        input it ever tried. The one input that mattered, a 9:16 pane, was never
+        tested, and the published artifact
+        `clip_1_HOW_I_MADE_400000_IN_A_MONTH.mp4` measures 24.8% of frame width
+        dead black on each side as a result.
+
+        Now the assertions match the name: fill, then crop, never pad.
+        """
         s1 = ShotPlan(
             start=0.0, end=5.0, mode='split_screen',
             speaker1_box=(100, 50, 900, 800),
@@ -112,8 +129,38 @@ class TestFramingAndAspect(unittest.TestCase):
         fg = build_video_filtergraph(decision, burn_subtitles=False)
         self.assertIn("vstack=inputs=2", fg)
         self.assertIn("crop=", fg)
-        self.assertIn("force_original_aspect_ratio=decrease", fg)
-        self.assertIn("pad=1080:960:(ow-iw)/2:(oh-ih)/2:color=black", fg)
+        self.assertIn("force_original_aspect_ratio=increase", fg)
+        self.assertIn("crop=1080:960", fg)
+        self.assertNotIn(
+            "pad=", fg,
+            "a pad in a split-screen graph is a black bar whenever the pane is "
+            "not exactly 9:8",
+        )
+
+    def test_split_screen_misproportioned_pane_still_fills(self):
+        """A pane that is NOT 9:8 must still fill its slot, with no bars.
+
+        This is the input the previous test never tried, and the one that produced
+        the shipped defect: 540x960 is 9:16, which fitted into 1080x960 as
+        540x960 and then padded 270px onto each side.
+        """
+        s1 = ShotPlan(
+            start=0.0, end=5.0, mode='split_screen',
+            speaker1_box=(100, 50, 540, 960),
+            speaker2_box=(1000, 50, 540, 960),
+            margin_v=0
+        )
+        decision = FramingDecision(
+            mode='multi_shot_dynamic', face_count=2, shots=[s1],
+            active_x=0, active_y=50, active_w=1920, active_h=1080
+        )
+        fg = build_video_filtergraph(decision, burn_subtitles=False)
+        self.assertNotIn("pad=", fg)
+        self.assertEqual(
+            fg.count("force_original_aspect_ratio=increase"), 2,
+            "both panes must fill, not just one",
+        )
+        self.assertEqual(fg.count("crop=1080:960"), 2)
 
     def test_single_dynamic_shot_preserves_shot_plan(self):
         from unittest.mock import patch
