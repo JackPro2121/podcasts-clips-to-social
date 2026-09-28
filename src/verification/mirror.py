@@ -82,6 +82,7 @@ class MirrorReport:
     dominance_ratio: float = 1.0
     boxes_original: int = 0
     boxes_mirrored: int = 0
+    suppressed_boxes: int = 0
     detector: str = ""
     notes: List[str] = field(default_factory=list)
 
@@ -107,6 +108,7 @@ class MirrorReport:
             "dominance_ratio": round(self.dominance_ratio, 4),
             "boxes_original": self.boxes_original,
             "boxes_mirrored": self.boxes_mirrored,
+            "suppressed_boxes": self.suppressed_boxes,
             "detector": self.detector,
             "notes": self.notes,
         }
@@ -170,8 +172,18 @@ def classify(
     return report
 
 
-def analyse(path: Path, samples: int = DEFAULT_SAMPLES) -> MirrorReport:
-    """Detect selfie-flipped source footage by comparing OCR across orientations."""
+def analyse(
+    path: Path,
+    samples: int = DEFAULT_SAMPLES,
+    exclude_rects: Optional[List[Any]] = None,
+) -> MirrorReport:
+    """Detect selfie-flipped source footage by comparing OCR across orientations.
+
+    ``exclude_rects`` are regions, in the decode resolution used here, to leave
+    out of the comparison. Pass the caption band from
+    :func:`src.verification.captions.detect_caption_regions` at the same
+    resolution. See the module docstring for why this is not optional.
+    """
     try:
         import numpy as np
     except ImportError:  # pragma: no cover
@@ -187,7 +199,7 @@ def analyse(path: Path, samples: int = DEFAULT_SAMPLES) -> MirrorReport:
     except Exception as error:
         return MirrorReport(ok=False, reason=f"no text detector: {error}")
 
-    frames, reason = probe.decode_gray_frames(
+    frames, reason = probe.decode_colour_frames(
         path, OCR_WIDTH, OCR_HEIGHT, max_frames=samples * 8
     )
     if not frames:
@@ -211,21 +223,68 @@ def analyse(path: Path, samples: int = DEFAULT_SAMPLES) -> MirrorReport:
         step = len(frames) / float(samples)
         chosen = [frames[int(index * step)] for index in range(samples)]
 
+    mask: Optional[Any] = None
+    if exclude_rects:
+        from . import captions as captions_module
+
+        # The band arrives in captions-module mask coordinates (270x480) and must
+        # be rescaled to this module's decode resolution. Passing it unscaled
+        # would exclude a 1/4-size region near the origin and silently exclude
+        # nothing useful.
+        scale_x = OCR_WIDTH / float(captions_module.MASK_WIDTH)
+        scale_y = OCR_HEIGHT / float(captions_module.MASK_HEIGHT)
+        mask = np.zeros(frames[0].shape[:2], dtype=bool)
+        height, width = mask.shape
+        for rect in exclude_rects:
+            x0 = max(0, min(width, int(rect.x * scale_x)))
+            y0 = max(0, min(height, int(rect.y * scale_y)))
+            x1 = max(0, min(width, int(rect.right * scale_x)))
+            y1 = max(0, min(height, int(rect.bottom * scale_y)))
+            if x1 > x0 and y1 > y0:
+                mask[y0:y1, x0:x1] = True
+        if not mask.any():
+            mask = None
+            report_mask_note = "exclusion band was empty after rescaling; ignored"
+        else:
+            report_mask_note = None
+    else:
+        report_mask_note = None
+
+    def _suppress(boxes: List[Any]) -> List[Any]:
+        if mask is None:
+            return boxes
+        height, width = mask.shape
+        kept: List[Any] = []
+        for box in boxes:
+            x0 = max(0, min(width, int(box.x)))
+            y0 = max(0, min(height, int(box.y)))
+            x1 = max(0, min(width, int(box.right)))
+            y1 = max(0, min(height, int(box.bottom)))
+            if x1 <= x0 or y1 <= y0:
+                continue
+            # A box is suppressed when most of it falls inside the excluded band.
+            if mask[y0:y1, x0:x1].mean() > 0.5:
+                continue
+            kept.append(box)
+        return kept
+
     original_scores: List[float] = []
     mirrored_scores: List[float] = []
     original_boxes: List[Any] = []
     mirrored_boxes: List[Any] = []
+    suppressed = 0
 
-    for gray in chosen:
-        # decode_gray_frames returns greyscale; OCR wants BGR.
-        bgr = np.stack([gray] * 3, axis=-1)
-        flipped = bgr[:, ::-1, :]
+    for frame in chosen:
+        flipped = frame[:, ::-1, :]
         try:
-            forward = list(detect_text_regions(bgr.copy(), force="ocr"))
-            reverse = list(detect_text_regions(flipped.copy(), force="ocr"))
+            raw_forward = list(detect_text_regions(frame.copy(), force="ocr"))
+            raw_reverse = list(detect_text_regions(flipped.copy(), force="ocr"))
         except Exception:
             # A detector that throws is not evidence in either direction.
             continue
+        forward = _suppress(raw_forward)
+        reverse = _suppress(raw_reverse)
+        suppressed += (len(raw_forward) - len(forward)) + (len(raw_reverse) - len(reverse))
         original_boxes.extend(forward)
         mirrored_boxes.extend(reverse)
         original_scores.append(_mean_confidence(forward))
@@ -246,6 +305,17 @@ def analyse(path: Path, samples: int = DEFAULT_SAMPLES) -> MirrorReport:
         len(chosen),
     )
     report.detector = str(detector_name)
+    report.suppressed_boxes = suppressed
+    if mask is not None:
+        report.notes.append(
+            f"excluded {suppressed} OCR box(es) covering the pipeline's own "
+            f"burned-in captions before comparing orientations. Without that "
+            f"exclusion the verdict is meaningless: libass renders captions after "
+            f"the frame is assembled, so they are correctly oriented no matter "
+            f"what the source was, and they outvote genuinely mirrored source text."
+        )
+    elif report_mask_note:
+        report.notes.append(report_mask_note)
     if report.measurable and report.readable_frames < MIN_READABLE_FRAMES:
         report.notes.append(
             f"only {report.readable_frames} sample(s) carried readable text; "

@@ -371,7 +371,27 @@ def verify(
 
     # --- mirror -------------------------------------------------------------
     if with_mirror:
-        mirror_report = mirror.analyse(path)
+        # The pipeline's own burned-in captions must be excluded first. libass
+        # renders them after the frame is assembled, so they are always correctly
+        # oriented; on the first CI run they outvoted the one genuinely mirrored
+        # element and the detector returned a false negative on a clip that is
+        # demonstrably mirrored.
+        caption_band: List[Any] = []
+        caption_reason = ""
+        try:
+            from . import captions as captions_module
+
+            caption_band, caption_reason = captions_module.detect_caption_regions(path)
+        except Exception as error:  # pragma: no cover - defensive
+            caption_reason = f"caption band detection failed: {error}"
+
+        verdict.metrics["caption_band"] = {
+            "found": bool(caption_band),
+            "reason": caption_reason,
+            "rects": [rect.as_dict() for rect in caption_band],
+        }
+
+        mirror_report = mirror.analyse(path, exclude_rects=caption_band or None)
         verdict.metrics["mirror"] = mirror_report.as_dict()
         if mirror_report.mirrored:
             verdict.add(
@@ -392,6 +412,11 @@ def verify(
                     "output quality",
                     mirror_report.as_dict(),
                 )
+            )
+        if not caption_band:
+            verdict.metrics.setdefault("notes", []).append(
+                f"caption band not located ({caption_reason}); mirror detection "
+                f"ran without caption exclusion and may under-report"
             )
 
     # --- duration contract --------------------------------------------------

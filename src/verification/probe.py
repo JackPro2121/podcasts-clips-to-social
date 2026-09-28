@@ -391,6 +391,68 @@ def decode_gray_frames(
     return list(buffer.reshape(count, height, width)), ""
 
 
+def decode_colour_frames(
+    path: Path,
+    width: int,
+    height: int,
+    max_frames: int = 40,
+    start: Optional[float] = None,
+    end: Optional[float] = None,
+) -> Tuple[List[Any], str]:
+    """Decode evenly sampled BGR frames at a reduced size.
+
+    Same contract as :func:`decode_gray_frames` but in colour, for detectors that
+    key on a colour signature. ``flags=area`` for the same reason: a windowed
+    resampler bleeds colour across an edge and would inflate a saturated-pixel
+    mask.
+    """
+    try:
+        import numpy as np
+    except ImportError:  # pragma: no cover
+        return [], "numpy is not installed"
+
+    total = duration_seconds(path)
+    if total <= 0.0:
+        return [], "could not determine clip duration"
+
+    window_start = 0.0 if start is None else max(0.0, float(start))
+    window_end = total if end is None else min(total, float(end))
+    span = max(0.05, window_end - window_start)
+    rate = min(30.0, max(0.5, max_frames / span))
+
+    seek = ["-ss", f"{window_start:.3f}"] if window_start > 0.0 else []
+    command = [
+        ffmpeg_binary(),
+        "-v",
+        "error",
+        *seek,
+        "-t",
+        f"{span:.3f}",
+        "-i",
+        str(path.resolve()),
+        "-vf",
+        f"fps={rate:.4f},scale={width}:{height}:flags=area",
+        "-vsync",
+        "0",
+        "-frames:v",
+        str(max_frames),
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "bgr24",
+        "-",
+    ]
+    code, data, stderr = _run_binary(command)
+    frame_bytes = width * height * 3
+    if code != 0 or not data:
+        return [], f"ffmpeg colour decode failed ({code}): {stderr.strip()[:200]}"
+    count = len(data) // frame_bytes
+    if count == 0:
+        return [], "ffmpeg produced zero complete frames"
+    buffer = np.frombuffer(data[: count * frame_bytes], dtype=np.uint8)
+    return list(buffer.reshape(count, height, width, 3)), ""
+
+
 def read_loudness(path: Path) -> Dict[str, float]:
     """Parse ``ebur128`` summary. Returns an empty dict on failure."""
     command = [
