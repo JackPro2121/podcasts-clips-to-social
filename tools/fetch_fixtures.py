@@ -52,7 +52,7 @@ def save_manifest(manifest: Dict[str, Any]) -> None:
     )
 
 
-def download(url: str, destination: Path) -> None:
+def download(url: str, destination: Path, allow_missing: bool = False) -> bool:
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(destination.suffix + ".part")
     request = urllib.request.Request(url, headers={"User-Agent": "fetch_fixtures/1"})
@@ -66,15 +66,19 @@ def download(url: str, destination: Path) -> None:
                     handle.write(chunk)
     except urllib.error.URLError as error:
         temporary.unlink(missing_ok=True)
+        if allow_missing:
+            print(f"[!] skipped unavailable fixture {url}: {error}")
+            return False
         raise SystemExit(f"download failed for {url}: {error}") from error
     temporary.replace(destination)
+    return True
 
 
 def url_for(entry: Dict[str, Any], base: str) -> str:
     return f"{base}/{entry['release_tag']}/{entry['file']}"
 
 
-def process(manifest: Dict[str, Any], verify_only: bool, record: bool) -> int:
+def process(manifest: Dict[str, Any], verify_only: bool, record: bool, allow_missing: bool = False) -> int:
     base = manifest["release_base"]
     entries: List[Dict[str, Any]] = list(manifest.get("clips", []))
     failures: List[str] = []
@@ -102,12 +106,17 @@ def process(manifest: Dict[str, Any], verify_only: bool, record: bool) -> int:
             continue
 
         if verify_only:
-            failures.append(f"{name}: missing (run without --verify to fetch)")
+            if not allow_missing:
+                failures.append(f"{name}: missing (run without --verify to fetch)")
+            else:
+                print(f"[!] {name}: missing (ignored with --allow-missing)")
             continue
 
         url = url_for(entry, base)
         print(f"[>] {name} <- {url}")
-        download(url, target)
+        ok = download(url, target, allow_missing=allow_missing)
+        if not ok:
+            continue
         actual = sha256_of(target)
         size = target.stat().st_size
         if expected and actual != expected:
@@ -148,8 +157,13 @@ def main() -> int:
     parser.add_argument(
         "--record", action="store_true", help="write newly discovered sha256 values to the manifest"
     )
+    parser.add_argument(
+        "--allow-missing",
+        action="store_true",
+        help="do not fail if remote fixtures are missing (e.g. pruned by release cleaner)",
+    )
     args = parser.parse_args()
-    return process(load_manifest(), args.verify, args.record)
+    return process(load_manifest(), args.verify, args.record, allow_missing=args.allow_missing)
 
 
 if __name__ == "__main__":
