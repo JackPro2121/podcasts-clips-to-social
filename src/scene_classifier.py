@@ -165,14 +165,16 @@ def classify_frame_scene(frame: np.ndarray) -> Dict[str, Any]:
             cascade_dir = getattr(getattr(cv2, "data", None), "haarcascades", "")
             cascade_path = str(cascade_dir) + "haarcascade_frontalface_default.xml"
             if os.path.isfile(cascade_path):
-                cascade = cv2.CascadeClassifier(cascade_path)
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                haar_faces: Any = cascade.detectMultiScale(gray, 1.2, 3, minSize=(30, 30))
-                if len(haar_faces) > 0:
-                    person_detected = True
-                    max_face_area_ratio = max(
-                        float(fw * fh) / total_frame_area for (_, _, fw, fh) in haar_faces
-                    )
+                cascade_cls = getattr(cv2, "CascadeClassifier", None)
+                if cascade_cls is not None:
+                    cascade = cascade_cls(cascade_path)
+                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    haar_faces: Any = cascade.detectMultiScale(gray, 1.2, 3, minSize=(30, 30))
+                    if len(haar_faces) > 0:
+                        person_detected = True
+                        max_face_area_ratio = max(
+                            float(fw * fh) / total_frame_area for (_, _, fw, fh) in haar_faces
+                        )
         except Exception:
             pass
 

@@ -278,13 +278,13 @@ def widest_row_frac(mask: Any, threshold: int = GLYPH_FILL_THRESHOLD) -> float:
     array = np.asarray(mask)
     if array.size == 0:
         return 0.0
-    per_row = (array > threshold).any(axis=1)
-    if not per_row.any():
+    per_row = np.asarray((array > threshold).any(axis=1))
+    if not bool(per_row.any()):
         return 0.0
     height, width = array.shape
     widest = 0
     for row in range(height):
-        if not per_row[row]:
+        if not bool(per_row[row]):  # type: ignore[index]
             continue
         cols = np.flatnonzero(array[row] > threshold)
         if cols.size:
