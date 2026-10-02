@@ -53,6 +53,10 @@ class ShotComposition:
     caption_anchor: str
     caption_rect: NormalizedRect
     protected_regions: List[NormalizedRect] = field(default_factory=list)
+    # Upper-face bands from the shot's detected faces. Kept separate from
+    # protected_regions so QA messages can still say "source text" for text, but
+    # the repair path treats both as forbidden.
+    face_regions: List[NormalizedRect] = field(default_factory=list)
     broll_mode: str = "none"
     transition: str = "cut"
     max_static_hold: float = 0.0
@@ -328,6 +332,7 @@ def _anchor_to_ass(anchor: str, rect: NormalizedRect, width: int, height: int) -
 def _force_collision_avoidance(
     shot: ShotComposition,
     rect: NormalizedRect,
+    safe_zone: SafeZone = DEFAULT_SAFE_ZONE,
 ) -> Tuple[str, NormalizedRect]:
     """
     Relocate a caption that overlaps the shot's protected source text.
@@ -336,27 +341,49 @@ def _force_collision_avoidance(
     caption is moved out of the way rather than re-rendering the same overlapping
     layout. Returns the anchor name alongside the rect so the reported anchor can
     never disagree with the geometry that was actually used.
+
+    The first version checked only ``protected_regions`` (source text), so the
+    repair that fixed a text collision moved the caption straight onto the
+    presenter's face -- the measured 100% caption-on-face defect. When both text
+    and a face are in the way the face wins: a caption on clothing is readable, a
+    caption across the eyes is not.
     """
-    if not shot.protected_regions:
+    avoid = list(shot.protected_regions) + list(shot.face_regions)
+    if not avoid:
         return shot.caption_anchor, rect
-    if not any(rect.intersects(region) for region in shot.protected_regions):
+
+    def face_conflicts(candidate: NormalizedRect) -> int:
+        return sum(1 for region in shot.face_regions if _conflicts(candidate, [region]))
+
+    def text_conflicts(candidate: NormalizedRect) -> int:
+        return sum(
+            1 for region in shot.protected_regions if _conflicts(candidate, [region])
+        )
+
+    def score(candidate: NormalizedRect) -> Tuple[int, int]:
+        return (face_conflicts(candidate), text_conflicts(candidate))
+
+    if score(rect) == (0, 0):
         return shot.caption_anchor, rect
-    for candidate in ("upper_center", "center", "lower_center"):
-        alternative = _caption_rect(candidate, DEFAULT_SAFE_ZONE)
-        if not any(alternative.intersects(region) for region in shot.protected_regions):
-            return candidate, alternative
-    # If all safe bands have some text, choose candidate with minimal collision count
-    best_candidate = shot.caption_anchor
-    best_count = sum(1 for region in shot.protected_regions if rect.intersects(region))
+
+    candidates = [shot.caption_anchor] + [
+        name
+        for name in ("lower_center", "upper_center", "center", "left_safe", "right_safe")
+        if name != shot.caption_anchor
+    ]
+    best_anchor = shot.caption_anchor
     best_rect = rect
-    for candidate in ("upper_center", "center", "lower_center"):
-        alt_rect = _caption_rect(candidate, DEFAULT_SAFE_ZONE)
-        overlap_count = sum(1 for region in shot.protected_regions if alt_rect.intersects(region))
-        if overlap_count < best_count:
-            best_count = overlap_count
-            best_candidate = candidate
-            best_rect = alt_rect
-    return best_candidate, best_rect
+    best_score = score(rect)
+    for candidate in candidates:
+        alternative = _caption_rect(candidate, safe_zone)
+        candidate_score = score(alternative)
+        if candidate_score < best_score:
+            best_anchor = candidate
+            best_rect = alternative
+            best_score = candidate_score
+        if best_score == (0, 0):
+            break
+    return best_anchor, best_rect
 
 
 def build_caption_placements(
@@ -378,7 +405,7 @@ def build_caption_placements(
         anchor = shot.caption_anchor
         rect = shot.caption_rect
         if avoid_collisions:
-            anchor, rect = _force_collision_avoidance(shot, rect)
+            anchor, rect = _force_collision_avoidance(shot, rect, plan.safe_zone)
             shot.caption_anchor = anchor
             shot.caption_rect = rect
         alignment, margin_v, avoidance = _anchor_to_ass(anchor, rect, width, height)
@@ -414,6 +441,7 @@ def build_composition_plan(
         shot_start = max(edit_plan.start, shot.start)
         shot_end = min(edit_plan.end, shot.end)
         protected = _protected_regions(shot)
+        face_regions = _face_avoidance_regions(shot, resolved_safe_zone)
         anchor = _caption_anchor(shot, protected, resolved_safe_zone)
         caption_rect = _caption_rect(anchor, resolved_safe_zone)
         static_hold = _freeze_hold(shot)
@@ -423,6 +451,8 @@ def build_composition_plan(
             decisions.append(f"{shot.shot_id}:static_hold={static_hold:.2f}s->motion")
         if protected:
             decisions.append(f"{shot.shot_id}:protected_text_regions={len(protected)}")
+        if face_regions:
+            decisions.append(f"{shot.shot_id}:protected_face_regions={len(face_regions)}")
         if shot.shot_type == "split_screen":
             decisions.append(f"{shot.shot_id}:split_layout")
         shot_plans.append(ShotComposition(
@@ -434,6 +464,7 @@ def build_composition_plan(
             caption_anchor=anchor,
             caption_rect=caption_rect,
             protected_regions=protected,
+            face_regions=face_regions,
             broll_mode=broll_mode,
             transition=transition,
             max_static_hold=round(min(static_hold, 2.5), 2),

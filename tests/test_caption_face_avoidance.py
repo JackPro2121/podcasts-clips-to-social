@@ -35,8 +35,10 @@ from src.composition_planner import (
     _caption_anchor,
     _conflicts,
     _face_avoidance_regions,
+    _force_collision_avoidance,
     DEFAULT_SAFE_ZONE,
     NormalizedRect,
+    ShotComposition,
 )
 from src.source_index import IndexedShot, TextRegion
 
@@ -248,6 +250,69 @@ class TestProximityTolerance(unittest.TestCase):
     def test_empty_regions_never_block(self) -> None:
         rect = NormalizedRect(x=0.08, y=0.62, width=0.76, height=0.14)
         self.assertFalse(_conflicts(rect, []))
+
+
+class TestRepairPathAvoidsFaces(unittest.TestCase):
+    """The repair relocation must treat faces as forbidden, not only source text.
+
+    This is the path that actually shipped the defect: QA raised
+    ``caption_source_collision`` on shots 0001/0003, the pipeline re-ran with
+    ``avoid_collisions=True``, and ``_force_collision_avoidance`` -- which only
+    checked ``protected_regions`` (text) -- moved the caption to ``upper_center``,
+    straight onto the presenter's face.
+
+    Mutation guard: restricting the avoid set back to ``shot.protected_regions``
+    selects ``upper_center`` here, which is inside the face band, and the first
+    assertion fails.
+    """
+
+    def _shot(self) -> ShotComposition:
+        return ShotComposition(
+            shot_id="shot_1",
+            start=0.0,
+            end=10.0,
+            source_type="human_or_scene",
+            crop=NormalizedRect(0.0, 0.0, 1.0, 1.0),
+            caption_anchor="lower_center",
+            caption_rect=NormalizedRect(0.08, 0.62, 0.76, 0.14),
+            # Source lower-third text the caption currently overlaps.
+            protected_regions=[NormalizedRect(0.05, 0.70, 0.90, 0.16)],
+            # Upper-face band: center (0.42..0.56) is the one band clear of both.
+            face_regions=[NormalizedRect(0.10, 0.08, 0.80, 0.24)],
+        )
+
+    def test_repair_never_lands_on_a_face(self) -> None:
+        shot = self._shot()
+        anchor, rect = _force_collision_avoidance(
+            shot, shot.caption_rect, DEFAULT_SAFE_ZONE
+        )
+        self.assertFalse(
+            _conflicts(rect, shot.face_regions),
+            msg=(
+                f"repair anchor {anchor!r} at y={rect.y:.2f}.."
+                f"{rect.y + rect.height:.2f} landed on the face band"
+            ),
+        )
+
+    def test_repair_still_clears_the_text_when_a_band_is_free(self) -> None:
+        shot = self._shot()
+        anchor, rect = _force_collision_avoidance(
+            shot, shot.caption_rect, DEFAULT_SAFE_ZONE
+        )
+        self.assertFalse(
+            _conflicts(rect, shot.protected_regions),
+            f"repair anchor {anchor!r} still overlaps the source text",
+        )
+
+    def test_plain_relocation_is_a_no_op_when_nothing_collides(self) -> None:
+        shot = self._shot()
+        shot.face_regions = []
+        shot.protected_regions = []
+        anchor, rect = _force_collision_avoidance(
+            shot, shot.caption_rect, DEFAULT_SAFE_ZONE
+        )
+        self.assertEqual(anchor, "lower_center")
+        self.assertEqual(rect, shot.caption_rect)
 
 
 def _caption_rect_for(anchor: str) -> NormalizedRect:
