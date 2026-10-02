@@ -119,7 +119,7 @@ def _apply_measured_loudness(
             "-map", "0:v:0", "-map", "0:a:0", "-c:v", "copy",
             "-af", _measured_loudnorm_filter(measurement, limiter_limit, linear),
             "-c:a", "aac", "-b:a", AUDIO_BITRATE, "-ar", "48000",
-            "-movflags", "+faststart", str(destination_path),
+            "-shortest", "-movflags", "+faststart", str(destination_path),
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

@@ -121,7 +121,10 @@ def _clip_transcript_text(
 
 def _extend_moment_to_complete_transcript(segments: List[TranscriptSegment], moment: Any) -> None:
     original_end = float(moment.end_time)
-    max_end = original_end + 8.0
+    hard_contract_ceiling = float(moment.start_time) + 54.0
+    max_end = min(original_end + 8.0, hard_contract_ceiling)
+    if max_end <= original_end:
+        return
     for segment in sorted(segments, key=lambda item: (item.start, item.end)):
         if segment.end <= original_end + 0.05:
             continue

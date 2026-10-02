@@ -105,7 +105,10 @@ def grade(
         peak_dbfs=peak_dbfs,
     )
     report.lufs_error = abs(integrated_lufs - TARGET_LUFS)
-    report.peak_error = abs(peak_dbfs - TARGET_TRUE_PEAK_DBFS)
+    if peak_dbfs > TARGET_TRUE_PEAK_DBFS:
+        report.peak_error = peak_dbfs - TARGET_TRUE_PEAK_DBFS
+    else:
+        report.peak_error = max(0.0, (TARGET_TRUE_PEAK_DBFS - 0.5) - peak_dbfs)
 
     if report.lufs_error > LUFS_TOLERANCE:
         report.ok = False

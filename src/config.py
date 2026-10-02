@@ -73,7 +73,7 @@ MAX_TRANSCRIPT_FALLBACKS = max(1, int(os.getenv("MAX_TRANSCRIPT_FALLBACKS", "3")
 # instead of being silently accepted.
 MIN_CLIP_DURATION = float(os.getenv("MIN_CLIP_DURATION", "30"))
 MAX_CLIP_DURATION = float(os.getenv("MAX_CLIP_DURATION", "140"))
-SHORT_FORM_MAX_DURATION = float(os.getenv("SHORT_FORM_MAX_DURATION", "60"))
+SHORT_FORM_MAX_DURATION = float(os.getenv("SHORT_FORM_MAX_DURATION", "55"))
 if MAX_CLIP_DURATION < MIN_CLIP_DURATION:
     MAX_CLIP_DURATION = MIN_CLIP_DURATION
 # Gemini model ladder. Ordered strongest-first; query_gemini_models walks the

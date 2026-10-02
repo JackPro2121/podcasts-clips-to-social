@@ -38,8 +38,8 @@ warnings.filterwarnings("ignore", message=".*Direct use of automatic function ca
 class ViralClipCandidate(BaseModel):
     title: str = Field(description="Catchy viral hook title (under 50 chars)")
     start_time: float = Field(description="Start time in seconds")
-    end_time: float = Field(description="End time in seconds (must be 30-140s after start_time)")
-    duration: float = Field(description="Duration in seconds (30.0 to 140.0)")
+    end_time: float = Field(description="End time in seconds (must be 30-52s after start_time)")
+    duration: float = Field(description="Duration in seconds (30.0 to 52.0)")
     viral_score: int = Field(description="Predicted virality score from 1 to 100")
     hook_reason: str = Field(description="Why this moment grabs immediate viewer attention")
     social_caption: str = Field(description="Ready-to-post engaging caption for TikTok/Reels/Shorts")
@@ -495,7 +495,7 @@ Your goal is to analyze the following podcast transcript and extract EXACTLY {nu
    Never start on host greetings, pleasantries, chitchat, or filler words ('um', 'uh', 'so', 'you know', 'yeah'). The first 3 seconds decide viral retention on TikTok, Shorts, and Reels. Start at the exact second the core hook begins.
 2. **High Emotional Intensity & Retention Pacing**: Fast-paced payoff, intense debate, or shocking breakdown that keeps the audience glued until the final second.
 3. **Standalone Cohesion**: The clip must make complete sense on its own without needing the rest of the 2-hour podcast.
-4. **Optimal Duration (30-60s Sweet Spot)**: The viral sweet spot for TikTok, Reels, and Shorts is strictly **30 to 60 seconds** (maximum 65 seconds). Never select a clip over 65 seconds. Pick concise, high-retention stories with rapid payoff.
+4. **Optimal Duration (30-50s Sweet Spot)**: The viral sweet spot for TikTok, Reels, and Shorts is strictly **30 to 50 seconds** (maximum 52 seconds). Never select a clip over 52 seconds. Pick concise, high-retention stories with rapid payoff.
 5. **Complete Boundaries**: The start must begin at a complete thought and the end must land after a complete sentence or question. Never end on a partial word, a dangling conjunction, or a sentence fragment.
 6. **Exact Timestamps**: Use the provided transcript timestamps to specify precise start_time and end_time.
 7. **Punchy Curiosity-Gap Title**: Give each clip an engaging, high-CTR hook title in ALL CAPS (e.g., "THE $100,000 CREDIT CARD MISTAKE", "WHY YOU WILL NEVER RETIRE RICH", "THE 3 MONEY RULES OF MILLIONAIRES"). Max 5-7 words. Never include filler words ("um", "uh", "yeah"), and strictly DO NOT include emojis or special symbols.

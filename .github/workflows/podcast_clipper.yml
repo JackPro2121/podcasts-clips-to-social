@@ -218,6 +218,8 @@ jobs:
           APIFY_SEGMENT_ACTOR_ID: ${{ vars.APIFY_SEGMENT_ACTOR_ID || 'vidkraken/youtube-video-audio-downloader-reliable' }}
           APIFY_TRANSCRIPT_ACTOR_ID: ${{ vars.APIFY_TRANSCRIPT_ACTOR_ID || 'om_kh/video-transcript-api' }}
           CLIP_ONLY_MODE: 'true'
+          MAX_CLIP_DURATION: '50'
+          SHORT_FORM_MAX_DURATION: '55'
           UNIVERSAL_EDITOR_SHADOW: ${{ vars.UNIVERSAL_EDITOR_SHADOW || 'true' }}
           UNIVERSAL_EDITOR_ENFORCE_QA: ${{ vars.UNIVERSAL_EDITOR_ENFORCE_QA || 'false' }}
           MAX_DISCOVERY_CANDIDATES: '12'
