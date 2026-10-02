@@ -182,7 +182,7 @@ def _validate_rendered_output(path: Path, expected_duration: float) -> None:
 # triangle holds a near-constant speed between its turning points, so the longest
 # sub-threshold run drops to ~0.07s -- below freezedetect's own d=0.5 report floor.
 _STATIC_SHOT_DRIFT_FREQ = 1.8
-_STATIC_SHOT_DRIFT_RATIO = 0.05
+_STATIC_SHOT_DRIFT_RATIO = 0.005
 # 2/pi scales a unit sine into a unit-amplitude triangle.
 _STATIC_SHOT_DRIFT_WAVE = "0.6366*asin(sin(t*{freq}))"
 
@@ -277,7 +277,7 @@ def _effective_drift_ratio(motion_gain: float) -> float:
         return _STATIC_SHOT_DRIFT_RATIO
     if not math.isfinite(gain) or gain <= 0:
         return _STATIC_SHOT_DRIFT_RATIO
-    return min(0.20, _STATIC_SHOT_DRIFT_RATIO * gain)
+    return min(0.015, _STATIC_SHOT_DRIFT_RATIO * gain)
 
 
 def _motion_guarantee_filter(motion_gain: float = 1.0) -> str:
@@ -456,7 +456,7 @@ def build_video_filtergraph(
                 shot_f = (
                     f"[0:v]trim=start={s_start:.2f}:end={s_end:.2f},setpts=PTS-STARTPTS,crop={s_cw}:{s_ch}:{s_cx}:{s_cy},split=2[s{i}_fg_in][s{i}_bg_in];"
                     f"[s{i}_bg_in]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},boxblur=30:5,eq=brightness=-0.16:contrast=1.12[s{i}_bg];"
-                    f"[s{i}_fg_in]crop=iw*0.92:ih*0.92:x='(iw-iw*0.92)/2+iw*0.03*sin(t*1.8)':y='(ih-ih*0.92)/2',scale={OUTPUT_WIDTH}:-1:force_original_aspect_ratio=decrease,{studio_grade}[s{i}_fg];"
+                    f"[s{i}_fg_in]crop=iw*0.92:ih*0.92:x='(iw-iw*0.92)/2':y='(ih-ih*0.92)/2',scale={OUTPUT_WIDTH}:-1:force_original_aspect_ratio=decrease,{studio_grade}[s{i}_fg];"
                     f"[s{i}_bg][s{i}_fg]overlay=(W-w)/2:(H-h)/2,setsar=1:1,fps={FPS}[{label}]"
                 )
             elif shot.mode == "split_screen" and shot.speaker1_box and shot.speaker2_box:
@@ -731,13 +731,13 @@ def render_viral_clip(
     output_clip_path.parent.mkdir(parents=True, exist_ok=True)
 
     current_input_idx = 0
-    # For targeted segment downloads (or small start_time < 15.0s), do NOT use fast keyframe
+    # For targeted segment downloads (or start_time < 30.0s), do NOT use fast keyframe
     # seeking before -i. Keyframe snapping shifts video by 200-500ms relative to audio.
     # Instead, accurately decode from start with exact presentation timestamp (PTS) trimming.
     if start_time < 0.02:
         input_args = ["-t", f"{duration:.2f}", "-i", str(source_video_path)]
         effective_start = 0.0
-    elif start_time < 15.0:
+    elif (source_duration is not None and source_duration <= 300.0) or start_time < 30.0:
         input_args = ["-i", str(source_video_path)]
         effective_start = start_time
     else:
@@ -821,14 +821,14 @@ def render_viral_clip(
         mix_inputs = ["[voice]"]
 
         atrim_part = (
-            f"atrim=start={effective_start:.3f}:duration={duration_text}"
+            f"atrim=start={effective_start:.3f}:duration={duration_text},asetpts=PTS-STARTPTS"
             if effective_start > 0.0
-            else f"atrim=duration={duration_text}"
+            else f"atrim=duration={duration_text},asetpts=PTS-STARTPTS"
         )
         # High-definition vocal chain: 80Hz rumble cut + 3kHz presence + 10kHz air
         voice_filter = (
             f"[{voice_input_idx}:a]aformat=channel_layouts=stereo,"
-            f"aresample=48000:async=1:first_pts=0,asetpts=PTS-STARTPTS,"
+            f"aresample=48000:async=1:first_pts=0,"
             f"{atrim_part},apad=whole_dur={duration_text},"
             f"highpass=f={HIGHPASS_FREQ},"
             f"equalizer=f={VOCAL_PRESENCE_FREQ}:width_type=h:width=1000:g=2.5,"
