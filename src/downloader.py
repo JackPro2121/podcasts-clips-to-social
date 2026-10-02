@@ -534,9 +534,13 @@ def download_segment_via_apify(
 # Strictly prefer avc1 (H.264) to avoid AV1 decoding loops on GitHub Actions runners.
 # Enforce English/original audio track priority so multi-dub videos do not download foreign audio.
 _AUDIO_EN_PREF = (
+    'bestaudio[language=en-US]/'
     'bestaudio[language=en]/'
     'bestaudio[language^=en]/'
     'bestaudio[format_id*=original]/'
+    'bestaudio[format_id=140]/'
+    'bestaudio[format_id=251]/'
+    'bestaudio[format_id=139]/'
     'bestaudio'
 )
 _HD_FORMAT = (
@@ -1360,3 +1364,140 @@ def download_clip_segment(
 
     print(f"[-] All segment download strategies failed for {section_spec}.")
     return None
+
+
+def fetch_english_audio_segment(
+    video_url: str,
+    output_dir: Path,
+    start_time: float,
+    end_time: float,
+    clip_index: int = 1,
+) -> Optional[Path]:
+    """
+    Downloads specifically the English audio track ([en-US] or original) for a clip time-range.
+    Uses yt-dlp with _AUDIO_EN_PREF and download_ranges.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    audio_out_tmpl = str(output_dir / f"audio_en_{clip_index}_{int(start_time)}s_{int(end_time)}s.%(ext)s")
+    base_opts: Dict[str, Any] = {
+        'js_runtimes': {'node': {}},
+        'outtmpl': audio_out_tmpl,
+        'download_ranges': yt_dlp.utils.download_range_func(None, [(start_time, end_time)]),
+        'force_keyframes_at_cuts': True,
+        'quiet': True,
+        'no_warnings': True,
+    }
+    if YTDLP_PROXY and YTDLP_PROXY.strip():
+        base_opts['proxy'] = YTDLP_PROXY.strip()
+
+    cookie_value = os.environ.get("YOUTUBE_COOKIES", "") or ""
+    cookie_path = (
+        _write_cookiefile(cookie_value)
+        if cookie_value.strip()
+        else None
+    )
+    clients = _ytdlp_client_variants(cookie_path=cookie_path)
+    audio_format = _AUDIO_EN_PREF
+
+    for label, extra in clients:
+        opts = {
+            **base_opts,
+            'format': audio_format,
+            **extra,
+        }
+        try:
+            print(f"  [*] Attempting English audio fetch via client '{label}'...")
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                ydl.extract_info(video_url, download=True)
+
+            candidates = sorted(output_dir.glob(f"audio_en_{clip_index}_{int(start_time)}s_{int(end_time)}s.*"))
+            for candidate in candidates:
+                if candidate.exists() and candidate.stat().st_size > 10_000:
+                    print(f"  [+] English audio track downloaded ({candidate.stat().st_size / 1024:.1f} KB) via '{label}'")
+                    return candidate.resolve()
+        except Exception as e:
+            print(f"  [-] Client '{label}' audio fetch failed: {e}")
+
+    # Fallback to Apify with mp3 format if APIFY_API_TOKEN is present
+    if APIFY_API_TOKEN:
+        print("[*] Trying Apify audio extraction for English track fallback...")
+        try:
+            apify_audio = download_via_apify(
+                video_url=video_url,
+                output_dir=output_dir,
+                start_time=start_time,
+                end_time=end_time,
+                quality="mp3",
+            )
+            if apify_audio and Path(apify_audio["video_path"]).exists():
+                return Path(apify_audio["video_path"]).resolve()
+        except Exception as e:
+            print(f"[-] Apify audio extraction failed: {e}")
+
+    return None
+
+
+def remux_video_with_audio(
+    video_path: Path,
+    audio_path: Path,
+    output_path: Path,
+) -> bool:
+    """
+    Replaces the audio track of video_path with audio_path using ffmpeg (c:v copy, c:a aac).
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(video_path),
+        "-i", str(audio_path),
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-map", "0:v:0",
+        "-map", "1:a:0",
+        "-shortest",
+        str(output_path),
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        return proc.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0
+    except Exception as e:
+        print(f"[-] Remux failed: {e}")
+        return False
+
+
+def try_fallback_english_audio(
+    video_url: str,
+    clip_path: Path,
+    output_dir: Path,
+    start_time: float,
+    end_time: float,
+    clip_index: int = 1,
+    transcript_text: Optional[str] = None,
+) -> Optional[Path]:
+    """
+    Fallback mechanism when downloaded clip has non-English audio (e.g. Apify pulled foreign dub).
+    Fetches the English audio track ([en-US]) and remuxes it with the video stream.
+    """
+    from src.transcriber import verify_audio_language
+
+    audio_file = fetch_english_audio_segment(
+        video_url=video_url,
+        output_dir=output_dir,
+        start_time=start_time,
+        end_time=end_time,
+        clip_index=clip_index,
+    )
+    if not audio_file or not audio_file.exists():
+        return None
+
+    remuxed_file = output_dir / f"clip_{clip_index}_en_remuxed.mp4"
+    if not remux_video_with_audio(clip_path, audio_file, remuxed_file):
+        return None
+
+    try:
+        verify_audio_language(remuxed_file, transcript_text=transcript_text)
+        return remuxed_file
+    except Exception as e:
+        print(f"[-] Remuxed audio still failed language verification: {e}")
+        return None

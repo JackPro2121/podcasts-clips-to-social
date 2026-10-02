@@ -579,8 +579,28 @@ def run_pipeline(
                     ),
                 )
             except Exception as language_error:
-                print(f"[-] Skipping non-English clip #{idx}: {language_error}")
-                continue
+                print(f"[!] Language check flagged non-English audio on clip #{idx}: {language_error}")
+                print("[*] Triggering fallback: attempting to fetch dedicated English audio track ([en-US]) to remux...")
+                from src.downloader import try_fallback_english_audio
+
+                fixed_clip = try_fallback_english_audio(
+                    video_url=active_source_url,
+                    clip_path=Path(clip_path),
+                    output_dir=DOWNLOADS_DIR,
+                    start_time=moment.start_time,
+                    end_time=moment.end_time,
+                    clip_index=idx,
+                    transcript_text=_clip_transcript_text(
+                        segments or [], moment.start_time, moment.end_time
+                    ),
+                )
+                if fixed_clip and fixed_clip.exists():
+                    clip_path = str(fixed_clip)
+                    clip_info['video_path'] = fixed_clip
+                    print(f"[+] Fallback to English audio track ([en-US]) successful for clip #{idx}!")
+                else:
+                    print(f"[-] Skipping non-English clip #{idx}: {language_error}")
+                    continue
 
             render_start = float(clip_info.get("segment_start", 0.0))
             render_end = render_start + clip_duration

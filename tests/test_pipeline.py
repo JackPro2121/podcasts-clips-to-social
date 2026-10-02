@@ -84,6 +84,29 @@ class TestPodcastClipperPipeline(unittest.TestCase):
                 )
             self.assertIn("Audio language is not English", str(ctx.exception))
 
+    def test_fallback_to_english_audio_track(self):
+        from unittest import mock
+        from src.downloader import try_fallback_english_audio
+        with mock.patch("src.downloader.fetch_english_audio_segment") as mock_fetch, \
+             mock.patch("src.downloader.remux_video_with_audio") as mock_remux, \
+             mock.patch("src.transcriber.verify_audio_language") as mock_verify:
+            mock_fetch.return_value = Path("audio_en.m4a")
+            mock_remux.return_value = True
+            mock_verify.return_value = "en"
+
+            with mock.patch.object(Path, "exists", return_value=True):
+                result = try_fallback_english_audio(
+                    video_url="https://youtube.com/watch?v=fake",
+                    clip_path=Path("clip_fake.mp4"),
+                    output_dir=Path("downloads"),
+                    start_time=10.0,
+                    end_time=20.0,
+                    clip_index=1,
+                    transcript_text="This is an English transcript for testing.",
+                )
+                self.assertIsNotNone(result)
+                self.assertTrue(str(result).endswith("clip_1_en_remuxed.mp4"))
+
     def test_loudness_pass_ladder_falls_back_to_dynamic_normalization(self):
         self.assertTrue(_LOUDNESS_PASS_LADDER[0][0])
         self.assertTrue(any(not linear for linear, _ in _LOUDNESS_PASS_LADDER[1:]))
