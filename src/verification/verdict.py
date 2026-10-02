@@ -495,28 +495,36 @@ def verify(
                     )
             else:
                 caption_payload["on_face_pct"] = None
-                # A check that could not run is reported as a WARNING, not as
-                # info and not as a pass. This is the single most important
-                # behaviour in the module.
-                #
-                # The first CI run of the caption check reported nothing at all
-                # on every clip, because faces.py opened the YuNet model path
-                # directly and the file tracked in git is named
-                # `face_detection_yunen_2023mar.onnx` -- transposed letters --
-                # while the loader looks for `face_detection_yunet.onnx`. The
-                # check silently did nothing on a gate that looked green, which
-                # is the exact failure this package was written to end.
-                #
-                # So: any check that cannot run says so at warning severity, and
-                # names the capability that is lost.
+                captions_present = bool(
+                    (verdict.metrics.get("caption_band") or {}).get("found")
+                )
+                if not captions_present:
+                    try:
+                        from . import captions as captions_module
+
+                        found, _reason = captions_module.detect_caption_regions(path)
+                        captions_present = bool(found)
+                    except Exception:
+                        captions_present = False
+                caption_payload["captions_present"] = captions_present
+                # A check that cannot run must not read as a pass. When captions
+                # are burned in, the face-avoidance contract is unverifiable, so
+                # this blocks; when there are no captions there is nothing to
+                # check and a warning is honest.
+                severity = "error" if captions_present else "warning"
                 verdict.add(
                     Finding(
                         CODE_CHECK_UNRUNNABLE,
-                        "warning",
+                        severity,
                         (
                             f"caption placement could not be measured: "
-                            f"{face_report.reason}. Captions may be overlapping the "
-                            f"subject and nothing in this report would show it."
+                            f"{face_report.reason}. "
+                            + (
+                                "Burned-in captions were detected, so the "
+                                "face-avoidance contract cannot be verified."
+                                if captions_present
+                                else "No burned-in captions were detected."
+                            )
                         ),
                         "internal",
                         caption_payload,

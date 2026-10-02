@@ -179,6 +179,15 @@ def _load_yunet() -> Tuple[Optional[Any], str]:
         return None, f"no face detector could be constructed: {error}"
     if detector is None:
         return None, "face_tracker returned no detector"
+    if not hasattr(detector, "detect"):
+        # face_tracker falls back through MediaPipe and Haar, which expose
+        # process()/detectMultiScale() instead. detect_in_frame below only knows
+        # the YuNet API, so those backends silently produced zero faces and the
+        # caption gate reported "no faces" instead of "wrong detector".
+        return None, (
+            f"face detector backend {type(detector).__name__} has no detect(); "
+            f"only the OpenCV YuNet detector can run the caption check"
+        )
     return detector, ""
 
 
@@ -204,6 +213,14 @@ def detect_in_frame(frame: Any, detector: Any) -> List[FaceBox]:
     else:
         resized = frame
     try:
+        # face_tracker.detect_faces_in_frame sets the input size on this shared,
+        # cached detector to the full frame before every detect(). Reusing it here
+        # without resetting the size means detect() runs with a 320x320 image
+        # while the detector still expects e.g. 1920x1080, and YuNet returns
+        # nothing -- which is exactly how the CI caption gate reported "no faces
+        # detected" on every clip while the same code found faces locally.
+        if hasattr(detector, "setInputSize"):
+            detector.setInputSize((resized.shape[1], resized.shape[0]))
         _, faces = detector.detect(resized)
     except Exception:
         return []
