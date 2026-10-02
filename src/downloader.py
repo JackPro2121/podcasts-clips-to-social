@@ -1418,7 +1418,7 @@ def fetch_english_audio_segment(
         except Exception as e:
             print(f"  [-] Client '{label}' audio fetch failed: {e}")
 
-    # Fallback to Apify with mp3 format if APIFY_API_TOKEN is present
+    # Fallback to Apify with audio format if APIFY_API_TOKEN is present
     if APIFY_API_TOKEN:
         print("[*] Trying Apify audio extraction for English track fallback...")
         try:
@@ -1427,7 +1427,7 @@ def fetch_english_audio_segment(
                 output_dir=output_dir,
                 start_time=start_time,
                 end_time=end_time,
-                quality="mp3",
+                quality="audio",
             )
             if apify_audio and Path(apify_audio["video_path"]).exists():
                 return Path(apify_audio["video_path"]).resolve()
