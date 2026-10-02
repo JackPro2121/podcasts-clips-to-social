@@ -110,7 +110,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg libgl1 libglib2.0-0
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
+          python -m pip install -r requirements.txt -r requirements-dev.txt
       - name: Run regression suite
         run: python -m unittest discover -s tests -v
       - name: Run static checks
