@@ -73,9 +73,9 @@ on:
         default: true
         type: boolean
       watermark:
-        description: 'Channel Watermark to burn at 50% opacity'
+        description: 'Channel Watermark to burn at 50% opacity (blank uses the CHANNEL_WATERMARK secret)'
         required: false
-        default: '@allinonepodcastsss'
+        default: ''
         type: string
 
   pull_request:
@@ -246,7 +246,7 @@ jobs:
           if [ "$EVENT_NAME" = "schedule" ]; then
             echo "[*] Triggered by daily schedule! Running automated High-CPM Finance & Wealth discovery..."
             args+=(--niche "finance" --num-clips 3 --framing auto --subtitle-style hormozi --subtitles auto)
-            args+=(--watermark "@allinonepodcastsss" --post-to-buffer)
+            args+=(--watermark "${CHANNEL_WATERMARK:-@allinonepodcastsss}" --post-to-buffer)
           else
             echo "[*] Triggered manually via workflow_dispatch."
             [ -n "${IN_VIDEO_URL:-}" ] && args+=(--url "$IN_VIDEO_URL")
@@ -255,7 +255,7 @@ jobs:
             args+=(--framing "${IN_FRAMING:-auto}")
             args+=(--subtitle-style "${IN_SUBTITLE_STYLE:-hormozi}")
             args+=(--subtitles "${IN_SUBTITLES_MODE:-auto}")
-            args+=(--watermark "${IN_WATERMARK:-@allinonepodcastsss}")
+            args+=(--watermark "${IN_WATERMARK:-${CHANNEL_WATERMARK:-@allinonepodcastsss}}")
             [ "${IN_POST_TO_BUFFER:-false}" = "true" ] && args+=(--post-to-buffer)
           fi
           python main.py "${args[@]}"

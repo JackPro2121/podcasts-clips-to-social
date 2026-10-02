@@ -34,8 +34,10 @@ from typing import Any, Dict, List, Sequence
 
 from . import probe
 
-# Matches the existing editorial_qa filter so the two agree on what counts.
-FREEZE_FILTER = "n=0.003:d=0.5"
+# Primary gate. 200 ms, not 500 ms: the first-0.25s cover-frame defect measured
+# 0.267 s and was invisible to the old d=0.5 floor, so a regression of it would
+# pass every check. The strict pass below stays for diagnostics.
+FREEZE_FILTER = "n=0.003:d=0.2"
 FREEZE_FILTER_STR = f"freezedetect={FREEZE_FILTER}"
 FREEZE_FILTER_STRICT = "freezedetect=n=0.001:d=0.3"
 BLACK_FILTER_STR = "blackdetect=d=0.15:pix_th=0.10"

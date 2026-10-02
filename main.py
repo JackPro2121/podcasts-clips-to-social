@@ -944,7 +944,7 @@ def run_pipeline(
                                         ass_subtitle_path=ass_path,
                                         burn_subtitles=burn_subtitles,
                                         sfx_cues=getattr(moment, "sfx_cues", []),
-                                        cover_image_path=thumb_path,
+                                        cover_image_path=None,
                                         motion_gain=adjustment.motion_gain,
                                     )
 
