@@ -326,14 +326,27 @@ def _dominant_shot_face_boxes(
         ]
         if not near:
             near = [box]
-        out.append(
-            (
-                int(np.median([b[0] for b in near])),
-                int(np.median([b[1] for b in near])),
-                int(np.median([b[2] for b in near])),
-                int(np.median([b[3] for b in near])),
-            )
+        median = (
+            int(np.median([b[0] for b in near])),
+            int(np.median([b[1] for b in near])),
+            int(np.median([b[2] for b in near])),
+            int(np.median([b[3] for b in near])),
         )
+        # Skip anything that lands on a region already recorded.
+        #
+        # The first version emitted the same face twice, because it took the top
+        # `limit` boxes by area and the largest two were both the same face
+        # detected in adjacent samples. Identical protected regions are harmless to
+        # the intersection logic but waste work and make a plan JSON that lists one
+        # face as two, which is misleading when someone reads the artifact to find
+        # out why a caption moved.
+        if any(
+            abs(median[0] - kept[0]) <= kept[2] * 0.5
+            and abs(median[1] - kept[1]) <= kept[3] * 0.5
+            for kept in out
+        ):
+            continue
+        out.append(median)
     return out
 
 

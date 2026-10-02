@@ -280,6 +280,48 @@ def _effective_drift_ratio(motion_gain: float) -> float:
     return min(0.20, _STATIC_SHOT_DRIFT_RATIO * gain)
 
 
+def _motion_guarantee_filter(motion_gain: float = 1.0) -> str:
+    """Emits the composed-frame motion guarantee filter.
+
+    Scales the composed frame slightly (3% oversample) and applies a subtle
+    two-axis triangle-wave drift capped at ~1.1% of frame width (~12-16px).
+    The X and Y axes are quarter-cycle (pi/2) out of phase to trace a slow
+    diagonal rather than sliding back and forth along one line.
+
+    This guarantees zero freeze_interval events on statically held source
+    frames across all layout modes without introducing visible camera wobble.
+    """
+    from src.creative_spec import MOTION_POLICY
+
+    try:
+        gain = float(motion_gain)
+    except (TypeError, ValueError):
+        gain = 1.0
+    if not math.isfinite(gain) or gain <= 0:
+        gain = 1.0
+
+    ow = int(round(OUTPUT_WIDTH * MOTION_POLICY.OVERSAMPLE)) // 2 * 2
+    oh = int(round(OUTPUT_HEIGHT * MOTION_POLICY.OVERSAMPLE)) // 2 * 2
+
+    # Amplitude as a fraction of the oversampled frame dimension, scaled by gain
+    amp_x = int(round(ow * MOTION_POLICY.AMPLITUDE_RATIO * gain))
+    amp_y = int(round(oh * MOTION_POLICY.AMPLITUDE_RATIO * gain))
+
+    # Keep motion strictly within the oversampled slack
+    max_amp_x = max(1, (ow - OUTPUT_WIDTH) // 2)
+    max_amp_y = max(1, (oh - OUTPUT_HEIGHT) // 2)
+    amp_x = max(1, min(amp_x, max_amp_x))
+    amp_y = max(1, min(amp_y, max_amp_y))
+
+    wave_x = MOTION_POLICY.WAVE.format(freq=MOTION_POLICY.FREQUENCY_HZ, phase=MOTION_POLICY.PHASE_X)
+    wave_y = MOTION_POLICY.WAVE.format(freq=MOTION_POLICY.FREQUENCY_HZ, phase=MOTION_POLICY.PHASE_Y)
+
+    x_expr = f"(iw-{OUTPUT_WIDTH})/2+{amp_x}*{wave_x}"
+    y_expr = f"(ih-{OUTPUT_HEIGHT})/2+{amp_y}*{wave_y}"
+
+    return f"scale={ow}:{oh}:flags=lanczos+accurate_rnd,crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:'{x_expr}':'{y_expr}',setsar=1:1"
+
+
 def _crop_position(position: int, expr: Optional[str]) -> str:
     """Render a crop x/y argument, quoting only genuine ffmpeg expressions."""
     return f"'{expr}'" if expr else str(position)
@@ -579,6 +621,11 @@ def build_video_filtergraph(
         base_label = "[zoomed]"
     else:
         base_label = "[base]"
+
+    # Composed-frame motion guarantee (Anti-freeze invariant per AGENTS.md 3.2 and MOTION_POLICY)
+    motion_f = _motion_guarantee_filter(motion_gain)
+    filters.append(f"{base_label}{motion_f}[motion_out]")
+    base_label = "[motion_out]"
 
     # Overlay Pexels B-roll clips (underneath subtitles, on top of host/guest video)
     if broll_inputs:

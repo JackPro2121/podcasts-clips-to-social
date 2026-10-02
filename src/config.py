@@ -288,7 +288,7 @@ SUBTITLE_THEMES: Dict[str, Dict[str, Any]] = {
         "outline_width": 6.5,
         "shadow_color": "&H90000000",       # Deep Soft Drop Shadow
         "shadow_depth": 3.5,
-         "max_words_per_line": 3,            # Fast-paced phrase grouping
+        "max_words_per_line": 2,            # Alex Hormozi 1-to-2 word dynamic pacing
         "uppercase": True
     },
     "neon_green": {

@@ -4,10 +4,22 @@ from pathlib import Path
 from typing import List, Optional, Any, Dict, Tuple
 from src.config import (
     SUBTITLE_THEMES, OUTPUT_WIDTH, OUTPUT_HEIGHT, CHANNEL_WATERMARK,
-    ENABLE_TOP_HOOK_BADGE, HOOK_BADGE_DURATION, HOOK_BADGE_MARGIN_V,
+    ENABLE_TOP_HOOK_BADGE, HOOK_BADGE_MARGIN_V,
     get_subtitle_margin_v
 )
+from src.creative_spec import (
+    MAX_WORDS_PER_CAPTION, MAX_WORDS_PER_CAPTION_FAST_SPEECH, FAST_SPEECH_WPM_THRESHOLD,
+    HOOK_BADGE_DURATION_S, hex_to_ass_color,
+    HIGHLIGHT_YELLOW, HIGHLIGHT_NEON_GREEN, DANGER_RED, POWER_GOLD, BODY_WHITE
+)
 from src.transcriber import TranscriptSegment, WordTimestamp
+
+# High-contrast keyword color coding in ASS format (&H00BBGGRR)
+ASS_COLOR_YELLOW = hex_to_ass_color(HIGHLIGHT_YELLOW)          # &H0000E6FF (High-energy yellow)
+ASS_COLOR_NEON_GREEN = hex_to_ass_color(HIGHLIGHT_NEON_GREEN)  # &H0033FF22 (Wealth / financial green)
+ASS_COLOR_DANGER_RED = hex_to_ass_color(DANGER_RED)          # &H003333FF (Risk / loss / danger red)
+ASS_COLOR_POWER_GOLD = hex_to_ass_color(POWER_GOLD)          # &H0000D7FF (Power / authority gold)
+ASS_COLOR_BODY_WHITE = hex_to_ass_color(BODY_WHITE)          # &H00FFFFFF (Base body text)
 
 MONEY_KEYWORDS = {
     "money", "cash", "dollar", "dollars", "wealth", "invest", "investing", "saving", "savings",
@@ -18,13 +30,16 @@ MONEY_KEYWORDS = {
 DANGER_KEYWORDS = {
     "broke", "debt", "lie", "lied", "hate", "hater", "scam", "lost", "lose", "losing",
     "risk", "danger", "stupid", "mistake", "zero", "fail", "failed", "crash", "crashed", "boredom",
-    "worst", "unemployment", "seduction", "fool", "stop", "bad", "cut", "terrible", "crisis", "warning", "collapse"
+    "worst", "unemployment", "seduction", "fool", "stop", "bad", "cut", "terrible", "crisis", "warning", "collapse",
+    "trap", "scared", "afraid", "fired", "bankrupt", "loss", "losses", "panic", "ruin", "poor", "threat"
 }
 POWER_KEYWORDS = {
     "rules", "rule", "game", "secret", "never", "always", "truth", "master", "power",
-    "double", "boss", "timing", "how", "much", "left", "win", "winning", "growth", "scale",
-    "exponential", "billionaire", "millionaire", "blueprint", "framework", "insane"
+    "double", "boss", "timing", "win", "winning", "growth", "scale",
+    "exponential", "billionaire", "millionaire", "blueprint", "framework", "insane",
+    "dominant", "dominate", "elite", "champion", "unstoppable", "genius", "empire", "legend"
 }
+
 
 
 
@@ -144,9 +159,9 @@ def create_styled_ass_subtitles(
     with kinetic bounce pops and contextual emoji injection.
     """
     theme = SUBTITLE_THEMES.get(theme_key, SUBTITLE_THEMES["hormozi"])
-    max_words = max(2, min(4, int(theme.get("max_words_per_line", 3))))
+    max_words = max(1, min(MAX_WORDS_PER_CAPTION_FAST_SPEECH, int(theme.get("max_words_per_line", MAX_WORDS_PER_CAPTION))))
     uppercase = theme.get("uppercase", True)
-    highlight_color = theme.get("highlight_color", "&H0000E6FF")
+    highlight_color = theme.get("highlight_color", ASS_COLOR_YELLOW)
 
     # Filter words strictly within the clip duration and offset timestamps to 0.0s
     clip_duration = max(0.0, clip_end - clip_start)
@@ -213,8 +228,8 @@ def create_styled_ass_subtitles(
     clip_dur = max(1.0, clip_end - clip_start)
     wpm = (len(clip_words) / clip_dur) * 60.0
     effective_max_words = max_words
-    if wpm > 190 and len(clip_words) > 10:
-        effective_max_words = min(4, effective_max_words + 1)
+    if wpm > FAST_SPEECH_WPM_THRESHOLD and len(clip_words) > 10:
+        effective_max_words = min(MAX_WORDS_PER_CAPTION_FAST_SPEECH, effective_max_words + 1)
 
     base_margin_v = default_margin_v(layout_mode)
 
@@ -243,12 +258,18 @@ def create_styled_ass_subtitles(
 
     def word_color(word: WordTimestamp) -> str:
         clean_lower = re.sub(r'[^a-z0-9]', '', word.word.lower())
-        if clean_lower in MONEY_KEYWORDS or any(c.isdigit() for c in word.word) or '$' in word.word:
-            return "&H0033FF22"
+        # Danger/loss/risk takes precedence
         if clean_lower in DANGER_KEYWORDS:
-            return "&H003333FF"
+            return ASS_COLOR_DANGER_RED
+        # Wealth, financial figures, currency symbols
+        if clean_lower in MONEY_KEYWORDS or '$' in word.word or (any(c.isdigit() for c in word.word) and any(s in word.word.lower() for s in ('$', 'k', 'm', 'b', '%'))):
+            return ASS_COLOR_NEON_GREEN
+        # Power / authority terms
         if clean_lower in POWER_KEYWORDS:
-            return "&H0000D7FF"
+            return ASS_COLOR_POWER_GOLD
+        # Numbers without currency
+        if any(c.isdigit() for c in word.word):
+            return ASS_COLOR_NEON_GREEN
         return highlight_color
 
     lines: List[str] = []
@@ -319,7 +340,7 @@ def create_styled_ass_subtitles(
         else:
             clean_title = escape_ass_text(clean_title)
 
-        hook_dur = format_ass_timestamp(min(HOOK_BADGE_DURATION, clip_end - clip_start))
+        hook_dur = format_ass_timestamp(min(HOOK_BADGE_DURATION_S, clip_end - clip_start))
         lines.insert(0, f"Dialogue: 1,0:00:00.00,{hook_dur},TopHeader,,0,0,0,,{{\\fad(150,350)}}{clean_title}")
 
     full_content = header + "\n".join(lines) + "\n"

@@ -9,6 +9,12 @@ from typing import List, Tuple, Optional
 from dataclasses import dataclass, field
 from src.scene_classifier import classify_frame_scene, detect_clip_shots
 from src.config import ENABLE_PUNCH_ZOOM
+from src.creative_spec import (
+    SPEAKER_MIN_DWELL_S,
+    SPEAKER_HYSTERESIS,
+    INTERJECTION_MAX_S,
+    MIN_SPEECH_LIP_MOTION,
+)
 
 MODEL_DIR = Path(__file__).resolve().parent / "models"
 YUNET_MODEL_PATH = MODEL_DIR / "face_detection_yunet.onnx"
@@ -197,14 +203,22 @@ def _dominant_face_boxes(
         ]
         if not same:
             same = [face]
-        boxes.append(
-            (
-                int(np.median([f.x for f in same])),
-                int(np.median([f.y for f in same])),
-                int(np.median([f.w for f in same])),
-                int(np.median([f.h for f in same])),
-            )
+        median = (
+            int(np.median([f.x for f in same])),
+            int(np.median([f.y for f in same])),
+            int(np.median([f.w for f in same])),
+            int(np.median([f.h for f in same])),
         )
+        # The top `limit` boxes by area are frequently the same face detected in
+        # adjacent samples, which would record one face as several protected
+        # regions. Harmless to collision maths, misleading in the plan artifact.
+        if any(
+            abs(median[0] - kept[0]) <= kept[2] * 0.5
+            and abs(median[1] - kept[1]) <= kept[3] * 0.5
+            for kept in boxes
+        ):
+            continue
+        boxes.append(median)
     return boxes
 
 
@@ -455,8 +469,8 @@ def _skin_tone_center_x(frame: np.ndarray, active_x: int, active_y: int, active_
     except Exception:
         return None
 
-_MIN_SPEECH_LIP_MOTION = 2.0
-_DOMINANT_SPEAKER_RATIO = 1.6
+_MIN_SPEECH_LIP_MOTION = MIN_SPEECH_LIP_MOTION
+_DOMINANT_SPEAKER_RATIO = SPEAKER_HYSTERESIS
 
 def _estimate_mouth_motion(prev_patch: Optional[np.ndarray], frame: np.ndarray, f: FaceBox) -> Tuple[float, Optional[np.ndarray]]:
     """Calculates normalized pixel displacement in the mouth region (lower 35% of face box) for active speaker detection."""
@@ -586,6 +600,183 @@ def _relative_frame_timestamp(
     else:
         rel_t = (current_frame - start_frame) / max(1.0, float(fps))
     return max(0.0, min(float(clip_duration), rel_t))
+
+
+def _segment_two_speaker_shots(
+    rel_s: float,
+    rel_e: float,
+    shot_samples: List[Tuple[float, List[FaceBox], bool, List[float]]],
+    valid_face_samples: List[List[FaceBox]],
+    two_speaker_samples: List[List[FaceBox]],
+    target_crop_w: int,
+    active_x: int,
+    active_y: int,
+    active_w: int,
+    active_h: int,
+) -> List[ShotPlan]:
+    """Smart dynamic speaker switching (OpusClip Pro style).
+
+    Analyzes per-sample mouth motion energy of both speakers across the interval.
+    Switches camera to active speaker close-up (9:16 portrait) when one speaker is talking.
+    Switches to full-bleed 9:8 split-screen when both speak simultaneously (cross-talk/debate).
+    Applies dwell-time filtering (SPEAKER_MIN_DWELL_S) and hysteresis (SPEAKER_HYSTERESIS)
+    to eliminate rapid ping-pong cuts and ignore quick interjections (INTERJECTION_MAX_S).
+    """
+    s1_cx = int(np.median([f[0].center_x for f in two_speaker_samples]))
+    s2_cx = int(np.median([f[1].center_x for f in two_speaker_samples]))
+    s1_cy = int(np.median([f[0].center_y for f in two_speaker_samples]))
+    s2_cy = int(np.median([f[1].center_y for f in two_speaker_samples]))
+    s1_fw = int(np.median([f[0].w for f in two_speaker_samples]))
+    s2_fw = int(np.median([f[1].w for f in two_speaker_samples]))
+    s1_fh = int(np.median([f[0].h for f in two_speaker_samples]))
+    s2_fh = int(np.median([f[1].h for f in two_speaker_samples]))
+
+    # Split-screen geometry
+    min_pane_w = int(active_w * 0.30)
+    max_pane_w = int(active_w * 0.55)
+    s1_pane_w, s1_pane_h = _pane_dimensions(
+        max(min_pane_w, min(int(s1_fw * 3.8), max_pane_w)),
+        active_h,
+        max_width=active_w,
+    )
+    s2_pane_w, s2_pane_h = _pane_dimensions(
+        max(min_pane_w, min(int(s2_fw * 3.8), max_pane_w)),
+        active_h,
+        max_width=active_w,
+    )
+    s1_y_offset = max(0, int(s1_cy - s1_fh * 1.5))
+    s2_y_offset = max(0, int(s2_cy - s2_fh * 1.5))
+    s1_x = max(active_x, min(s1_cx - s1_pane_w // 2, active_x + active_w - s1_pane_w))
+    s2_x = max(active_x, min(s2_cx - s2_pane_w // 2, active_x + active_w - s2_pane_w))
+    s1_y = max(active_y, min(active_y + s1_y_offset, active_y + active_h - s1_pane_h))
+    s2_y = max(active_y, min(active_y + s2_y_offset, active_y + active_h - s2_pane_h))
+    s1_box = (s1_x, s1_y, s1_pane_w, s1_pane_h)
+    s2_box = (s2_x, s2_y, s2_pane_w, s2_pane_h)
+
+    # Portrait crop for Speaker 1 and Speaker 2
+    crop_x_s1 = max(active_x, min(s1_cx - target_crop_w // 2, active_x + active_w - target_crop_w))
+    crop_x_s2 = max(active_x, min(s2_cx - target_crop_w // 2, active_x + active_w - target_crop_w))
+
+    dom_faces = _dominant_face_boxes(valid_face_samples)
+
+    def _create_shot(start_t: float, end_t: float, mode_type: str) -> ShotPlan:
+        if mode_type == "s1":
+            return ShotPlan(
+                start=round(start_t, 2),
+                end=round(end_t, 2),
+                face_boxes=dom_faces,
+                mode="portrait_face",
+                crop_x=crop_x_s1,
+                crop_y=active_y,
+                crop_w=target_crop_w,
+                crop_h=active_h,
+                center_y=s1_cy,
+                margin_v=460,
+            )
+        elif mode_type == "s2":
+            return ShotPlan(
+                start=round(start_t, 2),
+                end=round(end_t, 2),
+                face_boxes=dom_faces,
+                mode="portrait_face",
+                crop_x=crop_x_s2,
+                crop_y=active_y,
+                crop_w=target_crop_w,
+                crop_h=active_h,
+                center_y=s2_cy,
+                margin_v=460,
+            )
+        else:
+            return ShotPlan(
+                start=round(start_t, 2),
+                end=round(end_t, 2),
+                face_boxes=dom_faces,
+                mode="split_screen",
+                speaker1_box=s1_box,
+                speaker2_box=s2_box,
+                margin_v=0,
+                subtitle_placement="divider",
+                subtitle_alignment=5,
+            )
+
+    duration = rel_e - rel_s
+    if duration < 2.0 or not shot_samples:
+        s1_motions = [s[3][0] for s in shot_samples if len(s) > 3 and len(s[3]) == 2]
+        s2_motions = [s[3][1] for s in shot_samples if len(s) > 3 and len(s[3]) == 2]
+        avg_m1 = float(np.mean(s1_motions)) if s1_motions else 0.0
+        avg_m2 = float(np.mean(s2_motions)) if s2_motions else 0.0
+        if avg_m1 >= _MIN_SPEECH_LIP_MOTION and avg_m1 >= SPEAKER_HYSTERESIS * max(0.5, avg_m2):
+            return [_create_shot(rel_s, rel_e, "s1")]
+        elif avg_m2 >= _MIN_SPEECH_LIP_MOTION and avg_m2 >= SPEAKER_HYSTERESIS * max(0.5, avg_m1):
+            return [_create_shot(rel_s, rel_e, "s2")]
+        else:
+            return [_create_shot(rel_s, rel_e, "both")]
+
+    raw_states: List[Tuple[float, str]] = []
+    for s in shot_samples:
+        t = s[0]
+        if len(s) > 3 and len(s[3]) == 2:
+            m1, m2 = s[3][0], s[3][1]
+            if m1 >= _MIN_SPEECH_LIP_MOTION and m1 >= SPEAKER_HYSTERESIS * max(0.5, m2):
+                st = "s1"
+            elif m2 >= _MIN_SPEECH_LIP_MOTION and m2 >= SPEAKER_HYSTERESIS * max(0.5, m1):
+                st = "s2"
+            elif m1 >= _MIN_SPEECH_LIP_MOTION and m2 >= _MIN_SPEECH_LIP_MOTION:
+                st = "both"
+            else:
+                st = "silence"
+        else:
+            st = "silence"
+        raw_states.append((t, st))
+
+    if not raw_states:
+        return [_create_shot(rel_s, rel_e, "both")]
+
+    initial_st = "both"
+    for _, st in raw_states:
+        if st != "silence":
+            initial_st = st
+            break
+
+    segments: List[Tuple[float, float, str]] = []
+    seg_start = rel_s
+    current_mode = initial_st
+
+    idx = 0
+    while idx < len(raw_states):
+        t, st = raw_states[idx]
+        if st != "silence" and st != current_mode:
+            lookahead_end = t
+            j = idx
+            while j < len(raw_states) and raw_states[j][1] == st:
+                lookahead_end = raw_states[j][0]
+                j += 1
+            st_dur = lookahead_end - t
+            if st_dur <= INTERJECTION_MAX_S:
+                idx = j
+                continue
+
+            if (t - seg_start) >= SPEAKER_MIN_DWELL_S:
+                segments.append((seg_start, t, current_mode))
+                seg_start = t
+                current_mode = st
+                idx = j
+                continue
+
+        idx += 1
+
+    if rel_e > seg_start:
+        final_dur = rel_e - seg_start
+        if final_dur < SPEAKER_MIN_DWELL_S and segments:
+            prev_s, _, prev_m = segments[-1]
+            segments[-1] = (prev_s, rel_e, prev_m)
+        else:
+            segments.append((seg_start, rel_e, current_mode))
+
+    if not segments:
+        return [_create_shot(rel_s, rel_e, "both")]
+
+    return [_create_shot(s_s, s_e, m) for s_s, s_e, m in segments]
 
 
 def analyze_faces_in_clip(
@@ -758,115 +949,21 @@ def analyze_faces_in_clip(
                 crop_h=active_h,
                 margin_v=400
             ))
-        # 2. Dynamic Split-Screen or Active Solo Speaker — tight face-relative crops
+        # 2. Dynamic Split-Screen or Active Solo Speaker — smart speaker switching (OpusClip Pro style)
         elif valid_face_samples and (len(two_speaker_samples) / len(valid_face_samples) >= 0.40):
-            # Check for dominant single-speaker speech activity (lip motion)
-            s1_motions = [s[3][0] for s in shot_samples if len(s) > 3 and len(s[3]) == 2]
-            s2_motions = [s[3][1] for s in shot_samples if len(s) > 3 and len(s[3]) == 2]
-            avg_m1 = float(np.mean(s1_motions)) if s1_motions else 0.0
-            avg_m2 = float(np.mean(s2_motions)) if s2_motions else 0.0
-
-            # If Speaker 1 is speaking dominantly
-            if avg_m1 >= _MIN_SPEECH_LIP_MOTION and avg_m1 >= _DOMINANT_SPEAKER_RATIO * max(0.5, avg_m2):
-                s1_cx = int(np.median([f[0].center_x for f in two_speaker_samples]))
-                crop_x = max(active_x, min(s1_cx - target_crop_w // 2, active_x + active_w - target_crop_w))
-                shot_plans.append(ShotPlan(
-                    start=rel_s,
-                    end=rel_e,
-                    face_boxes=_dominant_face_boxes(valid_face_samples),
-                    mode='portrait_face',
-                    crop_x=crop_x,
-                    crop_y=active_y,
-                    crop_w=target_crop_w,
-                    crop_h=active_h,
-                    center_y=int(active_y + active_h * 0.35),
-                    margin_v=460
-                ))
-                continue
-            # If Speaker 2 is speaking dominantly
-            elif avg_m2 >= _MIN_SPEECH_LIP_MOTION and avg_m2 >= _DOMINANT_SPEAKER_RATIO * max(0.5, avg_m1):
-                s2_cx = int(np.median([f[1].center_x for f in two_speaker_samples]))
-                crop_x = max(active_x, min(s2_cx - target_crop_w // 2, active_x + active_w - target_crop_w))
-                shot_plans.append(ShotPlan(
-                    start=rel_s,
-                    end=rel_e,
-                    face_boxes=_dominant_face_boxes(valid_face_samples),
-                    mode='portrait_face',
-                    crop_x=crop_x,
-                    crop_y=active_y,
-                    crop_w=target_crop_w,
-                    crop_h=active_h,
-                    center_y=int(active_y + active_h * 0.35),
-                    margin_v=460
-                ))
-                continue
-            else:
-                s1_cx = int(np.median([f[0].center_x for f in two_speaker_samples]))
-                s2_cx = int(np.median([f[1].center_x for f in two_speaker_samples]))
-                s1_cy = int(np.median([f[0].center_y for f in two_speaker_samples]))
-                s2_cy = int(np.median([f[1].center_y for f in two_speaker_samples]))
-                # Median face dimensions for tight crop scaling
-                s1_fw = int(np.median([f[0].w for f in two_speaker_samples]))
-                s2_fw = int(np.median([f[1].w for f in two_speaker_samples]))
-                s1_fh = int(np.median([f[0].h for f in two_speaker_samples]))
-                s2_fh = int(np.median([f[1].h for f in two_speaker_samples]))
-
-            # Tight crop: each pane maintains 9:8 aspect ratio (matching 1080x960 pane)
-            #
-            # AGENTS.md 3.3: "Crop boxes must maintain PANE_ASPECT = 9.0 / 8.0 so
-            # each speaker pane scales to 1080x960 with zero black bars on the
-            # sides."
-            #
-            # The old code evened the width and the height *independently*, which
-            # perturbs the ratio. 1055->1054 and 937->936 gives 1.1261 instead of
-            # 1.125; the renderer then fitted that into 1080x960 with
-            # `force_original_aspect_ratio=decrease` and padded the remainder,
-            # reintroducing the black bar the clause forbids. Deriving one
-            # dimension from the other keeps the ratio to within a pixel while
-            # both stay even, which ffmpeg requires for yuv420p chroma alignment.
-            #
-            # The video_editor side now also scales with `increase` + `crop`, so a
-            # pane that is a pixel out cannot produce bars even so. Both fixes are
-            # needed: this one makes the framing correct, that one makes bars
-            # structurally impossible.
-            min_pane_w = int(active_w * 0.30)  # never narrower than 30% of frame
-            # NOTE: the old comment here claimed 55% "prevent[s] overlap". It does
-            # not, and it never could: 0.55 + 0.55 = 1.10. It is also not an
-            # overlap problem at all, because the panes are stacked vertically by
-            # vstack and never share screen space. The real risk of letting panes
-            # drift to the same position is that both panes show the same speaker,
-            # so the guard is now on the *positions* rather than the widths.
-            max_pane_w = int(active_w * 0.55)
-            s1_pane_w, s1_pane_h = _pane_dimensions(
-                max(min_pane_w, min(int(s1_fw * 3.8), max_pane_w)),
-                active_h,
-                max_width=active_w,
+            subshots = _segment_two_speaker_shots(
+                rel_s=rel_s,
+                rel_e=rel_e,
+                shot_samples=shot_samples,
+                valid_face_samples=valid_face_samples,
+                two_speaker_samples=two_speaker_samples,
+                target_crop_w=target_crop_w,
+                active_x=active_x,
+                active_y=active_y,
+                active_w=active_w,
+                active_h=active_h,
             )
-            s2_pane_w, s2_pane_h = _pane_dimensions(
-                max(min_pane_w, min(int(s2_fw * 3.8), max_pane_w)),
-                active_h,
-                max_width=active_w,
-            )
-
-            # Position: center crop on each speaker's face; keep head in upper third of pane
-            s1_y_offset = max(0, int(s1_cy - s1_fh * 1.5))  # start crop 1.5 face-heights above eyes
-            s2_y_offset = max(0, int(s2_cy - s2_fh * 1.5))
-            s1_x = max(active_x, min(s1_cx - s1_pane_w // 2, active_x + active_w - s1_pane_w))
-            s2_x = max(active_x, min(s2_cx - s2_pane_w // 2, active_x + active_w - s2_pane_w))
-            s1_y = max(active_y, min(active_y + s1_y_offset, active_y + active_h - s1_pane_h))
-            s2_y = max(active_y, min(active_y + s2_y_offset, active_y + active_h - s2_pane_h))
-
-            shot_plans.append(ShotPlan(
-                start=rel_s,
-                end=rel_e,
-                face_boxes=_dominant_face_boxes(valid_face_samples),
-                mode='split_screen',
-                speaker1_box=(s1_x, s1_y, s1_pane_w, s1_pane_h),
-                speaker2_box=(s2_x, s2_y, s2_pane_w, s2_pane_h),
-                margin_v=0,
-                subtitle_placement="divider",
-                subtitle_alignment=5
-            ))
+            shot_plans.extend(subshots)
         # 3. Portrait Solo Face (with temporal anchor memory + skin-tone fallback)
         else:
             eye_level_y = active_y + active_h * 0.35

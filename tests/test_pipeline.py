@@ -372,6 +372,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
             clip_start=0.0,
             clip_end=4.8,
             output_ass_path=out_ass,
+            theme_key="neon_green",
         )
         lines = [
             line for line in out_ass.read_text(encoding="utf-8").splitlines()
