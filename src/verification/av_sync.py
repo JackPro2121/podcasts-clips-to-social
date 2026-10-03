@@ -96,6 +96,16 @@ MIN_TRUSTED_CONFIDENCE = 0.15
 # frame", which is inside the noise of a container's duration rounding.
 STRUCTURAL_TOLERANCE_MS = 40.0
 
+# Source-alignment tolerance. The rendered clip's audio must start where the
+# trim said it would, within about a frame and a half of decode/encode head
+# room. This is the deterministic perceptual gate the SyncNet LSE metrics could
+# not be calibrated into: it compares the clip's own audio against the source
+# segment it was cut from, so it cannot produce a false positive from content.
+SOURCE_ALIGN_TOLERANCE_MS = 50.0
+SOURCE_ALIGN_MIN_CONFIDENCE = 0.30
+SOURCE_ALIGN_SEARCH_S = 5.0
+SOURCE_ALIGN_SAMPLE_RATE = 16000
+
 # Audio decode rate. Low on purpose: we want the envelope, not the waveform.
 AUDIO_SAMPLE_RATE = 8000
 
@@ -105,6 +115,39 @@ MOTION_WIDTH = 80
 MOTION_HEIGHT = 142
 
 _CREATE_NO_WINDOW = 0x08000000 if hasattr(probe.subprocess, "STARTUPINFO") else 0
+
+
+@dataclass
+class SourceAlignment:
+    """Where the clip's audio actually starts inside the source segment.
+
+    ``drift_ms`` is ``expected_s - offset_s``: positive means the soundtrack
+    **lags** the picture (audio is late), negative means it leads. Confidence is
+    the normalised correlation at the peak, so a flat or unrelated signal
+    reports ``measured=False`` instead of a fake offset.
+    """
+
+    measured: bool = False
+    reason: str = ""
+    drift_ms: float = 0.0
+    offset_s: float = 0.0
+    expected_s: float = 0.0
+    confidence: float = 0.0
+
+    @property
+    def ok(self) -> bool:
+        return self.measured and abs(self.drift_ms) <= SOURCE_ALIGN_TOLERANCE_MS
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "measured": self.measured,
+            "ok": self.ok,
+            "reason": self.reason,
+            "drift_ms": round(self.drift_ms, 1),
+            "offset_s": round(self.offset_s, 3),
+            "expected_s": round(self.expected_s, 3),
+            "confidence": round(self.confidence, 4),
+        }
 
 
 @dataclass
@@ -457,3 +500,117 @@ def analyse(
             f"Structural drift is still reported."
         )
     return report
+
+
+def _decode_mono(path: Path, sample_rate: int = SOURCE_ALIGN_SAMPLE_RATE):
+    """Decode a file to mono float32 at ``sample_rate``, or None."""
+    try:
+        import numpy as np
+    except ImportError:  # pragma: no cover
+        return None
+    command = [
+        probe.ffmpeg_binary(),
+        "-v",
+        "error",
+        "-i",
+        str(path.resolve()),
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        str(sample_rate),
+        "-f",
+        "s16le",
+        "-",
+    ]
+    code, data, _stderr = probe._run_binary(command)
+    if code != 0 or not data:
+        return None
+    samples = np.frombuffer(data[: len(data) // 2 * 2], dtype="<i2").astype(np.float32) / 32768.0
+    return samples if samples.size else None
+
+
+def best_source_offset(clip, window, sample_rate: int = SOURCE_ALIGN_SAMPLE_RATE):
+    """Offset of ``clip`` inside ``window`` in seconds, plus peak confidence.
+
+    Pure, so the arithmetic is unit-testable with synthetic signals where the
+    answer is known by construction. Both signals are mean-subtracted first:
+    loudnorm and AAC leave a DC offset that would otherwise bias the peak.
+    """
+    import numpy as np
+
+    clip = np.asarray(clip, dtype=np.float64)
+    window = np.asarray(window, dtype=np.float64)
+    if clip.size < sample_rate // 2 or window.size <= clip.size:
+        return 0.0, 0.0
+    clip = clip - clip.mean()
+    window = window - window.mean()
+    n = clip.size
+    m = window.size
+    size = 1
+    while size < n + m:
+        size <<= 1
+    correlation = np.fft.irfft(
+        np.fft.rfft(window, size) * np.conj(np.fft.rfft(clip, size)), size
+    )
+    index = int(np.argmax(correlation[: m - n + 1]))
+    segment = window[index : index + n]
+    denominator = float(np.linalg.norm(segment) * np.linalg.norm(clip))
+    confidence = float(np.dot(segment, clip) / denominator) if denominator > 0 else 0.0
+    return index / float(sample_rate), confidence
+
+
+def align_with_source(
+    clip_path: Path,
+    source_path: Path,
+    expected_start_s: float,
+    search_seconds: float = SOURCE_ALIGN_SEARCH_S,
+    sample_rate: int = SOURCE_ALIGN_SAMPLE_RATE,
+) -> SourceAlignment:
+    """Measure where the rendered clip's audio actually starts in its source.
+
+    The renderer is handed a downloaded segment and a trim start. If the clip's
+    audio content does not begin at that start, the film is out of sync with the
+    edit -- the exact class of defect that shipped when ``asetpts`` ran before
+    ``atrim``. This measures it directly, so the verdict can block on it without
+    trusting any plan.
+    """
+    if not clip_path.exists():
+        return SourceAlignment(reason=f"clip not found: {clip_path}")
+    if not source_path.exists():
+        return SourceAlignment(reason=f"source not found: {source_path}")
+
+    clip = _decode_mono(clip_path, sample_rate)
+    if clip is None:
+        return SourceAlignment(reason="clip audio could not be decoded")
+    source = _decode_mono(source_path, sample_rate)
+    if source is None:
+        return SourceAlignment(reason="source audio could not be decoded")
+
+    window_start_s = max(0.0, float(expected_start_s) - search_seconds)
+    window_end_s = min(
+        source.size / sample_rate,
+        float(expected_start_s) + clip.size / sample_rate + search_seconds,
+    )
+    window = source[int(window_start_s * sample_rate): int(window_end_s * sample_rate)]
+    if window.size <= clip.size:
+        return SourceAlignment(reason="source window is not longer than the clip")
+
+    offset_s, confidence = best_source_offset(clip, window, sample_rate)
+    offset_s += window_start_s
+    drift_ms = (float(expected_start_s) - offset_s) * 1000.0
+    if confidence < SOURCE_ALIGN_MIN_CONFIDENCE:
+        return SourceAlignment(
+            measured=False,
+            reason=f"correlation peak too weak ({confidence:.3f} < {SOURCE_ALIGN_MIN_CONFIDENCE})",
+            offset_s=offset_s,
+            expected_s=float(expected_start_s),
+            confidence=confidence,
+        )
+    return SourceAlignment(
+        measured=True,
+        drift_ms=drift_ms,
+        offset_s=offset_s,
+        expected_s=float(expected_start_s),
+        confidence=confidence,
+    )

@@ -323,6 +323,8 @@ def _evaluate_rendered_pixels(
     state_store: RunStateStore,
     clip_index: int,
     rendered_path: Path,
+    source_path: Optional[Path] = None,
+    source_start: Optional[float] = None,
 ) -> Tuple[bool, List[str]]:
     """Judge the rendered clip by its pixels, and refuse to publish one that fails.
 
@@ -365,6 +367,8 @@ def _evaluate_rendered_pixels(
         rendered_path,
         with_mirror=False,
         with_captions=True,
+        source_path=source_path,
+        source_expected_start=source_start,
         expected_width=OUTPUT_WIDTH,
         expected_height=OUTPUT_HEIGHT,
     )
@@ -768,6 +772,8 @@ def run_pipeline(
                     state_store=state_store,
                     clip_index=idx,
                     rendered_path=rendered_path,
+                    source_path=clip_path,
+                    source_start=render_start,
                 )
                 if not pixel_ok:
                     continue
@@ -970,6 +976,8 @@ def run_pipeline(
                                     state_store=state_store,
                                     clip_index=idx,
                                     rendered_path=rendered_path,
+                                    source_path=clip_path,
+                                    source_start=render_start,
                                 )
                                 if not pixel_ok:
                                     continue
@@ -1171,6 +1179,8 @@ def run_pipeline(
                         state_store=state_store,
                         clip_index=idx,
                         rendered_path=rendered_path,
+                        source_path=video_path,
+                        source_start=moment.start_time,
                     )
                     if not pixel_ok:
                         continue

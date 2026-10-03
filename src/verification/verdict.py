@@ -60,6 +60,7 @@ CODE_FREEZE = "freeze_cumulative"
 CODE_FREEZE_UNTERMINATED = "freeze_unterminated"
 CODE_BLACK_INTERVAL = "black_interval"
 CODE_AV_STRUCTURAL_DRIFT = "av_structural_drift"
+CODE_AV_SOURCE_DRIFT = "av_source_drift"
 CODE_LOUDNESS = "loudness"
 CODE_MIRRORED = "mirrored_source"
 CODE_CAPTION_ON_FACE = "caption_on_face"
@@ -211,6 +212,8 @@ def verify(
     with_mirror: bool = True,
     with_captions: bool = True,
     with_sway: bool = True,
+    source_path: Optional[Path] = None,
+    source_expected_start: Optional[float] = None,
     expected_width: Optional[int] = None,
     expected_height: Optional[int] = None,
 ) -> Verdict:
@@ -374,6 +377,41 @@ def verify(
                 sync_report.as_dict(),
             )
         )
+
+    # --- audio content alignment against the source segment ------------------
+    # The deterministic perceptual check. SyncNet's LSE metrics could not be
+    # calibrated onto this domain (measured on the corpus), so the gate compares
+    # the clip's own audio against the segment it was cut from and reports the
+    # exact drift in milliseconds.
+    if source_path is not None and source_expected_start is not None:
+        alignment = av_sync.align_with_source(path, source_path, source_expected_start)
+        verdict.metrics["source_alignment"] = alignment.as_dict()
+        if not alignment.measured:
+            verdict.add(
+                Finding(
+                    CODE_CHECK_UNRUNNABLE,
+                    "warning",
+                    f"source alignment could not be measured: {alignment.reason}",
+                    "internal",
+                    alignment.as_dict(),
+                )
+            )
+        elif abs(alignment.drift_ms) > av_sync.SOURCE_ALIGN_TOLERANCE_MS:
+            verdict.add(
+                Finding(
+                    CODE_AV_SOURCE_DRIFT,
+                    "error",
+                    (
+                        f"rendered soundtrack is {alignment.drift_ms:+.0f}ms relative to the "
+                        f"trim (positive = audio late; expected start "
+                        f"{alignment.expected_s:.3f}s; tolerance "
+                        f"{av_sync.SOURCE_ALIGN_TOLERANCE_MS:.0f}ms; "
+                        f"confidence {alignment.confidence:.3f})"
+                    ),
+                    "AGENTS.md 3.2",
+                    alignment.as_dict(),
+                )
+            )
 
     # --- loudness -----------------------------------------------------------
     loudness_report = loudness.analyse(path)
