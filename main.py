@@ -318,6 +318,98 @@ def _evaluate_universal_qa(
     return True, []
 
 
+def _face_free_caption_placements(rendered_path: Path, duration: float) -> List[Any]:
+    """One forced caption placement that clears the faces in a rendered clip.
+
+    Plan-time face boxes are normalized in source coordinates, but captions live
+    in the rendered crop; a tight crop can put the face exactly where the plan
+    thought it was safe. The rendered clip is the only authority on where the
+    face ended up, so when the pixel gate reports caption_on_face this derives
+    the band from the pixels and re-renders once.
+    """
+    from src.composition_planner import CaptionPlacement
+    from src.verification import faces
+
+    report = faces.analyse(rendered_path, samples=14)
+    if not report.any_faces or not report.boxes:
+        return []
+    scale_y = OUTPUT_HEIGHT / 360.0
+    face = report.boxes[0]
+    top = max(0.0, face.y * scale_y - 0.04 * OUTPUT_HEIGHT)
+    bottom = min(
+        float(OUTPUT_HEIGHT),
+        (face.y + face.height) * scale_y + 0.04 * OUTPUT_HEIGHT,
+    )
+
+    candidates = (
+        ("top_safe", 8, 0.15 * OUTPUT_HEIGHT, 0.27 * OUTPUT_HEIGHT),
+        ("lower_center", 2, 0.62 * OUTPUT_HEIGHT, 0.76 * OUTPUT_HEIGHT),
+        ("center", 2, 0.42 * OUTPUT_HEIGHT, 0.56 * OUTPUT_HEIGHT),
+        ("bottom_safe", 2, 0.72 * OUTPUT_HEIGHT, 0.85 * OUTPUT_HEIGHT),
+    )
+    chosen = None
+    best_overlap = None
+    for name, alignment, y0, y1 in candidates:
+        overlap = max(0.0, min(bottom, y1) - max(top, y0))
+        if overlap <= 0.0:
+            chosen = (name, alignment, y0, y1)
+            break
+        if best_overlap is None or overlap < best_overlap:
+            best_overlap = overlap
+            chosen = (name, alignment, y0, y1)
+    if chosen is None:
+        return []
+    name, alignment, y0, y1 = chosen
+    margin_v = int(round(y0)) if alignment == 8 else int(round(OUTPUT_HEIGHT - y1))
+    return [CaptionPlacement(
+        start=0.0,
+        end=max(0.1, float(duration)),
+        anchor=name,
+        shot_id="face_safe_retry",
+        alignment=alignment,
+        margin_v=max(0, margin_v),
+        collision_avoidance=True,
+    )]
+
+
+def _render_pixel_safe_captions(
+    *,
+    rendered_path: Path,
+    render_attempt: Any,
+    caption_override: Dict[str, Any],
+    duration: float,
+    adjustment: Any,
+    evaluate: Any,
+) -> Tuple[Path, bool, List[str]]:
+    """Pixel verdict first, then one face-aware caption re-render if needed."""
+    pixel_ok, pixel_codes = evaluate(rendered_path)
+    if pixel_ok or "caption_on_face" not in pixel_codes:
+        return rendered_path, pixel_ok, pixel_codes
+
+    placements = _face_free_caption_placements(rendered_path, duration)
+    if not placements:
+        return rendered_path, pixel_ok, pixel_codes
+    if adjustment is None:
+        from src.repair import RenderAdjustment
+
+        adjustment = RenderAdjustment()
+    caption_override["placements"] = placements
+    print("[*] Caption-on-face detected; re-rendering with a face-safe band...")
+    try:
+        retry_path = render_attempt(adjustment)
+    except Exception as error:
+        print(f"[!] Face-safe caption re-render failed: {error}")
+        caption_override.pop("placements", None)
+        return rendered_path, pixel_ok, pixel_codes
+    retry_ok, retry_codes = evaluate(retry_path)
+    caption_override.pop("placements", None)
+    if retry_ok:
+        print(f"[+] Face-safe caption re-render cleared caption_on_face ({placements[0].anchor}).")
+        return retry_path, True, []
+    print(f"[!] Face-safe caption re-render still blocked: {retry_codes}")
+    return rendered_path, pixel_ok, pixel_codes
+
+
 def _evaluate_rendered_pixels(
     run_id: str,
     state_store: RunStateStore,
@@ -712,11 +804,14 @@ def run_pipeline(
                     broll_cues = find_broll_cues_for_clip(clip_words, clip_duration=clip_duration)
 
             try:
+                caption_override_a: Dict[str, Any] = {}
                 def _render_attempt(adjustment: Any) -> Path:
                     # A repair attempt re-derives caption placements with
                     # collision avoidance when QA reported an overlap.
-                    placements = getattr(editor_artifacts, "caption_placements", None)
-                    if adjustment.avoid_caption_collisions and editor_artifacts is not None:
+                    placements = caption_override_a.get("placements")
+                    if placements is None:
+                        placements = getattr(editor_artifacts, "caption_placements", None)
+                    if adjustment.avoid_caption_collisions and editor_artifacts is not None and not caption_override_a.get("placements"):
                         placements = build_caption_placements(
                             editor_artifacts.composition_plan,
                             avoid_collisions=True,
@@ -767,13 +862,23 @@ def run_pipeline(
                 )
                 if rendered_path is None:
                     continue
-                pixel_ok, _pixel_codes = _evaluate_rendered_pixels(
-                    run_id=run_id,
-                    state_store=state_store,
-                    clip_index=idx,
+                def _evaluate_pixels(path: Path) -> Tuple[bool, List[str]]:
+                    return _evaluate_rendered_pixels(
+                        run_id=run_id,
+                        state_store=state_store,
+                        clip_index=idx,
+                        rendered_path=path,
+                        source_path=clip_path,
+                        source_start=render_start,
+                    )
+
+                rendered_path, pixel_ok, _pixel_codes = _render_pixel_safe_captions(
                     rendered_path=rendered_path,
-                    source_path=clip_path,
-                    source_start=render_start,
+                    render_attempt=_render_attempt,
+                    caption_override=caption_override_a,
+                    duration=clip_duration,
+                    adjustment=getattr(_repair_outcome, "adjustment", None),
+                    evaluate=_evaluate_pixels,
                 )
                 if not pixel_ok:
                     continue
@@ -913,9 +1018,12 @@ def run_pipeline(
                                 except Exception as te:
                                     print(f"[!] Thumbnail generation notice for probe clip #{idx}: {te}")
 
+                                caption_override_b: Dict[str, Any] = {}
                                 def _render_attempt(adjustment: Any) -> Path:
-                                    placements = getattr(editor_artifacts, "caption_placements", None)
-                                    if adjustment.avoid_caption_collisions and editor_artifacts is not None:
+                                    placements = caption_override_b.get("placements")
+                                    if placements is None:
+                                        placements = getattr(editor_artifacts, "caption_placements", None)
+                                    if adjustment.avoid_caption_collisions and editor_artifacts is not None and not caption_override_b.get("placements"):
                                         placements = build_caption_placements(
                                             editor_artifacts.composition_plan,
                                             avoid_collisions=True,
@@ -971,13 +1079,23 @@ def run_pipeline(
                                 )
                                 if rendered_path is None:
                                     continue
-                                pixel_ok, _pixel_codes = _evaluate_rendered_pixels(
-                                    run_id=run_id,
-                                    state_store=state_store,
-                                    clip_index=idx,
+                                def _evaluate_pixels(path: Path) -> Tuple[bool, List[str]]:
+                                    return _evaluate_rendered_pixels(
+                                        run_id=run_id,
+                                        state_store=state_store,
+                                        clip_index=idx,
+                                        rendered_path=path,
+                                        source_path=clip_path,
+                                        source_start=render_start,
+                                    )
+
+                                rendered_path, pixel_ok, _pixel_codes = _render_pixel_safe_captions(
                                     rendered_path=rendered_path,
-                                    source_path=clip_path,
-                                    source_start=render_start,
+                                    render_attempt=_render_attempt,
+                                    caption_override=caption_override_b,
+                                    duration=render_end - render_start,
+                                    adjustment=getattr(_repair_outcome, "adjustment", None),
+                                    evaluate=_evaluate_pixels,
                                 )
                                 if not pixel_ok:
                                     continue
@@ -1122,9 +1240,12 @@ def run_pipeline(
                     except Exception as te:
                         print(f"[!] Thumbnail generation notice for clip #{idx}: {te}")
 
+                    caption_override_c: Dict[str, Any] = {}
                     def _render_attempt(adjustment: Any) -> Path:
-                        placements = getattr(editor_artifacts, "caption_placements", None)
-                        if adjustment.avoid_caption_collisions and editor_artifacts is not None:
+                        placements = caption_override_c.get("placements")
+                        if placements is None:
+                            placements = getattr(editor_artifacts, "caption_placements", None)
+                        if adjustment.avoid_caption_collisions and editor_artifacts is not None and not caption_override_c.get("placements"):
                             placements = build_caption_placements(
                                 editor_artifacts.composition_plan,
                                 avoid_collisions=True,
@@ -1174,13 +1295,23 @@ def run_pipeline(
                     )
                     if rendered_path is None:
                         continue
-                    pixel_ok, _pixel_codes = _evaluate_rendered_pixels(
-                        run_id=run_id,
-                        state_store=state_store,
-                        clip_index=idx,
+                    def _evaluate_pixels(path: Path) -> Tuple[bool, List[str]]:
+                        return _evaluate_rendered_pixels(
+                            run_id=run_id,
+                            state_store=state_store,
+                            clip_index=idx,
+                            rendered_path=path,
+                            source_path=video_path,
+                            source_start=moment.start_time,
+                        )
+
+                    rendered_path, pixel_ok, _pixel_codes = _render_pixel_safe_captions(
                         rendered_path=rendered_path,
-                        source_path=video_path,
-                        source_start=moment.start_time,
+                        render_attempt=_render_attempt,
+                        caption_override=caption_override_c,
+                        duration=moment.end_time - moment.start_time,
+                        adjustment=getattr(_repair_outcome, "adjustment", None),
+                        evaluate=_evaluate_pixels,
                     )
                     if not pixel_ok:
                         continue

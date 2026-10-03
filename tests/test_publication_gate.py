@@ -64,10 +64,13 @@ class TestPixelGateIsWired(unittest.TestCase):
 
         Counted rather than hard-coded per site, because the failure mode is a
         fourth branch appearing without a gate, which a per-site assertion would
-        not notice.
+        not notice. Each branch now calls the wrapper `_render_pixel_safe_captions`
+        (pixel verdict, then one face-aware caption re-render) instead of the gate
+        directly, so both wirings are pinned: the wrapper count per branch, and
+        the closures that call `_evaluate_rendered_pixels` inside it.
         """
         appends = self.source.count("rendered_clips.append")
-        gates = self.source.count("pixel_ok, _pixel_codes = _evaluate_rendered_pixels")
+        gates = self.source.count("= _render_pixel_safe_captions(")
         self.assertEqual(
             appends,
             3,
@@ -77,7 +80,12 @@ class TestPixelGateIsWired(unittest.TestCase):
         self.assertEqual(
             gates,
             appends,
-            "every rendered_clips.append must be preceded by a pixel verdict gate",
+            "every rendered_clips.append must be preceded by the pixel gate wrapper",
+        )
+        self.assertGreaterEqual(
+            self.source.count("return _evaluate_rendered_pixels("),
+            appends,
+            "the wrapper's per-branch evaluate closures must call the gate itself",
         )
 
     def test_gate_is_not_environment_switchable(self) -> None:
