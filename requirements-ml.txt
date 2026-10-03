@@ -27,3 +27,7 @@ scenedetect[opencv]>=0.6,<0.7
 
 # Shot-boundary detection; weights are bundled in the wheel.
 transnetv2-pytorch==1.0.5
+
+# Needed by tools/export_transnetv2_onnx.py (the render job already gets
+# onnxruntime transitively through faster-whisper).
+onnxruntime>=1.17,<2
