@@ -176,10 +176,21 @@ _CENTRE_LAST_ORDER = ("lower_center", "upper_center", "center")
 # it is only ever a candidate when there really are two panes.
 _SPLIT_ORDER = ("split_divider", "lower_center", "center", "upper_center")
 
+# Human shots never get `upper_center`. Measured: every on-face caption in the
+# corpus -- including the 100% case that the pixel gate blocked on a real run --
+# was an `upper_center` band landing on the subject's brow and eyes. The face
+# regions that should have vetoed it come from the source index's face detector,
+# and one missed detection per shot is enough to make the band look free. The
+# chest-level bands are a weaker placement but never unreadable, so they are the
+# only candidates a person shot may use.
+_FACE_SAFE_ORDER = ("lower_center", "left_safe", "right_safe", "center")
+
 
 def _anchor_search_order(shot: IndexedShot) -> Sequence[str]:
     if shot.shot_type == "split_screen" or shot.face_count >= 1.5:
         return _SPLIT_ORDER
+    if shot.face_count >= 1.0:
+        return _FACE_SAFE_ORDER
     return _CENTRE_LAST_ORDER
 
 

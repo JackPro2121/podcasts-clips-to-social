@@ -31,11 +31,31 @@ from typing import Any, Dict, List, Tuple
 
 CODE_SWAY = "sway"
 SWAY_WARN_PX = 14.0
-SWAY_BLOCK_PX = 40.0
+# The policy oscillator is 12px; a repair attempt can raise its gain and the
+# renderer clamps that at roughly 20px, so 25px is the first value that is
+# unambiguously a regression rather than an escalated repair.
+SWAY_BLOCK_PX = 25.0
+# Broadband gate for gross camera shake (the 107px per-branch class) regardless
+# of frequency. Content motion almost never translates the whole frame by 60px;
+# the previous single band flagged a speaker's own 0.3Hz sway as camera shake.
+BROADBAND_BLOCK_PX = 60.0
+BROADBAND_WARN_PX = 30.0
+BROADBAND_BAND_HZ = (0.15, 1.5)
 
 ANALYSIS_FPS = 15.0
 SCALE_W, SCALE_H = 270, 480
-POLICY_BAND_HZ = (0.20, 0.36)
+# The metric must be tuned to the oscillator the renderer actually uses, or it
+# measures the subject instead: corpus content sway at 0.22-0.33Hz was being
+# reported as policy drift while the policy runs at 0.5Hz.
+try:
+    from src.creative_spec import MOTION_POLICY
+
+    POLICY_BAND_HZ: tuple = (
+        MOTION_POLICY.FREQUENCY_HZ - 0.10,
+        MOTION_POLICY.FREQUENCY_HZ + 0.10,
+    )
+except Exception:  # pragma: no cover - defensive
+    POLICY_BAND_HZ = (0.40, 0.60)
 MIN_SEGMENT_S = 2.0
 CUT_JUMP_PX = 30.0
 CUT_RESPONSE = 0.05
@@ -47,6 +67,8 @@ class TrajectorySway:
 
     p2p_px: float = 0.0
     freq_hz: float = 0.0
+    broadband_p2p_px: float = 0.0
+    broadband_freq_hz: float = 0.0
     start_s: float = 0.0
     end_s: float = 0.0
     segments: int = 0
@@ -60,6 +82,8 @@ class SwayReport:
     measurable: bool = False
     worst_p2p_px: float = 0.0
     worst_freq_hz: float = 0.0
+    worst_broadband_p2p_px: float = 0.0
+    worst_broadband_freq_hz: float = 0.0
     worst_axis: str = ""
     worst_start_s: float = 0.0
     worst_end_s: float = 0.0
@@ -72,11 +96,24 @@ class SwayReport:
             "measurable": self.measurable,
             "worst_p2p_px": round(self.worst_p2p_px, 2),
             "worst_freq_hz": round(self.worst_freq_hz, 4),
+            "worst_broadband_p2p_px": round(self.worst_broadband_p2p_px, 2),
+            "worst_broadband_freq_hz": round(self.worst_broadband_freq_hz, 4),
+            "policy_band_hz": [round(value, 3) for value in POLICY_BAND_HZ],
             "worst_axis": self.worst_axis,
             "worst_start_s": round(self.worst_start_s, 2),
             "worst_end_s": round(self.worst_end_s, 2),
             "segments": self.segments,
         }
+
+
+def _band_peak(freqs, spectrum, low: float, high: float) -> Tuple[float, float]:
+    import numpy as np
+
+    band = (freqs >= low) & (freqs <= high)
+    if not band.any():
+        return 0.0, 0.0
+    index = int(np.argmax(spectrum[band]))
+    return float(spectrum[band][index]), float(freqs[band][index])
 
 
 def _segments_from_jumps(
@@ -96,7 +133,7 @@ def _segments_from_jumps(
 
 
 def analyse_trajectory(trajectory: List[float], fps: float = ANALYSIS_FPS) -> TrajectorySway:
-    """Policy-band sway of one axis. Pure, so the arithmetic is unit-testable."""
+    """Policy-band and broadband sway of one axis. Pure, so it is unit-testable."""
     import numpy as np
 
     if len(trajectory) < int(MIN_SEGMENT_S * fps):
@@ -113,18 +150,18 @@ def analyse_trajectory(trajectory: List[float], fps: float = ANALYSIS_FPS) -> Tr
         windowed = values * np.hanning(len(values))
         spectrum = np.abs(np.fft.rfft(windowed)) / len(values) * 2.0
         freqs = np.fft.rfftfreq(len(values), d=1.0 / fps)
-        band = (freqs >= POLICY_BAND_HZ[0]) & (freqs <= POLICY_BAND_HZ[1])
-        if not band.any():
-            continue
-        index = int(np.argmax(spectrum[band]))
-        peak_amp = float(spectrum[band][index])
-        if peak_amp * 2.0 > worst.p2p_px:
-            worst.p2p_px = peak_amp * 2.0
-            worst.freq_hz = float(freqs[band][index])
+        amp, freq = _band_peak(freqs, spectrum, *POLICY_BAND_HZ)
+        if amp * 2.0 > worst.p2p_px:
+            worst.p2p_px = amp * 2.0
+            worst.freq_hz = freq
             worst.start_s = start / fps
             worst.end_s = end / fps
-    if worst.p2p_px <= 0.0:
-        worst.reason = "no policy-band peak found"
+        broad_amp, broad_freq = _band_peak(freqs, spectrum, *BROADBAND_BAND_HZ)
+        if broad_amp * 2.0 > worst.broadband_p2p_px:
+            worst.broadband_p2p_px = broad_amp * 2.0
+            worst.broadband_freq_hz = broad_freq
+    if worst.p2p_px <= 0.0 and worst.broadband_p2p_px <= 0.0:
+        worst.reason = "no band peak found"
     return worst
 
 
@@ -197,6 +234,12 @@ def analyse(path: Path) -> SwayReport:
             worst.worst_start_s = axis_report.start_s
             worst.worst_end_s = axis_report.end_s
             worst.segments = axis_report.segments
+        if axis_report.broadband_p2p_px > worst.worst_broadband_p2p_px:
+            worst.worst_broadband_p2p_px = axis_report.broadband_p2p_px
+            worst.worst_broadband_freq_hz = axis_report.broadband_freq_hz
+    if not worst.worst_axis and worst.worst_broadband_p2p_px <= 0.0:
+        return SwayReport(ok=True, measurable=False, reason="no band peak on either axis")
     if not worst.worst_axis:
-        return SwayReport(ok=True, measurable=False, reason="no policy-band peak on either axis")
+        worst.worst_axis = "x"
+    worst.measurable = True
     return worst

@@ -315,6 +315,30 @@ class TestRepairPathAvoidsFaces(unittest.TestCase):
         self.assertEqual(rect, shot.caption_rect)
 
 
+class TestHumanShotsNeverUseTheUpperBand(unittest.TestCase):
+    """Human shots must not get `upper_center`, even when face detection missed.
+
+    Measured: a real run's pixel gate blocked a clip with 100% of caption pixels
+    on the subject's brow and eyes. The shot had a face count but no face boxes
+    (the detector missed on the sampled frames), so the `upper_center` band --
+    which exists to dodge bottom text -- looked free of both text and face.
+
+    Mutation guard: restoring `upper_center` to the human-shot search order
+    fails this test.
+    """
+
+    def test_blind_face_shot_with_bottom_text_avoids_the_upper_band(self) -> None:
+        shot = _shot(face_count=1.0, source_width=1080, source_height=1920)
+        bottom_text = [NormalizedRect(0.05, 0.70, 0.90, 0.15)]
+        anchor = _caption_anchor(shot, bottom_text, DEFAULT_SAFE_ZONE)
+        self.assertNotEqual(anchor, "upper_center")
+        rect = _caption_rect_for(anchor)
+        self.assertFalse(
+            _conflicts(rect, bottom_text),
+            f"anchor {anchor!r} landed on the source text instead",
+        )
+
+
 def _caption_rect_for(anchor: str) -> NormalizedRect:
     from src.composition_planner import _caption_rect
 

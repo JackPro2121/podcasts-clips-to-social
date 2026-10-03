@@ -46,6 +46,14 @@ TARGET_TRUE_PEAK_DBFS = -1.5
 LUFS_TOLERANCE = 0.5
 TRUE_PEAK_TOLERANCE = 0.3
 
+# True peak is a ceiling, not a target. Loud-on-purpose audio must not exceed
+# the ceiling (that is the distortion guard), but genuinely quiet audio is not a
+# publish blocker -- platforms normalise loudness anyway. The previous check
+# failed a clip at -2.6 dBFS, which is roughly 1 dB below the ceiling and
+# perfectly safe. Only an implausibly quiet peak (< -4 dBFS, i.e. the audio
+# chain did not engage) is worth surfacing, and as a warning.
+QUIET_PEAK_FLOOR_DBFS = -4.0
+
 # AGENTS.md section 3's audio chain, listed so a regression names the clause it
 # broke.
 SPEC_CLAUSE = "ARCHITECTURE_AND_METHODOLOGY.md section 5 / AGENTS.md section 3.6"
@@ -57,6 +65,7 @@ class LoudnessReport:
 
     ok: bool = True
     reason: str = ""
+    warn_reason: str = ""
     measured: bool = False
     integrated_lufs: float = 0.0
     loudness_range: float = 0.0
@@ -69,13 +78,14 @@ class LoudnessReport:
     def severity(self) -> str:
         if not self.ok or not self.measured:
             return "error"
-        return "ok"
+        return "warning" if self.warn_reason else "ok"
 
     def as_dict(self) -> Dict[str, Any]:
         return {
             "ok": self.ok,
             "severity": self.severity,
             "reason": self.reason,
+            "warn_reason": self.warn_reason,
             "measured": self.measured,
             "integrated_lufs": round(self.integrated_lufs, 2),
             "loudness_range": round(self.loudness_range, 2),
@@ -87,6 +97,7 @@ class LoudnessReport:
                 "lufs_tolerance": LUFS_TOLERANCE,
                 "true_peak_dbfs": TARGET_TRUE_PEAK_DBFS,
                 "true_peak_tolerance": TRUE_PEAK_TOLERANCE,
+                "quiet_peak_floor_dbfs": QUIET_PEAK_FLOOR_DBFS,
             },
             "spec_clause": self.spec_clause,
         }
@@ -108,7 +119,7 @@ def grade(
     if peak_dbfs > TARGET_TRUE_PEAK_DBFS:
         report.peak_error = peak_dbfs - TARGET_TRUE_PEAK_DBFS
     else:
-        report.peak_error = max(0.0, (TARGET_TRUE_PEAK_DBFS - 0.5) - peak_dbfs)
+        report.peak_error = 0.0
 
     if report.lufs_error > LUFS_TOLERANCE:
         report.ok = False
@@ -120,9 +131,14 @@ def grade(
     elif report.peak_error > TRUE_PEAK_TOLERANCE:
         report.ok = False
         report.reason = (
-            f"true peak {peak_dbfs:.1f} dBFS is {report.peak_error:.2f} dB from "
-            f"the {TARGET_TRUE_PEAK_DBFS:.1f} dBTP target "
+            f"true peak {peak_dbfs:.1f} dBFS is {report.peak_error:.2f} dB above "
+            f"the {TARGET_TRUE_PEAK_DBFS:.1f} dBTP ceiling "
             f"(tolerance {TRUE_PEAK_TOLERANCE})"
+        )
+    elif peak_dbfs < QUIET_PEAK_FLOOR_DBFS:
+        report.warn_reason = (
+            f"true peak {peak_dbfs:.1f} dBFS is below the {QUIET_PEAK_FLOOR_DBFS:.1f} "
+            f"dBFS floor; the audio chain may not have engaged"
         )
     return report
 

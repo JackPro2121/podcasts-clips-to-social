@@ -426,6 +426,16 @@ def verify(
                 loudness_report.as_dict(),
             )
         )
+    elif loudness_report.measured and loudness_report.warn_reason:
+        verdict.add(
+            Finding(
+                CODE_LOUDNESS,
+                "warning",
+                loudness_report.warn_reason,
+                loudness_report.spec_clause,
+                loudness_report.as_dict(),
+            )
+        )
 
     # --- mirror -------------------------------------------------------------
     if with_mirror:
@@ -590,29 +600,42 @@ def verify(
                     sway_report.as_dict(),
                 )
             )
-        elif sway_report.measurable and sway_report.worst_p2p_px > sway.SWAY_BLOCK_PX:
+        elif sway_report.measurable and (
+            sway_report.worst_p2p_px > sway.SWAY_BLOCK_PX
+            or sway_report.worst_broadband_p2p_px > sway.BROADBAND_BLOCK_PX
+        ):
             verdict.add(
                 Finding(
                     sway.CODE_SWAY,
                     "error",
                     (
-                        f"camera sway {sway_report.worst_p2p_px:.0f}px peak-to-peak on the "
-                        f"{sway_report.worst_axis} axis at {sway_report.worst_freq_hz:.2f}Hz "
+                        f"camera sway {sway_report.worst_p2p_px:.0f}px peak-to-peak in the "
+                        f"policy band on the {sway_report.worst_axis} axis at "
+                        f"{sway_report.worst_freq_hz:.2f}Hz "
                         f"({sway_report.worst_start_s:.1f}-{sway_report.worst_end_s:.1f}s); "
-                        f"the motion policy targets <= {sway.SWAY_WARN_PX:.0f}px"
+                        f"broadband {sway_report.worst_broadband_p2p_px:.0f}px at "
+                        f"{sway_report.worst_broadband_freq_hz:.2f}Hz. Policy target "
+                        f"<= {sway.SWAY_WARN_PX:.0f}px; broadband block "
+                        f"{sway.BROADBAND_BLOCK_PX:.0f}px"
                     ),
                     "AGENTS.md 3.1",
                     sway_report.as_dict(),
                 )
             )
-        elif sway_report.measurable and sway_report.worst_p2p_px > sway.SWAY_WARN_PX:
+        elif sway_report.measurable and (
+            sway_report.worst_p2p_px > sway.SWAY_WARN_PX
+            or sway_report.worst_broadband_p2p_px > sway.BROADBAND_WARN_PX
+        ):
             verdict.add(
                 Finding(
                     sway.CODE_SWAY,
                     "warning",
                     (
-                        f"camera sway {sway_report.worst_p2p_px:.0f}px peak-to-peak on the "
-                        f"{sway_report.worst_axis} axis at {sway_report.worst_freq_hz:.2f}Hz"
+                        f"camera sway {sway_report.worst_p2p_px:.0f}px peak-to-peak in the "
+                        f"policy band on the {sway_report.worst_axis} axis at "
+                        f"{sway_report.worst_freq_hz:.2f}Hz; broadband "
+                        f"{sway_report.worst_broadband_p2p_px:.0f}px at "
+                        f"{sway_report.worst_broadband_freq_hz:.2f}Hz"
                     ),
                     "AGENTS.md 3.1",
                     sway_report.as_dict(),

@@ -17,14 +17,24 @@ def _triangle(fps: float, seconds: float, freq: float, amplitude: float) -> np.n
 
 class TestTrajectorySway(unittest.TestCase):
     def test_policy_band_triangle_is_detected(self) -> None:
-        report = sway.analyse_trajectory(_triangle(15, 20, 0.28, 8.0).tolist())
-        self.assertGreater(report.p2p_px, 3.0, "an 8px triangle must register")
-        self.assertAlmostEqual(report.freq_hz, 0.28, delta=0.06)
+        report = sway.analyse_trajectory(_triangle(15, 20, 0.5, 8.0).tolist())
+        self.assertGreater(report.p2p_px, 3.0, "an 8px policy triangle must register")
+        self.assertAlmostEqual(report.freq_hz, 0.5, delta=0.06)
 
     def test_bigger_amplitude_reads_bigger(self) -> None:
-        small = sway.analyse_trajectory(_triangle(15, 20, 0.28, 3.0).tolist())
-        large = sway.analyse_trajectory(_triangle(15, 20, 0.28, 12.0).tolist())
+        small = sway.analyse_trajectory(_triangle(15, 20, 0.5, 3.0).tolist())
+        large = sway.analyse_trajectory(_triangle(15, 20, 0.5, 12.0).tolist())
         self.assertGreater(large.p2p_px, small.p2p_px)
+
+    def test_content_frequency_is_not_policy_sway(self) -> None:
+        """A speaker's own 0.3Hz sway must not read as the 0.5Hz policy oscillator.
+
+        Measured on a real run: 53px of content sway at 0.33Hz was blocked as
+        camera shake, which cost a publishable clip.
+        """
+        report = sway.analyse_trajectory(_triangle(15, 20, 0.3, 20.0).tolist())
+        self.assertLess(report.p2p_px, sway.SWAY_BLOCK_PX)
+        self.assertGreater(report.broadband_p2p_px, 5.0)
 
     def test_short_trajectory_is_reported_not_measured(self) -> None:
         report = sway.analyse_trajectory([0.0] * 10)
@@ -32,7 +42,7 @@ class TestTrajectorySway(unittest.TestCase):
         self.assertEqual(report.p2p_px, 0.0)
 
     def test_camera_cut_splits_segments(self) -> None:
-        trajectory = _triangle(15, 20, 0.28, 8.0)
+        trajectory = _triangle(15, 20, 0.5, 8.0)
         trajectory[150:] += 100.0
         report = sway.analyse_trajectory(trajectory.tolist())
         self.assertGreaterEqual(report.segments, 2)

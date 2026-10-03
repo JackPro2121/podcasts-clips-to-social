@@ -29,7 +29,13 @@ class TestCompositionPlanner(unittest.TestCase):
             text_regions=[TextRegion(0.05, 0.80, 0.9, 0.12, 0.9)],
         )
         composition = build_composition_plan(self._edit_plan(), self._index(shot))
-        self.assertEqual(composition.shots[0].caption_anchor, "upper_center")
+        anchor = composition.shots[0].caption_anchor
+        # The lower third is blocked by source text, and the caption must move --
+        # but a human shot must not jump to `upper_center`, because that is how
+        # a real run put 100% of caption pixels on the subject's brow and eyes.
+        # The face-safe order places it at chest level instead.
+        self.assertNotEqual(anchor, "upper_center")
+        self.assertEqual(anchor, "left_safe")
         self.assertTrue(composition.shots[0].protected_regions)
         self.assertIn("source_text_requires_protection", composition.shots[0].warnings)
 
