@@ -172,6 +172,170 @@
           "no freeze events at n=0.003 d=0.5"
         ]
       }
+    },
+    {
+      "id": "high_income_1",
+      "file": "clip_1_WHY_HIGH_INCOME_DOESNT_MEAN_RI.mp4",
+      "release_tag": "clips-20261002-225847-8d00fa12",
+      "run_id": 37073981050,
+      "human_assessment": {
+        "verdict": "PASS",
+        "layout": "multi_shot_dynamic, 6 portrait_face shots; cuts switch between the two speakers",
+        "defects": [],
+        "clean": [
+          "captions clear the upper face on every sampled frame (verifier: caption_on_face 0.0%)",
+          "0% pillarbox, 0% letterbox; 1080x1920",
+          "no freeze events at n=0.003 d=0.2",
+          "A/V streams agree: start delta 0 ms, duration delta -7 ms",
+          "duration 41.10s inside the 30-55s contract"
+        ],
+        "notes": [
+          "residual horizontal sway 35.6 px peak-to-peak at 0.283 Hz (motion policy target is <=12 px); open item for the motion phase, verifier has no sway metric yet",
+          "incomplete_endpoint warning: the clip ends on an incomplete sentence"
+        ],
+        "verifier_confirmation": {
+          "caption_on_face_pct": 0.0,
+          "note": "first run verified after the Phase-0 caption-repair fix; caption-on-face went 100% (previous run) to 0%"
+        }
+      },
+      "sha256": "c375793dcd332206cc12d4200abf789716eb646d08d4d41b4058b1b0099f933f",
+      "bytes": 14077017
+    },
+    {
+      "id": "bathroom_2",
+      "file": "clip_2_THE_65000_BATHROOM_REMODEL_MIS.mp4",
+      "release_tag": "clips-20261002-225851-3834d73c",
+      "run_id": 37073981050,
+      "human_assessment": {
+        "verdict": "PASS",
+        "layout": "source is already vertical with a baked-in two-camera stacked layout and blue channel branding; pipeline renders 5 portrait_face crops of it",
+        "defects": [],
+        "clean": [
+          "captions clear the upper face (verifier: caption_on_face 0.0%)",
+          "0% pillarbox, 0% letterbox",
+          "no freeze events at n=0.003 d=0.2",
+          "A/V streams agree: start delta 0 ms, duration delta -12.7 ms",
+          "duration 44.17s inside the contract"
+        ],
+        "notes": [
+          "residual sway 21.0 px peak-to-peak at 0.341 Hz; open item for the motion phase",
+          "source-baked graphics and layout are preserved, not detected or restyled",
+          "incomplete_endpoint warning"
+        ],
+        "verifier_confirmation": {
+          "caption_on_face_pct": 0.0
+        }
+      },
+      "sha256": "d26c3abde5184075fbdb81445363d590f0177e5b26933813dd1f671a7c03f2aa",
+      "bytes": 11190390
+    },
+    {
+      "id": "credit_3",
+      "file": "clip_3_WAKING_UP_AT_3AM_OVER_CREDIT_C.mp4",
+      "release_tag": "clips-20261002-225856-2960952b",
+      "run_id": 37073981050,
+      "human_assessment": {
+        "verdict": "PASS",
+        "layout": "13 shots including two split_screen shots (10.89-15.47s, 35.41-36.33s); repaired re-render cleared caption_source_collision in shots 0003 and 0009",
+        "defects": [],
+        "clean": [
+          "captions clear the upper face (verifier: caption_on_face 0.0%)",
+          "0% pillarbox even in the split_screen shots",
+          "no freeze events at n=0.003 d=0.2",
+          "A/V streams agree: start delta 0 ms, duration delta -17 ms",
+          "duration 49.10s inside the contract"
+        ],
+        "notes": [
+          "residual sway 28.0 px peak-to-peak at 0.349 Hz; open item for the motion phase",
+          "exercises the repair path end-to-end (veto -> avoid_caption_collisions -> pass)"
+        ],
+        "verifier_confirmation": {
+          "caption_on_face_pct": 0.0
+        }
+      },
+      "sha256": "0db0e1aaaae38d316755e5027c07f51f71421817b54fd5877852b4c682681e56",
+      "bytes": 16407925
+    },
+    {
+      "id": "roth_ira_1",
+      "file": "clip_1_THE_DANGEROUS_ROTH_IRA_TRAP.mp4",
+      "release_tag": "clips-20261002-204245-eacd18f9",
+      "run_id": 37059995762,
+      "human_assessment": {
+        "verdict": "FAIL",
+        "layout": "multi_shot_dynamic portrait_face; captions relocated by the collision repair",
+        "defects": [
+          "B3 caption_on_face: verifier measures 100% of burned-in caption pixels on the brow/eyes (worst at 32% through the clip); visually confirmed at t=20s",
+          "B4 hook_badge: purple staggered block with clipped text",
+          "residual sway 15.6 px peak-to-peak",
+          "incomplete_endpoint warning"
+        ],
+        "clean": [
+          "1080x1920, aspect 0.5625",
+          "no freeze events",
+          "A/V streams agree: start delta 0 ms, duration delta -7 ms",
+          "duration 44.90s"
+        ],
+        "verifier_confirmation": {
+          "caption_on_face_pct": 100.0,
+          "note": "reproduced locally after the Phase-0 detector fix; before it, CI reported check_unrunnable and PASS"
+        }
+      },
+      "sha256": "1d4dd398f4beef684d3a8a66082bf948545068806e843c1fe5a19016e9545c92",
+      "bytes": 19527960
+    },
+    {
+      "id": "trillion_2",
+      "file": "clip_2_THE_TWO_TRILLION_DOLLAR_MISTAK.mp4",
+      "release_tag": "clips-20261002-204251-235ae61e",
+      "run_id": 37059995762,
+      "human_assessment": {
+        "verdict": "PASS",
+        "layout": "source is an already-vertical slide/camera presentation layout; pipeline renders portrait_face crops (3 shots); captions settle in the lower third",
+        "defects": [],
+        "clean": [
+          "captions clear the upper face (verifier: caption_on_face 0.0%)",
+          "0% pillarbox / letterbox",
+          "no freeze events",
+          "A/V streams agree: start delta 0 ms, duration delta -7 ms",
+          "duration 51.00s inside the contract"
+        ],
+        "notes": [
+          "residual sway 37.5 px peak-to-peak at 0.227 Hz; open item for the motion phase",
+          "incomplete_endpoint warning"
+        ],
+        "verifier_confirmation": {
+          "caption_on_face_pct": 0.0
+        }
+      },
+      "sha256": "a9dcc6722c056ce33ba27150ffad7f2417cd23b811a555cb7615504840b579ed",
+      "bytes": 21516776
+    },
+    {
+      "id": "retirement_3",
+      "file": "clip_3_THE_BIGGEST_401K_INVESTING_MIS.mp4",
+      "release_tag": "clips-20261002-204255-bae6d08c",
+      "run_id": 37059995762,
+      "human_assessment": {
+        "verdict": "FAIL",
+        "layout": "pip_slide 0-10.25s then portrait_face (6 shots)",
+        "defects": [
+          "B3 caption_on_face: verifier measures 36.36% of caption pixels on the brow/eyes (worst at 11% through the clip)",
+          "F6 pip_slide duplicates the source's own host bubble and overlaps the slide title area",
+          "residual sway 33.5 px peak-to-peak"
+        ],
+        "clean": [
+          "0% pillarbox / letterbox",
+          "no freeze events",
+          "duration 47.77s",
+          "A/V streams agree: start delta 0 ms, duration delta -12.7 ms"
+        ],
+        "verifier_confirmation": {
+          "caption_on_face_pct": 36.36
+        }
+      },
+      "sha256": "1ced9926eeb9e469feec9df6db2befb8c446295fce1de0b0d8c5caa5beed7482",
+      "bytes": 19300984
     }
   ],
   "synthetic": [
