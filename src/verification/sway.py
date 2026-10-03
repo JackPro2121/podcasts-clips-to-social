@@ -36,10 +36,11 @@ SWAY_WARN_PX = 14.0
 # unambiguously a regression rather than an escalated repair.
 SWAY_BLOCK_PX = 25.0
 # Broadband gate for gross camera shake (the 107px per-branch class) regardless
-# of frequency. Content motion almost never translates the whole frame by 60px;
-# the previous single band flagged a speaker's own 0.3Hz sway as camera shake.
-BROADBAND_BLOCK_PX = 60.0
-BROADBAND_WARN_PX = 30.0
+# of frequency. Calibrated on border-masked measurements: the old gross-drift
+# corpus reads 31-33px of background translation, speaker-content clips read
+# 12-29px, and a clean static render reads under 6px.
+BROADBAND_BLOCK_PX = 32.0
+BROADBAND_WARN_PX = 22.0
 BROADBAND_BAND_HZ = (0.15, 1.5)
 
 ANALYSIS_FPS = 15.0
@@ -198,19 +199,29 @@ def analyse(path: Path) -> SwayReport:
         return SwayReport(ok=False, reason=f"file not found: {path}")
     try:
         import cv2
+        import numpy as np
     except ImportError:
-        return SwayReport(ok=False, reason="OpenCV is not installed")
+        return SwayReport(ok=False, reason="OpenCV or numpy is not installed")
 
     frames, reason = _decode_gray(path)
     if not frames:
         return SwayReport(ok=False, reason=reason)
 
+    # Measure camera motion on the frame borders only. The subject lives in the
+    # middle of a portrait crop, and a person's own head/torso sway sits in the
+    # same 0.2-0.5Hz band as the motion policy; whole-frame phase correlation
+    # read a speaker's sway as camera shake and blocked publishable clips.
+    # Background/set occupies the borders, so that is where the camera shows.
+    mask = np.ones((SCALE_H, SCALE_W), dtype="float32")
+    mask[int(0.10 * SCALE_H): int(0.85 * SCALE_H),
+         int(0.15 * SCALE_W): int(0.85 * SCALE_W)] = 0.0
+
     window = cv2.createHanningWindow((SCALE_W, SCALE_H), cv2.CV_32F)
     dx = [0.0]
     dy = [0.0]
-    previous = frames[0].astype("float32")
+    previous = frames[0].astype("float32") * mask
     for frame in frames[1:]:
-        current = frame.astype("float32")
+        current = frame.astype("float32") * mask
         (shift_x, shift_y), response = cv2.phaseCorrelate(previous, current, window)
         if response >= CUT_RESPONSE and abs(shift_x) <= CUT_JUMP_PX and abs(shift_y) <= CUT_JUMP_PX:
             dx.append(dx[-1] + shift_x)

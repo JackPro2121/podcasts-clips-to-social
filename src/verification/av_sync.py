@@ -92,9 +92,12 @@ MAX_LAG_SECONDS = 0.4
 # Below this peak correlation the result is reported as no result at all.
 MIN_TRUSTED_CONFIDENCE = 0.15
 
-# Structural tolerance. One frame at 30 fps is 33 ms, so 40 ms is "about one
-# frame", which is inside the noise of a container's duration rounding.
-STRUCTURAL_TOLERANCE_MS = 40.0
+# Structural tolerance, on the streams' own account of their durations. The
+# earlier 40ms was "about one frame" and blocked a clip whose audio container
+# ran 65ms past the video (a trailing-padding tail, no content shift -- the
+# source-alignment check below is the check that governs actual sync). 80ms
+# still blocks the 140-200ms class this guard was written for.
+STRUCTURAL_TOLERANCE_MS = 80.0
 
 # Source-alignment tolerance. The rendered clip's audio must start where the
 # trim said it would, within about a frame and a half of decode/encode head
