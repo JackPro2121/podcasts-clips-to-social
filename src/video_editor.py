@@ -170,21 +170,12 @@ def _validate_rendered_output(path: Path, expected_duration: float) -> None:
         raise RuntimeError("Rendered output duration is outside the allowed tolerance")
 
 
-# A shot whose face timeline could not be resolved into a moving crop used to be
-# emitted as a fixed integer crop box. Over statically-held source content that
-# renders a literally frozen output, which editorial_qa correctly rejects as a
-# freeze_interval error. The presentation_slide branch already drifted; these
-# values were measured to clear freezedetect n=0.003 (0.765 mean-abs-diff) on both
-# a frozen synthetic frame and the real clip from CI run 36171365900.
-#
-# The wave is a triangle rather than a sine on purpose: a sine's velocity reaches
-# zero at every extremum, which reintroduced sub-threshold runs up to 0.53s. A
-# triangle holds a near-constant speed between its turning points, so the longest
-# sub-threshold run drops to ~0.07s -- below freezedetect's own d=0.5 report floor.
-_STATIC_SHOT_DRIFT_FREQ = 1.8
-_STATIC_SHOT_DRIFT_RATIO = 0.005
-# 2/pi scales a unit sine into a unit-amplitude triangle.
-_STATIC_SHOT_DRIFT_WAVE = "0.6366*asin(sin(t*{freq}))"
+# Motion is owned by one mechanism: _motion_guarantee_filter, applied to the
+# composed frame after the layout. The old per-branch drift was retired after
+# the corpus measured 15-37px of sway: two oscillators at nearly the same
+# frequency (0.286Hz per-branch, 0.28Hz composed) added together. The composed
+# guarantee covers every layout branch, including the ones that never had
+# per-branch drift.
 
 # Picture-in-picture inset geometry for the host-over-slide layout.
 # Scaled off the output frame so it tracks OUTPUT_WIDTH/HEIGHT, and placed to
@@ -228,58 +219,6 @@ def _punch_zoom_filter(motion: str, shot_frames: int) -> str:
     )
 
 
-def _drift_axis_expr(
-    base: int,
-    low: int,
-    high: int,
-    extent: int = 0,
-    ratio: float = _STATIC_SHOT_DRIFT_RATIO,
-) -> Optional[str]:
-    """
-    Returns a per-frame crop offset keeping continuous motion inside [low, high].
-
-    Three properties are load-bearing:
-
-    1. The clamp must never bind. A bound clamp flattens part of the wave into a
-       static hold, which is exactly the freeze this guards against. So the
-       oscillation centre is placed far enough from both bounds that the full
-       amplitude fits between them.
-    2. The sweep is capped at `ratio * extent` of the crop dimension, so motion
-       reads as life rather than as a camera mistake.
-    3. A subject sitting against a frame edge still gets motion: the centre is
-       nudged inward by at most the cap, which is invisible next to the crop
-       width, rather than collapsing to zero amplitude.
-
-    Returns None only when the axis has no slack at all, letting the caller keep
-    the exact static integer it emitted before.
-    """
-    if high <= low or base < low or base > high or extent <= 0 or ratio <= 0:
-        return None
-    max_amp = int(extent * ratio)
-    if max_amp < 1:
-        return None
-    if high - low >= 2 * max_amp:
-        centre = min(max(base, low + max_amp), high - max_amp)
-    else:
-        centre = (low + high) // 2
-    amplitude = min(max_amp, centre - low, high - centre)
-    if amplitude < 1:
-        return None
-    wave = _STATIC_SHOT_DRIFT_WAVE.format(freq=_STATIC_SHOT_DRIFT_FREQ)
-    return f"max({low},min({centre}+{amplitude}*{wave},{high}))"
-
-
-def _effective_drift_ratio(motion_gain: float) -> float:
-    """Scale the drift ratio for a repair attempt, clamped to a sane sweep."""
-    try:
-        gain = float(motion_gain)
-    except (TypeError, ValueError):
-        return _STATIC_SHOT_DRIFT_RATIO
-    if not math.isfinite(gain) or gain <= 0:
-        return _STATIC_SHOT_DRIFT_RATIO
-    return min(0.015, _STATIC_SHOT_DRIFT_RATIO * gain)
-
-
 def _motion_guarantee_filter(motion_gain: float = 1.0) -> str:
     """Emits the composed-frame motion guarantee filter.
 
@@ -303,9 +242,12 @@ def _motion_guarantee_filter(motion_gain: float = 1.0) -> str:
     ow = int(round(OUTPUT_WIDTH * MOTION_POLICY.OVERSAMPLE)) // 2 * 2
     oh = int(round(OUTPUT_HEIGHT * MOTION_POLICY.OVERSAMPLE)) // 2 * 2
 
-    # Amplitude as a fraction of the oversampled frame dimension, scaled by gain
-    amp_x = int(round(ow * MOTION_POLICY.AMPLITUDE_RATIO * gain))
-    amp_y = int(round(oh * MOTION_POLICY.AMPLITUDE_RATIO * gain))
+    # Amplitude is an absolute per-axis target so the vertical axis cannot grow
+    # 1.78x larger than the horizontal one on a portrait frame. The wave peaks
+    # at +/-0.6366, not +/-1.
+    amplitude = max(1, int(round(MOTION_POLICY.PEAK_TO_PEAK_PX / (2.0 * 0.6366))))
+    amp_x = max(1, int(round(amplitude * gain)))
+    amp_y = max(1, int(round(amplitude * gain)))
 
     # Keep motion strictly within the oversampled slack
     max_amp_x = max(1, (ow - OUTPUT_WIDTH) // 2)
@@ -320,11 +262,6 @@ def _motion_guarantee_filter(motion_gain: float = 1.0) -> str:
     y_expr = f"(ih-{OUTPUT_HEIGHT})/2+{amp_y}*{wave_y}"
 
     return f"scale={ow}:{oh}:flags=lanczos+accurate_rnd,crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:'{x_expr}':'{y_expr}',setsar=1:1"
-
-
-def _crop_position(position: int, expr: Optional[str]) -> str:
-    """Render a crop x/y argument, quoting only genuine ffmpeg expressions."""
-    return f"'{expr}'" if expr else str(position)
 
 
 def _clamp_crop_box(
@@ -373,8 +310,6 @@ def build_video_filtergraph(
     # the $0 GH Action environment, we'll implement it via an expression in the crop filter
     # where possible, or a separate zoompan filter.
 
-    # A repair attempt can ask for a stronger sweep when QA reports a freeze.
-    drift_ratio = _effective_drift_ratio(motion_gain)
     video_width = max(2, int(getattr(framing, "video_width", 1920)))
     video_height = max(2, int(getattr(framing, "video_height", 1080)))
     active_x = max(0, min(int(getattr(framing, "active_x", 0)), video_width - 2))
@@ -419,15 +354,14 @@ def build_video_filtergraph(
                 c_hi_y = active_y + active_h - ch
                 c_x = max(active_x, min(active_x + (active_w - cw) // 2, c_hi_x))
                 c_y = max(active_y, min(active_y + (active_h - ch) // 2, c_hi_y))
-                canvas_x = _crop_position(c_x, _drift_axis_expr(c_x, active_x, c_hi_x, cw, drift_ratio))
-                canvas_y = _crop_position(c_y, _drift_axis_expr(c_y, active_y, c_hi_y, ch, drift_ratio))
-                # The host inset has plenty of slack, so it drifts too. A small
-                # inset alone may not move enough pixels to clear the QA gate, so
-                # this is belt-and-braces behind the canvas drift.
-                h_hi_x = active_x + active_w - s_cw
-                h_hi_y = active_y + active_h - s_ch
-                h_x = _crop_position(s_cx, _drift_axis_expr(s_cx, active_x, h_hi_x, s_cw, drift_ratio))
-                h_y = _crop_position(s_cy, _drift_axis_expr(s_cy, active_y, h_hi_y, s_ch, drift_ratio))
+                # No per-branch drift here: motion is owned by the single
+                # composed-frame guarantee at the end of the graph. Two
+                # mechanisms at nearly the same frequency added together and
+                # produced the reported 15-37px sway.
+                canvas_x = c_x
+                canvas_y = c_y
+                h_x = s_cx
+                h_y = s_cy
                 shot_f = (
                     f"[0:v]trim=start={s_start:.2f}:end={s_end:.2f},setpts=PTS-STARTPTS,split=3[p{i}_c][p{i}_s][p{i}_h];"
                     f"[p{i}_c]crop={cw}:{ch}:{canvas_x}:{canvas_y},"
@@ -527,9 +461,7 @@ def build_video_filtergraph(
                         eff_x = max(active_x, min(base_cx - eff_w // 2, active_x + active_w - eff_w))
                         shot_f = (
                             f"[0:v]trim=start={s_start:.2f}:end={s_end:.2f},setpts=PTS-STARTPTS,"
-                            f"crop={eff_w}:{eff_h}:"
-                            f"{_crop_position(eff_x, _drift_axis_expr(eff_x, active_x, active_x + active_w - eff_w, eff_w, drift_ratio))}:"
-                            f"{eff_y},"
+                            f"crop={eff_w}:{eff_h}:{eff_x}:{eff_y},"
                             f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}{',' + punch if punch else ''}[{label}]"
                         )
                 else:
@@ -549,9 +481,7 @@ def build_video_filtergraph(
                         crop_x = max(active_x, min(shot.crop_x, active_x + active_w - target_crop_w))
                         shot_f = (
                             f"[0:v]trim=start={s_start:.2f}:end={s_end:.2f},setpts=PTS-STARTPTS,"
-                            f"crop={target_crop_w}:{s_ch}:"
-                            f"{_crop_position(crop_x, _drift_axis_expr(crop_x, active_x, active_x + active_w - target_crop_w, target_crop_w, drift_ratio))}:"
-                            f"{s_cy},"
+                            f"crop={target_crop_w}:{s_ch}:{crop_x}:{s_cy},"
                             f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,setsar=1:1,fps={FPS}{',' + punch if punch else ''}[{label}]"
                         )
             shot_filters.append(shot_f)

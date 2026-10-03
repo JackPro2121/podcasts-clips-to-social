@@ -45,7 +45,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import av_sync, fixtures, geometry, loudness, mirror, motion, probe
+from . import av_sync, fixtures, geometry, loudness, mirror, motion, probe, sway
 
 SCHEMA_VERSION = 1
 
@@ -210,6 +210,7 @@ def verify(
     with_correlation: bool = False,
     with_mirror: bool = True,
     with_captions: bool = True,
+    with_sway: bool = True,
     expected_width: Optional[int] = None,
     expected_height: Optional[int] = None,
 ) -> Verdict:
@@ -533,6 +534,52 @@ def verify(
         except Exception as error:  # pragma: no cover - defensive
             caption_payload["error"] = str(error)
     verdict.metrics["captions"] = caption_payload
+
+    # --- camera sway --------------------------------------------------------
+    # The pre-fix corpus swayed 45-74px peak-to-peak and nothing measured it.
+    # The blocking threshold currently catches that class; it tightens to the
+    # warn threshold once a full run renders with the single-mechanism policy.
+    if with_sway:
+        sway_report = sway.analyse(path)
+        verdict.metrics["sway"] = sway_report.as_dict()
+        if not sway_report.ok:
+            verdict.add(
+                Finding(
+                    CODE_CHECK_UNRUNNABLE,
+                    "warning",
+                    f"camera sway could not be measured: {sway_report.reason}",
+                    "internal",
+                    sway_report.as_dict(),
+                )
+            )
+        elif sway_report.measurable and sway_report.worst_p2p_px > sway.SWAY_BLOCK_PX:
+            verdict.add(
+                Finding(
+                    sway.CODE_SWAY,
+                    "error",
+                    (
+                        f"camera sway {sway_report.worst_p2p_px:.0f}px peak-to-peak on the "
+                        f"{sway_report.worst_axis} axis at {sway_report.worst_freq_hz:.2f}Hz "
+                        f"({sway_report.worst_start_s:.1f}-{sway_report.worst_end_s:.1f}s); "
+                        f"the motion policy targets <= {sway.SWAY_WARN_PX:.0f}px"
+                    ),
+                    "AGENTS.md 3.1",
+                    sway_report.as_dict(),
+                )
+            )
+        elif sway_report.measurable and sway_report.worst_p2p_px > sway.SWAY_WARN_PX:
+            verdict.add(
+                Finding(
+                    sway.CODE_SWAY,
+                    "warning",
+                    (
+                        f"camera sway {sway_report.worst_p2p_px:.0f}px peak-to-peak on the "
+                        f"{sway_report.worst_axis} axis at {sway_report.worst_freq_hz:.2f}Hz"
+                    ),
+                    "AGENTS.md 3.1",
+                    sway_report.as_dict(),
+                )
+            )
 
     # --- duration contract --------------------------------------------------
     duration_finding = _duration_finding(verdict.duration_s)

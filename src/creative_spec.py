@@ -158,18 +158,22 @@ class MotionPolicy:
     # {freq} and {phase} are substituted by _motion_guarantee_filter.
     WAVE: str = "0.6366*asin(sin(t*({freq})*6.2831853+{phase}))"
 
-    FREQUENCY_HZ: float = 0.28
+    FREQUENCY_HZ: float = 0.5
     # Quarter-cycle apart on each axis, so the frame traces a slow diagonal rather
     # than sliding straight back and forth along one line, which reads as a
     # mistake rather than as life.
     PHASE_X: float = 0.0
     PHASE_Y: float = 1.5707963
 
-    # Amplitude as a fraction of the oversampled frame dimension. The old
-    # per-branch drift used 0.05 of the *crop* dimension, which is 107 pixels
-    # peak-to-peak on a 1080-wide output -- roughly 10% of frame width, and
-    # genuinely visible as a wobble. This is about 12 pixels.
-    AMPLITUDE_RATIO: float = 0.011
+    # Peak-to-peak travel on each axis, in output pixels. A single absolute
+    # target rather than a per-dimension ratio: scaling by frame dimension gave
+    # the Y axis 1.78x the X amplitude on a 1080x1920 frame, and the measured
+    # corpus sway of 15-37px included that vertical half. 12px is 1.1% of frame
+    # width; the integer-rounded crop moves a pixel every ~0.08s at FREQUENCY_HZ
+    # 0.5, which is what keeps freezedetect's 0.2s floor from ever seeing a
+    # static run. The previous 0.28Hz needed the oversized Y amplitude to move
+    # that often -- speed, not size, is what defeats the floor.
+    PEAK_TO_PEAK_PX: int = 12
 
     # Scale up before drifting so the moving window never samples past the frame
     # edge, which would introduce soft borders.
@@ -181,11 +185,8 @@ class MotionPolicy:
 
     @property
     def peak_to_peak_px(self) -> int:
-        """Worst-case horizontal travel on the output, for the spec comment."""
-        scale = OUTPUT_WIDTH * self.OVERSAMPLE
-        amplitude = self.AMPLITUDE_RATIO * scale
-        # The wave peaks at +/-0.6366, not +/-1.
-        return int(round(amplitude * 2 * 0.6366))
+        """Worst-case per-axis travel on the output, for the spec comment."""
+        return int(round(self.PEAK_TO_PEAK_PX))
 
     @property
     def peak_to_peak_pct_of_width(self) -> float:

@@ -18,7 +18,7 @@ from src.repair import (
     plan_repair,
     render_with_repair,
 )
-from src.video_editor import _effective_drift_ratio, _STATIC_SHOT_DRIFT_RATIO
+from src.video_editor import _motion_guarantee_filter
 
 
 class TestPlanRepair(unittest.TestCase):
@@ -97,17 +97,16 @@ class TestPlanRepair(unittest.TestCase):
     def test_repairable_codes_all_map_to_a_known_lever(self):
         self.assertTrue(set(REPAIRABLE_CODES.values()) <= {"motion", "captions"})
 
-    def test_drift_ratio_is_scaled_and_capped(self):
-        self.assertAlmostEqual(
-            _effective_drift_ratio(1.0), _STATIC_SHOT_DRIFT_RATIO, places=6)
-        self.assertGreater(_effective_drift_ratio(3.6), _STATIC_SHOT_DRIFT_RATIO)
-        self.assertLessEqual(_effective_drift_ratio(1000.0), 0.20)
+    def test_motion_gain_scales_the_composed_guarantee(self):
+        base = _motion_guarantee_filter(1.0)
+        boosted = _motion_guarantee_filter(MAX_MOTION_GAIN)
+        self.assertNotEqual(base, boosted, "repair gain must reach the renderer")
 
-    def test_drift_ratio_rejects_nonsense_gain(self):
+    def test_motion_gain_rejects_nonsense(self):
+        base = _motion_guarantee_filter(1.0)
         for bad in (0.0, -2.0, float("nan"), float("inf"), "abc", None):
-            self.assertAlmostEqual(
-                _effective_drift_ratio(bad), _STATIC_SHOT_DRIFT_RATIO, places=6,
-                msg=f"gain={bad!r}",
+            self.assertEqual(
+                _motion_guarantee_filter(bad), base, msg=f"gain={bad!r}"
             )
 
 

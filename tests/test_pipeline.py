@@ -614,7 +614,10 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         fg = build_video_filtergraph(decision, burn_subtitles=False)
         self.assertIn("trim=start=0.00:end=5.00", fg)
         self.assertIn("trim=start=5.00:end=12.00", fg)
-        self.assertIn("sin(t*1.8)", fg)
+        # Motion lives once, on the composed frame; per-branch drift was retired
+        # after the corpus measured 15-37px of double-oscillator sway.
+        self.assertIn("[motion_out]", fg)
+        self.assertEqual(fg.count("asin(sin("), 2)
         self.assertIn("concat=n=2:v=1:a=0", fg)
         self.assertIn("setsar=1:1", fg)
 

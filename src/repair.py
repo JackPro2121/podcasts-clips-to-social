@@ -25,22 +25,21 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 # still comfortably inside the GitHub Actions 6 hour job ceiling.
 MAX_REPAIR_ATTEMPTS = 2
 
-# motion_gain is a multiplier on the static-shot drift ratio. The cap keeps the
-# sweep at a plausible camera move rather than a visible wobble.
+# motion_gain is a multiplier on the composed-frame motion guarantee's
+# amplitude. The cap keeps the sweep at a plausible camera move rather than a
+# visible wobble; the renderer clamps it to the oversample slack anyway.
 MIN_MOTION_GAIN = 1.0
 MAX_MOTION_GAIN = 3.6
 MOTION_GAIN_STEP = 1.8
-# Never let the drift exceed this fraction of the crop width, whatever the gain.
-MAX_DRIFT_RATIO = 0.20
 
 # code -> the render-side lever that can plausibly address it
 #
-# `freeze_interval` is deliberately absent. The renderer's static-shot motion
-# guarantee (video_editor._drift_axis_expr) already prevents frozen output, and
-# was verified against the real CI artifact plus a sweep of every crop position,
-# so escalating gain on a freeze verdict only masked a regression in that
-# guarantee. If a freeze ever reaches QA again it should fail the run loudly
-# rather than be papered over by a second motion mechanism.
+# `freeze_interval` is deliberately absent. The renderer's composed-frame motion
+# guarantee (video_editor._motion_guarantee_filter) already prevents frozen
+# output, and was verified against the real CI artifact plus a sweep of every
+# crop position, so escalating gain on a freeze verdict only masked a regression
+# in that guarantee. If a freeze ever reaches QA again it should fail the run
+# loudly rather than be papered over by a second motion mechanism.
 REPAIRABLE_CODES: Dict[str, str] = {
     "static_hold_limit": "motion",
     "black_interval": "motion",
@@ -68,9 +67,6 @@ class RenderAdjustment:
 
     motion_gain: float = MIN_MOTION_GAIN
     avoid_caption_collisions: bool = False
-
-    def drift_ratio(self, base_ratio: float) -> float:
-        return min(MAX_DRIFT_RATIO, base_ratio * self.motion_gain)
 
     def to_dict(self) -> Dict[str, object]:
         return {

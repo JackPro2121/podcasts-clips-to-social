@@ -79,15 +79,21 @@ class TestPipFiltergraph(unittest.TestCase):
         self.assertIn(f"crop={cw}:", self.graph)
         self.assertNotIn(f"crop={W}:{H}:", self.graph)
 
-    def test_both_canvas_and_inset_receive_the_motion_guarantee(self):
-        drift = "0.6366*asin(sin(t*1.8))"
+    def test_canvas_and_inset_have_no_own_drift(self):
+        """Motion is owned by the composed layer; a second oscillator is the sway bug.
+
+        The pip canvas and host inset used to carry their own `asin(sin(t*1.8))`
+        drift on top of the composed guarantee. Two oscillators at nearly the
+        same frequency added together and the corpus measured 15-37px of sway.
+        """
         parts = self.graph.split(";")
         canvas = [p for p in parts if p.strip().endswith("[p0_slide]")]
         host = [p for p in parts if p.strip().endswith("[p0_host]")]
         self.assertEqual(len(canvas), 1)
         self.assertEqual(len(host), 1)
-        self.assertIn(drift, canvas[0], "the slide canvas must drift")
-        self.assertIn(drift, host[0], "the host inset must drift")
+        self.assertNotIn("asin(sin(", canvas[0], "the slide canvas must not drift on its own")
+        self.assertNotIn("asin(sin(", host[0], "the host inset must not drift on its own")
+        self.assertIn("[motion_out]", self.graph, "the composed guarantee must still run")
 
     def test_no_static_full_region_crop_is_emitted(self):
         """A crop spanning the whole active region has no slack and would freeze."""
