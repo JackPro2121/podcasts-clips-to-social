@@ -6,10 +6,15 @@
     "scrubbing the timeline, so the verifier's verdict can be checked against",
     "ground truth rather than against itself.",
     "",
-    "The MP4s are NOT tracked in git (~140 MB). Fetch them with:",
+    "The MP4s are NOT tracked in git (~250 MB). Fetch them with:",
     "  python tools/fetch_fixtures.py",
     "Every file is verified by SHA-256 on fetch. A hash mismatch is a hard error:",
-    "a silently different fixture would make every visual regression test lie."
+    "a silently different fixture would make every visual regression test lie.",
+    "",
+    "All entries are hosted on the immutable 'golden-masters-v1' release, not on",
+    "the per-run clips-* releases, because the 5-day release cleaner deletes",
+    "clips-* releases and would break the fetch. 'original_release_tag' records",
+    "where each file was first published."
   ],
   "schema_version": 1,
   "release_base": "https://github.com/JackPro2121/podcasts-clips-to-social/releases/download",
@@ -17,7 +22,7 @@
     {
       "id": "broke_1",
       "file": "clip_1_THE_REAL_FEAR_OF_GOING_BROKE.mp4",
-      "release_tag": "clips-20260926-232801-1ced950a",
+      "release_tag": "golden-masters-v1",
       "run_id": 36278776052,
       "sha256": "d80f43c2dd0768a08e66faed599d67905dff6ad733d37568b033a991b7b47fd5",
       "bytes": 18826208,
@@ -42,12 +47,13 @@
           "no black intervals",
           "audio and video streams agree on duration (0 ms delta)"
         ]
-      }
+      },
+      "original_release_tag": "clips-20260926-232801-1ced950a"
     },
     {
       "id": "grinding_2",
       "file": "clip_2_THE_MYTH_OF_GRINDING_FOR_WEALT.mp4",
-      "release_tag": "clips-20260926-232809-87c34fd7",
+      "release_tag": "golden-masters-v1",
       "run_id": 36278776052,
       "sha256": "5d00b390b8e728cf551857d2b741e900c55a279e5f8e0db5c3a894091b0303e4",
       "bytes": 15840916,
@@ -63,12 +69,13 @@
           "-14.3 LUFS, -1.4 dBTP",
           "no freeze events at n=0.003 d=0.5"
         ]
-      }
+      },
+      "original_release_tag": "clips-20260926-232809-87c34fd7"
     },
     {
       "id": "hardwork_3",
       "file": "clip_3_WHY_HARD_WORK_DOES_NOT_GUARANT.mp4",
-      "release_tag": "clips-20260926-232816-e62360f6",
+      "release_tag": "golden-masters-v1",
       "run_id": 36278776052,
       "sha256": "5f7e295869a0059d347fbea81475294648b385684dc0aa98e396f36cd763a566",
       "bytes": 13661191,
@@ -85,12 +92,13 @@
           "no freeze events at n=0.003 d=0.5",
           "no black intervals"
         ]
-      }
+      },
+      "original_release_tag": "clips-20260926-232816-e62360f6"
     },
     {
       "id": "four_hundred_k_1",
       "file": "clip_1_HOW_I_MADE_400000_IN_A_MONTH.mp4",
-      "release_tag": "clips-20260926-225506-a316e0fa",
+      "release_tag": "golden-masters-v1",
       "run_id": 36277030701,
       "sha256": "8b1d2234c07129884568b9c0d1a544ddad57d5dd2e15a776ee8da31f2a0d6f05",
       "bytes": 17120724,
@@ -109,12 +117,13 @@
           "1080x1920, aspect 0.5625",
           "-14.3 LUFS, -1.5 dBTP"
         ]
-      }
+      },
+      "original_release_tag": "clips-20260926-225506-a316e0fa"
     },
     {
       "id": "disney_2",
       "file": "clip_2_WHY_DISNEY_PAY_IS_A_TRAP.mp4",
-      "release_tag": "clips-20260926-225512-5ebbbe7b",
+      "release_tag": "golden-masters-v1",
       "run_id": 36277030701,
       "sha256": "50d32d7fb4c855e8fb8585f2d16e832ddf30f29cd05f8391f20c70e11b07d862",
       "bytes": 21461246,
@@ -146,12 +155,13 @@
           "no caption over the face",
           "visually clean on a full timeline scrub -- which is the point: the only defect here is invisible to a human watching the clip"
         ]
-      }
+      },
+      "original_release_tag": "clips-20260926-225512-5ebbbe7b"
     },
     {
       "id": "sixty_k_1",
       "file": "clip_1_PAID_OFF_60000_ON_50000_SALARY.mp4",
-      "release_tag": "clips-20260926-221257-e4dc5015",
+      "release_tag": "golden-masters-v1",
       "run_id": 36274579761,
       "sha256": "bdd90d7317dabf7ddd9ba6904837bda3b7dd8e5f09e798e282ef4c37e2f1cb7c",
       "bytes": 61949466,
@@ -171,12 +181,13 @@
           "-14.0 LUFS, -1.6 dBTP",
           "no freeze events at n=0.003 d=0.5"
         ]
-      }
+      },
+      "original_release_tag": "clips-20260926-221257-e4dc5015"
     },
     {
       "id": "high_income_1",
       "file": "clip_1_WHY_HIGH_INCOME_DOESNT_MEAN_RI.mp4",
-      "release_tag": "clips-20261002-225847-8d00fa12",
+      "release_tag": "golden-masters-v1",
       "run_id": 37073981050,
       "human_assessment": {
         "verdict": "PASS",
@@ -199,12 +210,13 @@
         }
       },
       "sha256": "c375793dcd332206cc12d4200abf789716eb646d08d4d41b4058b1b0099f933f",
-      "bytes": 14077017
+      "bytes": 14077017,
+      "original_release_tag": "clips-20261002-225847-8d00fa12"
     },
     {
       "id": "bathroom_2",
       "file": "clip_2_THE_65000_BATHROOM_REMODEL_MIS.mp4",
-      "release_tag": "clips-20261002-225851-3834d73c",
+      "release_tag": "golden-masters-v1",
       "run_id": 37073981050,
       "human_assessment": {
         "verdict": "PASS",
@@ -227,12 +239,13 @@
         }
       },
       "sha256": "d26c3abde5184075fbdb81445363d590f0177e5b26933813dd1f671a7c03f2aa",
-      "bytes": 11190390
+      "bytes": 11190390,
+      "original_release_tag": "clips-20261002-225851-3834d73c"
     },
     {
       "id": "credit_3",
       "file": "clip_3_WAKING_UP_AT_3AM_OVER_CREDIT_C.mp4",
-      "release_tag": "clips-20261002-225856-2960952b",
+      "release_tag": "golden-masters-v1",
       "run_id": 37073981050,
       "human_assessment": {
         "verdict": "PASS",
@@ -254,12 +267,13 @@
         }
       },
       "sha256": "0db0e1aaaae38d316755e5027c07f51f71421817b54fd5877852b4c682681e56",
-      "bytes": 16407925
+      "bytes": 16407925,
+      "original_release_tag": "clips-20261002-225856-2960952b"
     },
     {
       "id": "roth_ira_1",
       "file": "clip_1_THE_DANGEROUS_ROTH_IRA_TRAP.mp4",
-      "release_tag": "clips-20261002-204245-eacd18f9",
+      "release_tag": "golden-masters-v1",
       "run_id": 37059995762,
       "human_assessment": {
         "verdict": "FAIL",
@@ -282,12 +296,13 @@
         }
       },
       "sha256": "1d4dd398f4beef684d3a8a66082bf948545068806e843c1fe5a19016e9545c92",
-      "bytes": 19527960
+      "bytes": 19527960,
+      "original_release_tag": "clips-20261002-204245-eacd18f9"
     },
     {
       "id": "trillion_2",
       "file": "clip_2_THE_TWO_TRILLION_DOLLAR_MISTAK.mp4",
-      "release_tag": "clips-20261002-204251-235ae61e",
+      "release_tag": "golden-masters-v1",
       "run_id": 37059995762,
       "human_assessment": {
         "verdict": "PASS",
@@ -309,12 +324,13 @@
         }
       },
       "sha256": "a9dcc6722c056ce33ba27150ffad7f2417cd23b811a555cb7615504840b579ed",
-      "bytes": 21516776
+      "bytes": 21516776,
+      "original_release_tag": "clips-20261002-204251-235ae61e"
     },
     {
       "id": "retirement_3",
       "file": "clip_3_THE_BIGGEST_401K_INVESTING_MIS.mp4",
-      "release_tag": "clips-20261002-204255-bae6d08c",
+      "release_tag": "golden-masters-v1",
       "run_id": 37059995762,
       "human_assessment": {
         "verdict": "FAIL",
@@ -335,7 +351,8 @@
         }
       },
       "sha256": "1ced9926eeb9e469feec9df6db2befb8c446295fce1de0b0d8c5caa5beed7482",
-      "bytes": 19300984
+      "bytes": 19300984,
+      "original_release_tag": "clips-20261002-204255-bae6d08c"
     }
   ],
   "synthetic": [
