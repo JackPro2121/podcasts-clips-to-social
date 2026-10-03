@@ -1,0 +1,68 @@
+name: Model Smoke (ML tier)
+
+# Proves on CI that the pretrained models install, load, and produce numbers:
+# TransNetV2 shot boundaries, SyncNet + S3FD audio-visual offsets. The render
+# job stays lean; this tier runs in its own environment with its own lockfile.
+#
+# Users said: quality first, download whatever verified models are needed on
+# GitHub Actions. This workflow is the honest answer to "does it actually run
+# on the runner", with every checkpoint SHA-256 pinned in tools/fetch_models.py.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'requirements-ml.txt'
+      - 'tools/fetch_models.py'
+      - 'tools/model_smoke.py'
+      - '.github/workflows/model_smoke.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: model-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Load pretrained models and produce numbers
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements-ml.txt
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install ML tier
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ml.txt
+          pip list | grep -Ei "torch|syncnet|transnet" || true
+
+      - name: Cache pretrained checkpoints
+        uses: actions/cache@v4
+        with:
+          path: src/models
+          key: ml-models-${{ hashFiles('tools/fetch_models.py') }}
+
+      - name: Fetch official checkpoints
+        run: python tools/fetch_models.py --fetch all
+
+      - name: Fetch a golden master
+        run: |
+          curl -sL --retry 3 -o "$RUNNER_TEMP/smoke.mp4" \
+            "https://github.com/JackPro2121/podcasts-clips-to-social/releases/download/golden-masters-v1/clip_1_WHY_HIGH_INCOME_DOESNT_MEAN_RI.mp4"
+          ls -l "$RUNNER_TEMP/smoke.mp4"
+
+      - name: Run model smoke
+        run: python tools/model_smoke.py --video "$RUNNER_TEMP/smoke.mp4" --max-seconds 15

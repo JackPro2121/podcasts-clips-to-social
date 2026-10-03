@@ -53,6 +53,10 @@ scratch/
 *.mp4
 # Model weights are ignored by default, with one deliberate exception below.
 src/models/*.onnx
+# Deep-verification checkpoints (SyncNet / S3FD), fetched from their official
+# sources by tools/fetch_models.py with pinned SHA-256.
+src/models/*.pth
+src/models/*.model
 
 # EXCEPTION: the YuNet face detector is tracked.
 #
