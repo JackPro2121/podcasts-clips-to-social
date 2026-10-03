@@ -33,7 +33,6 @@ from src.config import (
     SHOT_DETECTOR,
     TRANSNET_MODEL_PATH,
     TRANSNET_MIN_CUT_CONFIDENCE,
-    TRANSNET_WINDOW,
 )
 
 ShotList = List[Tuple[float, float]]
@@ -148,14 +147,30 @@ class TransNetV2Detector:
     TransNetV2 over ONNX Runtime, with an OpenCV DNN fallback for runtimes
     without onnxruntime installed.
 
-    The network sees 48x27 RGB frames in windows of 100 and emits three
-    logits per frame: hard cut, gradual/fade, and no transition. Both transition
-    classes are considered, because a dissolve mid-interview is still a shot
-    boundary the renderer should not pan across.
+    The ONNX graph is the project's own export of the proven
+    ``transnetv2-pytorch`` model (tools/export_transnetv2_onnx.py), fetched from
+    the immutable golden-masters release by tools/fetch_models.py:
+
+        input  ``frames``       uint8 [1, 100, 27, 48, 3]
+        output ``single_frame`` float [1, 100, 1]  (sigmoid applied)
+
+    The windowing replicates the reference implementation exactly -- pad 25
+    frames at the head and ``25 + step - (n % step)`` at the tail, slide a
+    100-frame window by 50, keep each window's middle 50 predictions -- because
+    that is what the export's parity proof measured against. Averaging
+    overlapping windows instead (the previous runner) does not match the model's
+    training-time context and was never exercised with real weights.
     """
 
     INPUT_WIDTH = 48
     INPUT_HEIGHT = 27
+    WINDOW = 100
+    STEP = 50
+    HALF = 25
+    EXPECTED_INPUT_SHAPE = [1, 100, 27, 48, 3]
+    # Decode cap: 3000 frames is ~100s at 30fps, comfortably above the 30-55s
+    # clip contract; longer windows stride uniformly and report the rate used.
+    MAX_FRAMES = 3000
 
     def __init__(self, session: Any, fps: float) -> None:
         self._session = session
@@ -174,6 +189,16 @@ class TransNetV2Detector:
                 str(model_path), sess_options=options,
                 providers=["CPUExecutionProvider"],
             )
+            inputs = session.get_inputs()
+            shape = [int(dim) if isinstance(dim, int) else dim for dim in inputs[0].shape]
+            if shape != cls.EXPECTED_INPUT_SHAPE or "uint8" not in inputs[0].type:
+                print(
+                    f"[-] TransNetV2 model has an unexpected signature "
+                    f"({inputs[0].name} {inputs[0].shape} {inputs[0].type}); "
+                    f"expected frames {cls.EXPECTED_INPUT_SHAPE} tensor(uint8). "
+                    f"Using PySceneDetect."
+                )
+                return None
             return cls(session, fps)
         except Exception as error:
             print(f"[-] TransNetV2 via onnxruntime unavailable ({error}); trying OpenCV DNN.")
@@ -186,8 +211,17 @@ class TransNetV2Detector:
             return None
 
     def _infer(self, batch: Any) -> Any:
+        """Single-frame probabilities [1, T, 1] for one window."""
         try:
-            return self._session.run(None, {self._session.get_inputs()[0].name: batch})[0]
+            output_names = [output.name for output in self._session.get_outputs()]
+            if "single_frame" in output_names:
+                return self._session.run(
+                    ["single_frame"],
+                    {self._session.get_inputs()[0].name: batch},
+                )[0]
+            return self._session.run(
+                None, {self._session.get_inputs()[0].name: batch}
+            )[0]
         except AttributeError:
             # OpenCV DNN: no get_inputs(), and run() takes positional args.
             self._session.setInput(batch)
@@ -202,55 +236,40 @@ class TransNetV2Detector:
             frame, (TransNetV2Detector.INPUT_WIDTH, TransNetV2Detector.INPUT_HEIGHT),
             interpolation=cv2.INTER_AREA,
         )
-        rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB).astype(np.float32)
-        rgb /= 255.0
-        return rgb
+        # The exported graph normalises internally; feed uint8 RGB exactly as
+        # tools/export_transnetv2_onnx.py decoded during the parity proof.
+        return cv2.cvtColor(resized, cv2.COLOR_BGR2RGB).astype(np.uint8)
 
     def _transition_strengths(self, frames: Sequence[Any]) -> List[float]:
         """
         Per-frame probability that a shot boundary sits on that frame.
 
-        Windows overlap by half so a boundary near a window edge is still seen
-        whole by at least one window; predictions are averaged, which smooths the
-        double-counted region instead of biasing it.
+        Reference windowing (see class docstring): head pad 25, tail pad
+        ``25 + step - (n % step)``, window 100, stride 50, keep the middle 50
+        of each window's predictions, then truncate to the frame count.
         """
         import numpy as np
 
         total = len(frames)
         if total < 2:
             return [0.0] * total
-        window = max(2, int(TRANSNET_WINDOW))
-        stride = max(1, window // 2)
-        window = min(window, total)
-        stride = max(1, min(stride, window - 1)) if window > 1 else 1
+        window, step, half = self.WINDOW, self.STEP, self.HALF
+        remainder = total % step
+        end_pad = half + step - (remainder if remainder else step)
+        padded: List[Any] = (
+            [frames[0]] * half + list(frames) + [frames[-1]] * end_pad
+        )
 
-        accumulated = np.zeros(total, dtype=np.float64)
-        counts = np.zeros(total, dtype=np.float64)
-        positions = list(range(0, max(1, total - window + 1), stride)) or [0]
-        if positions[-1] + window < total:
-            positions.append(total - window)
-
-        for start in positions:
-            chunk = frames[start:start + window]
-            if len(chunk) < 2:
-                continue
+        strengths: List[float] = []
+        for start in range(0, len(padded) - window + 1, step):
+            chunk = padded[start:start + window]
             batch = np.stack([self._prepare(frame) for frame in chunk])[None, ...]
-            output = self._infer(batch)
-            probabilities = np.asarray(output)
+            probabilities = np.asarray(self._infer(batch), dtype=np.float64)
             if probabilities.ndim == 3:
                 probabilities = probabilities[0]
-            if probabilities.ndim != 2 or probabilities.shape[0] < 2:
-                continue
-            # Rows are [cut, gradual, static]; both transition classes count.
-            transitions = probabilities[:, :2].max(axis=1)
-            transitions = np.clip(transitions, 0.0, 1.0)
-            accumulated[start:start + len(transitions)] += transitions
-            counts[start:start + len(transitions)] += 1.0
-
-        return [
-            float(accumulated[i] / counts[i]) if counts[i] else 0.0
-            for i in range(total)
-        ]
+            values = probabilities[:, 0] if probabilities.ndim == 2 else probabilities
+            strengths.extend(float(value) for value in values[half:half + step])
+        return strengths[:total]
 
     def shots(
         self,
@@ -348,30 +367,38 @@ def _try_transnet(
         if detector is None:
             return None
 
-        step = max(1, int(round(fps / max(0.1, sample_fps))))
         start_frame = max(0, int(start_sec * fps))
         end_frame = max(start_frame + 2, int(end_sec * fps))
+        total = max(2, end_frame - start_frame)
+        # TransNetV2's reference windowing expects consecutive frames, so
+        # `sample_fps` is ignored here: decode every frame up to the cap, and
+        # only stride when a window is longer than the cap. The previous runner
+        # advanced the loop counter without skipping reads, so it fed the first
+        # N consecutive frames and then labelled them as 4fps samples -- the
+        # boundary timestamps would have been wrong had weights ever been
+        # present.
+        stride = 1
+        if total > TransNetV2Detector.MAX_FRAMES:
+            stride = total // TransNetV2Detector.MAX_FRAMES + 1
         capture.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-
         frames: List[Any] = []
-        index = start_frame
-        while index < end_frame and len(frames) < 900:
+        consumed = 0
+        while consumed < total and len(frames) < TransNetV2Detector.MAX_FRAMES:
             success, frame = capture.read()
             if not success or frame is None:
                 break
-            frames.append(frame)
-            index += step
+            if consumed % stride == 0:
+                frames.append(frame)
+            consumed += 1
     finally:
         capture.release()
 
     if len(frames) < 2:
         return None
 
-    # Frames were sampled every `step` frames, so the index-to-seconds mapping
-    # inside shots() must use the *sampling* rate, not the source frame rate.
-    effective_fps = fps / step
+    effective_fps = fps / stride
     if not _reported.get("transnet_ok"):
-        print(f"[+] TransNetV2 shot detection active ({len(frames)} sampled frames).")
+        print(f"[+] TransNetV2 shot detection active ({len(frames)} frames at {effective_fps:.2f}fps).")
         _reported["transnet_ok"] = True
 
     detector._fps = effective_fps
@@ -385,7 +412,8 @@ def _try_transnet(
         mean_confidence=round(confidence, 4),
         notes=[
             f"frames={len(frames)}",
-            f"sample_fps={effective_fps:.2f}",
+            f"effective_fps={effective_fps:.2f}",
+            f"stride={stride}",
             f"mean_confidence={confidence:.3f}",
         ],
     )

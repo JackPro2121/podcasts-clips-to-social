@@ -69,37 +69,43 @@ class TestTransNetV2Detector(unittest.TestCase):
                 detector = TransNetV2Detector.try_create(fps=30.0)
                 self.assertIsNone(detector)
 
-    def test_prepare_resizes_and_normalises_frame(self) -> None:
+    def test_prepare_returns_uint8_rgb_for_the_exported_graph(self) -> None:
+        # The exported ONNX normalises internally; the runner must hand it the
+        # same uint8 RGB the export's parity proof measured.
         frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
         frame[500:600, 500:600] = 255
         prepared = TransNetV2Detector._prepare(frame)
         self.assertEqual(prepared.shape, (27, 48, 3))
-        self.assertEqual(prepared.dtype, np.float32)
-        self.assertTrue(0.0 <= prepared.min() <= prepared.max() <= 1.0)
+        self.assertEqual(prepared.dtype, np.uint8)
 
     def test_transition_strengths_with_mock_session(self) -> None:
         class DummySession:
-            def run(self, output_names: Any, input_feed: Any) -> List[np.ndarray]:
-                batch = list(input_feed.values())[0]
-                batch_len = batch.shape[1]
-                # Emit dummy transitions: frame 5 has high cut probability
-                preds = np.zeros((1, batch_len, 3), dtype=np.float32)
-                preds[:, :, 2] = 1.0  # static
-                if batch_len > 5:
-                    preds[:, 5, 0] = 0.95  # cut
-                    preds[:, 5, 2] = 0.05
-                return [preds]
+            def get_outputs(self) -> List[Any]:
+                class OutputMeta:
+                    def __init__(self, name: str) -> None:
+                        self.name = name
+                return [OutputMeta("single_frame"), OutputMeta("many_hot")]
 
             def get_inputs(self) -> List[Any]:
                 class InputMeta:
-                    name = "input"
+                    name = "frames"
                 return [InputMeta()]
+
+            def run(self, output_names: Any, input_feed: Any) -> List[np.ndarray]:
+                batch = list(input_feed.values())[0]
+                batch_len = batch.shape[1]
+                preds = np.zeros((1, batch_len, 1), dtype=np.float32)
+                # Reference windowing pads 25 frames at the head, so clip frame 5
+                # sits at padded index 30, inside the kept middle [25:75].
+                if batch_len > 30:
+                    preds[0, 30, 0] = 0.95
+                return [preds]
 
         detector = TransNetV2Detector(session=DummySession(), fps=10.0)
         frames = [np.zeros((100, 100, 3), dtype=np.uint8) for _ in range(20)]
         strengths = detector._transition_strengths(frames)
         self.assertEqual(len(strengths), 20)
-        self.assertGreater(strengths[5], 0.8)
+        self.assertGreater(strengths[5], 0.9)
 
     def test_shots_splits_on_confidence_threshold(self) -> None:
         detector = TransNetV2Detector(session=mock.MagicMock(), fps=10.0)

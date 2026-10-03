@@ -6,8 +6,10 @@ Every URL below is the model's **official publisher**:
 
 * SyncNet + S3FD: Oxford VGG, the canonical source referenced by
   ``joonson/syncnet_python``'s own ``download_model.sh``.
-* TransNetV2: weights are bundled inside the ``transnetv2-pytorch`` wheel, so
-  there is nothing to fetch here.
+* TransNetV2: exported from the proven ``transnetv2-pytorch`` model by
+  ``tools/export_transnetv2_onnx.py`` (window- and video-level parity proof)
+  and hosted on this project's immutable ``golden-masters-v1`` release, so the
+  torch-free render job can run it through onnxruntime.
 
 The SHA-256 and byte count of each file were recorded on first download from
 that official source and are pinned here, so a later fetch that returns a
@@ -34,6 +36,7 @@ DEFAULT_MODELS_DIR = REPO_ROOT / "src" / "models"
 CHUNK = 1 << 20
 
 VGG = "https://www.robots.ox.ac.uk/~vgg/software/lipsync/data"
+RELEASE_BASE = "https://github.com/JackPro2121/podcasts-clips-to-social/releases/download"
 
 MODELS: Dict[str, Dict[str, Any]] = {
     "syncnet_v2.model": {
@@ -47,6 +50,15 @@ MODELS: Dict[str, Dict[str, Any]] = {
         "sha256": "d54a87c2b7543b64729c9a25eafd188da15fd3f6e02f0ecec76ae1b30d86c491",
         "bytes": 89844381,
         "purpose": "S3FD face detector required by the SyncNet pipeline",
+    },
+    "transnetv2.onnx": {
+        "url": f"{RELEASE_BASE}/golden-masters-v1/transnetv2.onnx",
+        "sha256": "e80ce1264ce71d96b21ae641c8b593950599d8c25a7320e810efe06049b65295",
+        "bytes": 31996324,
+        "purpose": (
+            "TransNetV2 shot-boundary detection, exported from transnetv2-pytorch by "
+            "tools/export_transnetv2_onnx.py with window- and video-level parity proof"
+        ),
     },
 }
 
@@ -144,10 +156,6 @@ def main() -> int:
     if args.list:
         for name, meta in MODELS.items():
             print(f"{name}\n    url:     {meta['url']}\n    bytes:   {meta['bytes']:,}\n    purpose: {meta['purpose']}")
-        print(
-            "\ntransnetv2-pytorch bundles its weights in the wheel; install it via "
-            "requirements-ml.txt and nothing needs fetching here."
-        )
         return 0
 
     return process(args.models_dir, args.fetch, args.verify, args.allow_missing)
