@@ -1,0 +1,102 @@
+name: SyncNet Calibration
+
+# Heavy, manual-only job. Runs the SyncNet lip-sync metrics across the
+# golden-master corpus so the gate threshold comes from measured data (clean
+# PASS fixtures vs the pre-fix clips reported as out of sync), not from a
+# benchmark number for a different domain.
+#
+# The JSON artifact is the evidence for the threshold picked in
+# src/verification/lip_sync.py.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ids:
+        description: 'Space-separated fixture ids (blank = all available)'
+        type: string
+        default: ''
+      max_seconds:
+        description: 'Seconds per clip (0 = full clips)'
+        type: string
+        default: '20'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: syncnet-calibration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  calibrate:
+    name: Measure LSE-C / LSE-D on the corpus
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements-ml.txt
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install ML tier
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ml.txt
+
+      - name: Cache pretrained checkpoints
+        uses: actions/cache@v4
+        with:
+          path: src/models
+          key: ml-models-${{ hashFiles('tools/fetch_models.py') }}
+
+      - name: Fetch official checkpoints
+        run: python tools/fetch_models.py --fetch all
+
+      - name: Cache golden-master corpus
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures
+          key: fixtures-${{ hashFiles('tests/fixtures/manifest.json') }}
+
+      - name: Fetch the golden-master corpus
+        run: python tools/fetch_fixtures.py --allow-missing
+
+      - name: Calibrate SyncNet
+        run: |
+          set -euo pipefail
+          python tools/syncnet_calibrate.py \
+            --ids ${{ github.event.inputs.ids }} \
+            --max-seconds ${{ github.event.inputs.max_seconds }} \
+            --output syncnet_calibration.json | tee calibration.txt
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## SyncNet calibration"
+            echo
+            if [ -f calibration.txt ]; then
+              cat calibration.txt
+            else
+              echo "calibration did not produce output; see the step log."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload calibration artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: syncnet-calibration
+          path: |
+            syncnet_calibration.json
+            calibration.txt
+          retention-days: 90
+          if-no-files-found: warn
