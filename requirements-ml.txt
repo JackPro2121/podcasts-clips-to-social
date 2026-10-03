@@ -20,5 +20,10 @@ torchvision>=0.17,<1
 # Loads the official Oxford VGG SyncNet and S3FD checkpoints.
 syncnet-python==0.2.2
 
+# syncnet-python 0.2.2 imports scenedetect.video_manager, which PySceneDetect
+# 0.7 removed. Pin the 0.6 API line for this tier only; the render job uses the
+# modern scenedetect API and is unaffected.
+scenedetect[opencv]>=0.6,<0.7
+
 # Shot-boundary detection; weights are bundled in the wheel.
 transnetv2-pytorch==1.0.5
