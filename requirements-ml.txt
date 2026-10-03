@@ -31,3 +31,5 @@ transnetv2-pytorch==1.0.5
 # Needed by tools/export_transnetv2_onnx.py (the render job already gets
 # onnxruntime transitively through faster-whisper).
 onnxruntime>=1.17,<2
+# torch >= 2.6's ONNX exporter imports onnxscript at entry.
+onnxscript>=0.1
