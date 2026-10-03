@@ -94,10 +94,27 @@ def download(url: str, destination: Path, allow_missing: bool = False) -> bool:
 
 
 def process(models_dir: Path, fetch: List[str], verify_only: bool, allow_missing: bool) -> int:
+    """Fetch or verify models.
+
+    Selection semantics, because a fetch of one model must not fail because an
+    unrelated one is absent (the render job fetches only ``transnetv2.onnx``;
+    the SyncNet checkpoints belong to the ML tier):
+
+    * ``--fetch all``            -> every registry entry is required
+    * ``--fetch name [name...]`` -> only the named entries are required; others
+                                    are verified if present and skipped if not
+    * ``--verify`` (no fetch)    -> every registry entry is required
+    """
     failures: List[str] = []
+    fetch_all = "all" in fetch
+    required = (
+        set(MODELS) if (fetch_all or not fetch) else {name for name in fetch if name in MODELS}
+    )
+
     for name, meta in MODELS.items():
         target = models_dir / name
         expected = meta["sha256"]
+        needed = name in required
 
         if target.exists():
             actual = sha256_of(target)
@@ -107,13 +124,18 @@ def process(models_dir: Path, fetch: List[str], verify_only: bool, allow_missing
                     f"{name}: on-disk {size} bytes sha {actual[:12]}... != pinned "
                     f"{meta['bytes']} bytes sha {expected[:12]}..."
                 )
-                continue
-            print(f"[ok] {name}: sha256 verified ({size:,} bytes)")
+            else:
+                print(f"[ok] {name}: sha256 verified ({size:,} bytes)")
             continue
 
-        if verify_only or name not in fetch and "all" not in fetch:
+        if not needed:
+            continue
+
+        if verify_only:
             if not allow_missing:
                 failures.append(f"{name}: missing (run --fetch {name})")
+            else:
+                print(f"[!] {name}: missing (ignored with --allow-missing)")
             continue
 
         print(f"[>] {name} <- {meta['url']}")
