@@ -167,6 +167,24 @@ def main() -> int:
     )
     print(f"[+] exported {args.output} ({args.output.stat().st_size:,} bytes)")
 
+    # torch's exporter can spill the weights into an external side file. The
+    # release must carry exactly one self-contained artifact, so consolidate.
+    side_file = args.output.with_name(args.output.name + ".data")
+    if side_file.exists():
+        import onnx
+
+        proto = onnx.load(str(args.output))
+        onnx.save_model(proto, str(args.output), save_as_external_data=False)
+        side_file.unlink()
+        print(f"[+] consolidated external data into {args.output} ({args.output.stat().st_size:,} bytes)")
+    if args.output.with_name(args.output.name + ".data").exists():
+        raise SystemExit("external data file still present after consolidation")
+    if args.output.stat().st_size < 1_000_000:
+        raise SystemExit(
+            f"export is suspiciously small ({args.output.stat().st_size} bytes); "
+            "weights likely missing"
+        )
+
     session = onnxruntime.InferenceSession(
         str(args.output), providers=["CPUExecutionProvider"]
     )

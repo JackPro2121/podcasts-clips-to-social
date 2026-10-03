@@ -33,3 +33,5 @@ transnetv2-pytorch==1.0.5
 onnxruntime>=1.17,<2
 # torch >= 2.6's ONNX exporter imports onnxscript at entry.
 onnxscript>=0.1
+# Consolidating external-data exports into a single self-contained file.
+onnx>=1.16
