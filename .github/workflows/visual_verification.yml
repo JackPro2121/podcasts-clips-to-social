@@ -90,8 +90,15 @@ jobs:
 
       - name: Fetch the golden-master corpus
         # The real published artifacts, by public URL, SHA-256 verified.
+        #
+        # Do NOT gate this behind `--verify`: `--verify --allow-missing` exits 0
+        # while downloading nothing, so the `||` fallback never ran and the
+        # corpus stayed absent -- the job printed "no golden masters available"
+        # and 8 regression tests silently skipped on every run. `--allow-missing`
+        # on the fetch path downloads whatever is missing, verifies whatever is
+        # present, and tolerates fixtures the release cleaner has removed.
         continue-on-error: true
-        run: python tools/fetch_fixtures.py --verify --allow-missing || python tools/fetch_fixtures.py --allow-missing
+        run: python tools/fetch_fixtures.py --allow-missing
 
       - name: Report which verifier capabilities are live
         # Explicit, so a capability that silently stopped working is visible in
