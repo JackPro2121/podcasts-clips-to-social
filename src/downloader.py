@@ -292,6 +292,7 @@ def download_via_apify(
     api_token: Optional[str] = None,
     start_time: Optional[float] = None,
     end_time: Optional[float] = None,
+    output_label: str = "clip",
 ) -> Optional[Dict[str, Any]]:
     """
     Downloads a source video using the configured full-download actor. Targeted
@@ -310,6 +311,7 @@ def download_via_apify(
             end_time=end_time,
             quality=quality,
             api_token=token,
+            output_label=output_label,
         )
 
     actor_path = quote(APIFY_FULL_DOWNLOAD_ACTOR_ID.replace("/", "~"), safe="~")
@@ -416,6 +418,7 @@ def download_segment_via_apify(
     end_time: float,
     quality: str = "1080",
     api_token: Optional[str] = None,
+    output_label: str = "clip",
 ) -> Optional[Dict[str, Any]]:
     """Download only one selected time range through a segment-capable Actor."""
     token = api_token or APIFY_API_TOKEN
@@ -498,7 +501,10 @@ def download_segment_via_apify(
             print("[-] Apify segment response did not include a valid download URL.")
             return None
         vid_id = extract_youtube_id(video_url) or "video"
-        out_file = output_dir / f"clip_{vid_id}_{int_start}s_{int_end}s.mp4"
+        # The label keeps the English-audio fallback from overwriting the video
+        # segment: both used to stream to clip_<id>_<range>.mp4, so a fallback
+        # fetch replaced the source video with an audio-only file.
+        out_file = output_dir / f"{output_label}_{vid_id}_{int_start}s_{int_end}s.mp4"
         print(f"[*] Streaming requested Apify segment to {out_file.name}...")
 
         if not _is_public_https_url(direct_url):
@@ -1428,6 +1434,7 @@ def fetch_english_audio_segment(
                 start_time=start_time,
                 end_time=end_time,
                 quality="audio",
+                output_label="audio_en",
             )
             if apify_audio and Path(apify_audio["video_path"]).exists():
                 return Path(apify_audio["video_path"]).resolve()

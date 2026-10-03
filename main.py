@@ -1,6 +1,7 @@
 import sys
 import argparse
 import json
+import tempfile
 import traceback
 import uuid
 from pathlib import Path
@@ -410,6 +411,43 @@ def _render_pixel_safe_captions(
     return rendered_path, pixel_ok, pixel_codes
 
 
+def _source_audio_is_english(video_url: str) -> bool:
+    """Probe a short audio sample of the source's default track for English.
+
+    The Apify segment actor muxes whatever audio YouTube serves as the default;
+    for multi-dub videos that is frequently a foreign auto-dub (German in one
+    run, Arabic in another). Discovering that after three full renders wastes
+    the run, so the candidate loop probes an 8-second audio-only segment first.
+    Inconclusive probes return True and never reject a candidate.
+    """
+    if not APIFY_API_TOKEN:
+        return True
+    from src.downloader import download_segment_via_apify
+
+    with tempfile.TemporaryDirectory() as tmp:
+        for start in (90.0, 240.0):
+            result = download_segment_via_apify(
+                video_url=video_url,
+                output_dir=Path(tmp),
+                start_time=start,
+                end_time=start + 8.0,
+                quality="audio",
+                output_label="langprobe",
+            )
+            if not result:
+                continue
+            try:
+                code = verify_audio_language(Path(result["video_path"]))
+            except Exception as error:
+                print(f"[!] Audio-language probe failed: {error}")
+                return True
+            code = str(code or "").strip().lower()
+            print(f"[*] Audio-language probe at {int(start)}s: detected '{code or 'unknown'}'.")
+            if code:
+                return code.startswith("en")
+        return True
+
+
 def _evaluate_rendered_pixels(
     run_id: str,
     state_store: RunStateStore,
@@ -599,6 +637,8 @@ def run_pipeline(
     native_transcript = None
 
     if is_youtube_url and not is_local_file:
+        english_candidate = None
+        fallback_candidate = None
         for candidate_index, cand in enumerate(candidates):
             cand_id = extract_youtube_id(cand)
             print(f"[*] Checking candidate for native transcript: {cand}")
@@ -606,20 +646,41 @@ def run_pipeline(
                 cand,
                 allow_apify_fallback=candidate_index < MAX_TRANSCRIPT_FALLBACKS,
             )
-            if transcript_data and transcript_data.get("transcript"):
-                active_source_url = cand
-                video_id = transcript_data.get("video_id", cand_id)
-                video_title = f"YouTube_{video_id or 'podcast'}"
-                native_transcript = transcript_data["transcript"]
-                print(f"[+] Native YouTube transcript fetched ({len(native_transcript)} segments) for '{cand}'. No video downloaded yet.")
-                segments = get_transcript(
-                    video_path=Path("__transcript_only__"),
-                    native_transcript=native_transcript,
-                    video_id=video_id
+            if not (transcript_data and transcript_data.get("transcript")):
+                continue
+            cand_video_id = transcript_data.get("video_id", cand_id)
+            cand_title = f"YouTube_{cand_video_id or 'podcast'}"
+            cand_segments = get_transcript(
+                video_path=Path("__transcript_only__"),
+                native_transcript=transcript_data["transcript"],
+                video_id=cand_video_id,
+            )
+            if not cand_segments:
+                continue
+            print(
+                f"[+] Native YouTube transcript fetched "
+                f"({len(transcript_data['transcript'])} segments) for '{cand}'. "
+                f"No video downloaded yet."
+            )
+            record = (cand, cand_video_id, cand_title, transcript_data["transcript"], cand_segments)
+            if candidate_index < MAX_TRANSCRIPT_FALLBACKS and not _source_audio_is_english(cand):
+                if fallback_candidate is None:
+                    fallback_candidate = record
+                print("[!] Candidate audio is not English; trying the next candidate.")
+                continue
+            english_candidate = record
+            break
+
+        chosen = english_candidate or fallback_candidate
+        if chosen is not None:
+            active_source_url, video_id, video_title, native_transcript, segments = chosen
+            if english_candidate is None:
+                print(
+                    "[!] No English-audio candidate found; using the first transcript "
+                    "candidate with the audio fallback."
                 )
-                if segments:
-                    break
-        if not segments:
+        else:
+            segments = None
             print("[!] No candidate had a native transcript. Will use full-download fallback pipeline.")
 
     # ------ Step 2: AI Viral Moment Detection BEFORE any video download ------
