@@ -464,8 +464,9 @@ def detect_viral_moments(
 ) -> List[ViralClipCandidate]:
     """
     Multi-Tier Zero-Cost Autonomous AI Viral Detection:
-    1. Primary: Ollama Cloud (gemma4:31b, dedicated capacity)
-    2. Fallback 1: Google Gemini Flash Free Tier
+    1. Primary: Google Gemini Flash (owner Pro-plan key; free-tier 503s are
+       retried with backoff inside query_gemini_models)
+    2. Fallback 1: Ollama Cloud (gemma4:31b, dedicated capacity)
     3. Fallback 2: Groq Free Tier (groq/compound-mini, openai/gpt-oss-120b)
     4. Fallback 3: OpenRouter Free Tier (minimax/minimax-m3:free)
     5. Fallback 4: Semantic topic extraction from spoken dialogue
@@ -524,18 +525,18 @@ Do not include markdown backticks or commentary outside the JSON.
     gemini_key = api_key or GEMINI_API_KEY
     raw_text = None
 
-    # Tier 1: Ollama Cloud (gemma4:31b). Primary since 2026-10-04: the Gemini
-    # free tier returned 503 on every model across three consecutive runs
-    # (2026-10-03/04), while Ollama serves the same prompt from dedicated
-    # capacity behind our own key.
-    if OLLAMA_API_KEY:
-        print(f"[*] Tier 1: Sending transcript to Ollama Cloud ({OLLAMA_MODEL})...")
-        raw_text = query_ollama_cloud_models(prompt, OLLAMA_API_KEY, OLLAMA_MODEL, OLLAMA_BASE_URL)
-
-    # Tier 2: Gemini Flash Free Tier
-    if not raw_text and gemini_key:
-        print("[*] Tier 2: Falling back to Google Gemini Flash...")
+    # Tier 1: Google Gemini Flash. Primary again per owner direction (Pro-plan
+    # key): Gemini writes the richest captions, and query_gemini_models already
+    # retries 503/429 with backoff across the model ladder. The paid key removes
+    # the free-tier quota cliff that caused three consecutive 503 runs.
+    if gemini_key:
+        print("[*] Tier 1: Sending transcript to Google Gemini Flash...")
         raw_text = query_gemini_models(prompt, gemini_key)
+
+    # Tier 2: Ollama Cloud (gemma4:31b) - dedicated capacity fallback
+    if not raw_text and OLLAMA_API_KEY:
+        print(f"[*] Tier 2: Falling back to Ollama Cloud ({OLLAMA_MODEL})...")
+        raw_text = query_ollama_cloud_models(prompt, OLLAMA_API_KEY, OLLAMA_MODEL, OLLAMA_BASE_URL)
 
     # Tier 3: Groq Free Tier
     if not raw_text and GROQ_API_KEY:
@@ -604,6 +605,21 @@ def fallback_rule_based_detector(segments: List[TranscriptSegment], num_clips: i
             derived_title = f"POWERFUL PODCAST INSIGHT #{i+1}"
         
         dur = round(end_t - start_t, 1)
+
+        # Transcript-derived caption for the no-LLM path. The old template
+        # repeated the title and appended a generic CTA ("What are your
+        # thoughts on this?"), which read as machine-written on a published
+        # post; the opening spoken sentences read like a human summary.
+        speech_sentences = [
+            part.strip()
+            for part in re.split(r"(?<=[.!?])\s+", " ".join(chunk_words).strip())
+            if part.strip()
+        ]
+        caption_text = " ".join(speech_sentences[:2]).strip()
+        if len(caption_text) > 220:
+            caption_text = caption_text[:220].rsplit(" ", 1)[0].rstrip(",;:") + "..."
+        if not caption_text:
+            caption_text = "A moment from this episode worth hearing twice."
         peaks: List[Tuple[float, float]] = [(5.0, 10.0), (20.0, 25.0)] if dur > 30 else [(3.0, 7.0)]
         sfx = [(0.1, "whoosh"), (peaks[0][0], "whoosh")]
         if dur > 20:
@@ -616,7 +632,7 @@ def fallback_rule_based_detector(segments: List[TranscriptSegment], num_clips: i
             duration=dur,
             viral_score=80 - (i * 5),
             hook_reason="Engaging dialogue section with high-retention speech",
-            social_caption=strip_emojis(f"{derived_title}\n\nWhat are your thoughts on this? Let us know below."),
+            social_caption=strip_emojis(caption_text),
             hashtags=list(profile["hashtags"]),
             peak_intensity_segments=peaks,
             sfx_cues=sfx,
