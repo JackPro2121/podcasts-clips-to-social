@@ -670,5 +670,57 @@ class TestUpperFaceBandL1(unittest.TestCase):
         self.assertLess(upper[0].height, whole[0].height)
 
 
+class TestSwayCalibrationAgainstHumans(unittest.TestCase):
+    """The sway gate must sit between accepted content and the gross defect.
+
+    The old 32px broadband block failed this corpus: it sat below content humans
+    accepted (up to 39px on run 37202390593's wrongly blocked clip #2) and it
+    was stolen by ordinary crop/subject motion. The recalibrated 52px block
+    passes every human-PASS master and still catches the only gross-sway
+    exemplar (sixty_k_1, 126px). Evidence table in ``sway.py``'s docstring.
+    """
+
+    def setUp(self) -> None:
+        if not fixtures.all_present():
+            self.skipTest(fixtures.fetch_hint())
+
+    def test_human_accepted_clips_never_block_on_sway(self) -> None:
+        from src.verification import sway
+
+        checked = 0
+        for master in fixtures.available():
+            if not master.expects_pass:
+                continue
+            report = sway.analyse(master.path)
+            self.assertTrue(report.ok, f"{master.file}: sway not measurable: {report.reason}")
+            if not report.measurable:
+                continue
+            checked += 1
+            self.assertLessEqual(
+                report.worst_p2p_px,
+                sway.SWAY_BLOCK_PX,
+                f"{master.file}: policy {report.worst_p2p_px:.1f}px would block",
+            )
+            self.assertLessEqual(
+                report.worst_broadband_p2p_px,
+                sway.BROADBAND_BLOCK_PX,
+                f"{master.file}: broadband {report.worst_broadband_p2p_px:.1f}px would block",
+            )
+        self.assertGreaterEqual(checked, 4, "expected the four human-PASS golden masters")
+
+    def test_gross_sway_defect_still_blocks(self) -> None:
+        from src.verification import sway
+
+        master = fixtures.by_id("sixty_k_1")
+        self.assertIsNotNone(master, "sixty_k_1 fixture is required for this pin")
+        report = sway.analyse(master.path)
+        self.assertTrue(report.measurable, report.reason)
+        self.assertGreater(
+            report.worst_broadband_p2p_px,
+            sway.BROADBAND_BLOCK_PX,
+            "the 126px gross-sway exemplar must still block",
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

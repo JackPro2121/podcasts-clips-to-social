@@ -55,6 +55,35 @@ class TestTrajectorySway(unittest.TestCase):
         self.assertLess(report.p2p_px, 2.0, f"a pure pan read as {report.p2p_px:.1f}px sway")
 
 
+class TestCalibratedBoundaries(unittest.TestCase):
+    """Thresholds sit between human-accepted content and the gross defect.
+
+    Calibration source: the fixture manifest's human verdicts (accepted content
+    reaches 39px broadband on run 37202390593's wrongly blocked clip #2; the
+    only gross-sway exemplar reads 126px) plus the corpus table in
+    ``sway.py``'s docstring. These tests pin the warn/block split with synthetic
+    trajectories; the real corpus is pinned in ``test_visual_regressions``.
+    """
+
+    def test_policy_warn_level_does_not_block(self) -> None:
+        report = sway.analyse_trajectory(_triangle(15, 20, 0.5, 27.0).tolist())
+        self.assertGreater(report.p2p_px, sway.SWAY_WARN_PX)
+        self.assertLessEqual(report.p2p_px, sway.SWAY_BLOCK_PX)
+
+    def test_policy_regression_class_blocks(self) -> None:
+        report = sway.analyse_trajectory(_triangle(15, 20, 0.5, 34.0).tolist())
+        self.assertGreater(report.p2p_px, sway.SWAY_BLOCK_PX)
+
+    def test_broadband_warn_level_does_not_block(self) -> None:
+        report = sway.analyse_trajectory(_triangle(15, 20, 0.3, 55.0).tolist())
+        self.assertGreater(report.broadband_p2p_px, sway.BROADBAND_WARN_PX)
+        self.assertLessEqual(report.broadband_p2p_px, sway.BROADBAND_BLOCK_PX)
+
+    def test_gross_broadband_class_blocks(self) -> None:
+        report = sway.analyse_trajectory(_triangle(15, 20, 0.3, 70.0).tolist())
+        self.assertGreater(report.broadband_p2p_px, sway.BROADBAND_BLOCK_PX)
+
+
 class TestReportShape(unittest.TestCase):
     def test_missing_file_is_not_a_crash(self) -> None:
         from pathlib import Path

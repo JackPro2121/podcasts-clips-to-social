@@ -584,9 +584,9 @@ def verify(
     verdict.metrics["captions"] = caption_payload
 
     # --- camera sway --------------------------------------------------------
-    # The pre-fix corpus swayed 45-74px peak-to-peak and nothing measured it.
-    # The blocking threshold currently catches that class; it tightens to the
-    # warn threshold once a full run renders with the single-mechanism policy.
+    # Thresholds are calibrated on the golden-master corpus plus the run
+    # 37202390593 artifact; the evidence table lives in sway.py's docstring.
+    # Re-tighten only when 2-3 more published runs populate the 39-126px gap.
     if with_sway:
         sway_report = sway.analyse(path)
         verdict.metrics["sway"] = sway_report.as_dict()
@@ -614,9 +614,11 @@ def verify(
                         f"{sway_report.worst_freq_hz:.2f}Hz "
                         f"({sway_report.worst_start_s:.1f}-{sway_report.worst_end_s:.1f}s); "
                         f"broadband {sway_report.worst_broadband_p2p_px:.0f}px at "
-                        f"{sway_report.worst_broadband_freq_hz:.2f}Hz. Policy target "
-                        f"<= {sway.SWAY_WARN_PX:.0f}px; broadband block "
-                        f"{sway.BROADBAND_BLOCK_PX:.0f}px"
+                        f"{sway_report.worst_broadband_freq_hz:.2f}Hz. Policy block "
+                        f"<= {sway.SWAY_BLOCK_PX:.0f}px; broadband block "
+                        f"<= {sway.BROADBAND_BLOCK_PX:.0f}px; warn at policy "
+                        f">{sway.SWAY_WARN_PX:.0f}px / broadband "
+                        f">{sway.BROADBAND_WARN_PX:.0f}px"
                     ),
                     "AGENTS.md 3.1",
                     sway_report.as_dict(),

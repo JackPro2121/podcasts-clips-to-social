@@ -14,12 +14,36 @@ frequency band (0.28Hz +/- 0.08). Content-driven movement is broadband and does
 not produce a sharp peak in that band, so measuring the band, not total travel,
 is what separates policy oscillation from a person leaning.
 
-Thresholds
-----------
-``SWAY_BLOCK_PX`` currently catches the pre-fix class (45-74px) and leaves the
-renderer-verified 15-37px clips as warnings. It tightens once a full pipeline
-run renders with the single-mechanism motion policy; the number will come from
-that measurement, not from a guess.
+Thresholds (measured, not guessed)
+----------------------------------
+Calibrated against the 12-clip golden-master corpus (``tests/fixtures/manifest.json``
+carries the human verdicts) plus the artifact of run 37202390593, whose clip #2
+was wrongly blocked by the old broadband gate::
+
+    clip                          human      policy   broadband
+    high_income_1                 PASS        9.2      16.9   (human note: 35.6px, accepted)
+    bathroom_2                    PASS       10.8      22.4   (21.0px note)
+    credit_3                      PASS       18.8      18.8   (28.0px note)
+    trillion_2                    PASS       13.4      30.5   (37.5px note)
+    seven FAIL clips (non-sway)   FAIL      <=10.6    <=33.5
+    sixty_k_1                     FAIL       37.1     126.0   (only gross-sway exemplar)
+    run 37202390593 clip_2        blocked*   15.0      39.0   (publishable; *old gate)
+
+The old broadband block (32px) sat below content humans accepted and far below
+the only gross defect (126px), so publishable clips were lost. The blocks now
+sit between the two distributions: broadband 52px keeps ~13px of margin over
+the worst accepted content and >2x below the defect; policy 25px already
+separates the worst PASS clip (18.8px) from the defect (37.1px). The 39-126px
+gap is deliberately unguarded until more runs populate it; warns at 20/38 keep
+every occurrence visible in the verdict log.
+
+Two known measurement limits, documented rather than engineered around:
+
+* The broadband band's lowest bins carry slow pan/trend residue on short
+  segments (0.18Hz is bin 1 of a 5.6s segment). Narrowing the band or changing
+  the detrend needs a longer-segment corpus first.
+* Phase correlation reads whatever the border mask contains; a subject who
+  fills the frame edge contributes their own motion.
 """
 
 from __future__ import annotations
@@ -30,17 +54,19 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 CODE_SWAY = "sway"
-SWAY_WARN_PX = 14.0
+SWAY_WARN_PX = 20.0
 # The policy oscillator is 12px; a repair attempt can raise its gain and the
 # renderer clamps that at roughly 20px, so 25px is the first value that is
-# unambiguously a regression rather than an escalated repair.
+# unambiguously a regression rather than an escalated repair. Corpus margin:
+# worst PASS clip reads 18.8px, the gross defect 37.1px.
 SWAY_BLOCK_PX = 25.0
 # Broadband gate for gross camera shake (the 107px per-branch class) regardless
-# of frequency. Calibrated on border-masked measurements: the old gross-drift
-# corpus reads 31-33px of background translation, speaker-content clips read
-# 12-29px, and a clean static render reads under 6px.
-BROADBAND_BLOCK_PX = 32.0
-BROADBAND_WARN_PX = 22.0
+# of frequency. Corpus-calibrated: human-accepted content reaches 39px
+# (run 37202390593 clip #2, measured with this metric), non-sway FAIL clips
+# reach 33.5px, and the only gross defect reads 126px. See the module docstring
+# for the full table.
+BROADBAND_BLOCK_PX = 52.0
+BROADBAND_WARN_PX = 38.0
 BROADBAND_BAND_HZ = (0.15, 1.5)
 
 ANALYSIS_FPS = 15.0
