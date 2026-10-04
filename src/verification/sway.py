@@ -37,13 +37,19 @@ separates the worst PASS clip (18.8px) from the defect (37.1px). The 39-126px
 gap is deliberately unguarded until more runs populate it; warns at 20/38 keep
 every occurrence visible in the verdict log.
 
-Two known measurement limits, documented rather than engineered around:
+The metric rejects two transition classes that are not sway, measured on run
+37208970507 (which lost 4 of 5 clips to them before this):
 
-* The broadband band's lowest bins carry slow pan/trend residue on short
-  segments (0.18Hz is bin 1 of a 5.6s segment). Narrowing the band or changing
-  the detrend needs a longer-segment corpus first.
-* Phase correlation reads whatever the border mask contains; a subject who
-  fills the frame edge contributes their own motion.
+* **Directed crop pans.** ``multi_shot_dynamic`` reframes between speakers
+  travel 148-350px mostly one way; those segments are skipped
+  (``_is_directed_translation``).
+* **Short-segment trend residue.** A 2s segment's first FFT bin is 0.5Hz - the
+  policy frequency itself - so a single pan or cut reset read as 43-93px of
+  "policy sway". A reading now counts only with >= ``MIN_OSCILLATION_CYCLES``.
+
+Still documented, not engineered around: phase correlation reads whatever the
+border mask contains; a subject who fills the frame edge contributes their own
+motion.
 """
 
 from __future__ import annotations
@@ -84,6 +90,18 @@ try:
 except Exception:  # pragma: no cover - defensive
     POLICY_BAND_HZ = (0.40, 0.60)
 MIN_SEGMENT_S = 2.0
+# A band reading only counts when the segment spans at least this many cycles of
+# the peak frequency. Below it the "peak" is trend/transition residue: run
+# 37208970507 had a 2.13s segment whose 0.47Hz peak was bin 1 of the segment
+# itself - a single crop-pan step read as 93px of "policy sway".
+MIN_OSCILLATION_CYCLES = 2.0
+# A segment that travels mostly in one direction by a large distance is a crop
+# pan (multi_shot_dynamic reframes between speakers), not sway. Measured:
+# blocked run clips show net 148-350px at monotonicity 0.61-1.00, while the
+# gross-shake control oscillates (monotonicity 0.01-0.14) with a path 20x its
+# net. Sweep calibration: the worst accepted non-pan path is ~350px per segment.
+PAN_NET_PX = 120.0
+PAN_MONOTONIC_RATIO = 0.6
 CUT_JUMP_PX = 30.0
 CUT_RESPONSE = 0.05
 
@@ -159,6 +177,21 @@ def _segments_from_jumps(
     ]
 
 
+def _is_directed_translation(values: Any) -> bool:
+    """True when the segment travels mostly one way for PAN_NET_PX+ pixels.
+
+    Characterises a crop pan: net displacement large and close to the total
+    path. Oscillation (shake) reverses constantly, so its path dwarfs its net.
+    """
+    import numpy as np
+
+    if len(values) < 2:
+        return False
+    net = abs(float(values[-1] - values[0]))
+    path = float(np.abs(np.diff(values)).sum())
+    return path > 0.0 and net >= PAN_NET_PX and (net / path) >= PAN_MONOTONIC_RATIO
+
+
 def analyse_trajectory(trajectory: List[float], fps: float = ANALYSIS_FPS) -> TrajectorySway:
     """Policy-band and broadband sway of one axis. Pure, so it is unit-testable."""
     import numpy as np
@@ -172,19 +205,30 @@ def analyse_trajectory(trajectory: List[float], fps: float = ANALYSIS_FPS) -> Tr
 
     worst = TrajectorySway(segments=len(segments))
     for start, end in segments:
-        values = np.asarray(trajectory[start:end], dtype=np.float64)
-        values = values - np.linspace(values[0], values[-1], len(values))
+        raw = np.asarray(trajectory[start:end], dtype=np.float64)
+        if _is_directed_translation(raw):
+            continue
+        duration_s = (end - start) / fps
+        values = raw - np.linspace(raw[0], raw[-1], len(raw))
         windowed = values * np.hanning(len(values))
         spectrum = np.abs(np.fft.rfft(windowed)) / len(values) * 2.0
         freqs = np.fft.rfftfreq(len(values), d=1.0 / fps)
         amp, freq = _band_peak(freqs, spectrum, *POLICY_BAND_HZ)
-        if amp * 2.0 > worst.p2p_px:
+        if (
+            freq > 0.0
+            and duration_s * freq >= MIN_OSCILLATION_CYCLES
+            and amp * 2.0 > worst.p2p_px
+        ):
             worst.p2p_px = amp * 2.0
             worst.freq_hz = freq
             worst.start_s = start / fps
             worst.end_s = end / fps
         broad_amp, broad_freq = _band_peak(freqs, spectrum, *BROADBAND_BAND_HZ)
-        if broad_amp * 2.0 > worst.broadband_p2p_px:
+        if (
+            broad_freq > 0.0
+            and duration_s * broad_freq >= MIN_OSCILLATION_CYCLES
+            and broad_amp * 2.0 > worst.broadband_p2p_px
+        ):
             worst.broadband_p2p_px = broad_amp * 2.0
             worst.broadband_freq_hz = broad_freq
     if worst.p2p_px <= 0.0 and worst.broadband_p2p_px <= 0.0:

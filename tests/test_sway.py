@@ -84,6 +84,39 @@ class TestCalibratedBoundaries(unittest.TestCase):
         self.assertGreater(report.broadband_p2p_px, sway.BROADBAND_BLOCK_PX)
 
 
+class TestTransitionRejection(unittest.TestCase):
+    """Pans and short-segment residues are not sway.
+
+    Run 37208970507 lost 4 of 5 clips to segments that were pure crop pans
+    (``multi_shot_dynamic`` reframes between speakers) or to short-segment
+    bin-1 residue: a 2.13s segment's 0.47Hz peak is one cycle of the segment
+    itself. Both classes read as 43-105px "sway" before this.
+    """
+
+    def test_eased_crop_pan_is_not_sway(self) -> None:
+        t = np.arange(int(15 * 2.13)) / 15
+        eased = (225.0 * (1 - np.exp(-t / 0.45))).tolist()
+        report = sway.analyse_trajectory(eased)
+        self.assertLess(report.p2p_px, 3.0)
+        self.assertLess(report.broadband_p2p_px, 3.0)
+
+    def test_directed_long_pan_is_skipped(self) -> None:
+        pan = (200.0 * np.arange(int(15 * 8)) / int(15 * 8)).tolist()
+        report = sway.analyse_trajectory(pan)
+        self.assertLess(report.p2p_px, 3.0)
+        self.assertLess(report.broadband_p2p_px, 3.0)
+
+    def test_short_segment_step_residue_needs_two_cycles(self) -> None:
+        step = [float(v) for v in list(range(21)) + [0.0] * 9]
+        report = sway.analyse_trajectory(step)
+        self.assertLess(report.p2p_px, 3.0)
+        self.assertLess(report.broadband_p2p_px, 3.0)
+
+    def test_sustained_gross_oscillation_still_blocks(self) -> None:
+        report = sway.analyse_trajectory(_triangle(15, 20, 0.3, 70.0).tolist())
+        self.assertGreater(report.broadband_p2p_px, sway.BROADBAND_BLOCK_PX)
+
+
 class TestReportShape(unittest.TestCase):
     def test_missing_file_is_not_a_crash(self) -> None:
         from pathlib import Path
