@@ -1,6 +1,7 @@
 import sys
 import argparse
 import json
+import re
 import tempfile
 import traceback
 import uuid
@@ -205,6 +206,35 @@ def _detection_pool(
     if added:
         print(f"[+] Added {added} backfill candidate(s) for clip-count resilience.")
     return pool
+
+
+def _renumber_rendered_clips(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Renumber rendered filenames to the publish order.
+
+    The detection pool hands out stable candidate indices; when a candidate is
+    lost (language, QA, pixel veto) the delivered set can be clip_1/3/4 in the
+    release assets. The number is user-facing, so rewrite it to clip_1..clip_N
+    without touching the title part. A target that already exists (a failed
+    candidate's artifact with the same title) is left alone rather than
+    overwritten - those files are the evidence used to diagnose failures.
+    """
+    renumbered: List[Dict[str, Any]] = []
+    for position, item in enumerate(clips, 1):
+        updated = dict(item)
+        for key in ("path", "thumbnail"):
+            value = item.get(key)
+            if not value:
+                continue
+            path = Path(value)
+            match = re.match(r"^clip_(\d+)(_.*)$", path.name)
+            if not match:
+                continue
+            target = path.with_name(f"clip_{position}{match.group(2)}")
+            if target != path and path.exists() and not target.exists():
+                path.replace(target)
+                updated[key] = str(target)
+        renumbered.append(updated)
+    return renumbered
 
 
 def _build_universal_shadow(
@@ -1535,6 +1565,8 @@ def run_pipeline(
         )
     else:
         print(f"[+] Clip count: {delivered_clips}/{requested_clips} as requested.")
+
+    rendered_clips = _renumber_rendered_clips(rendered_clips)
 
     # Step 6: Release Hosting & Buffer Social Distribution
     print("\n--- [6/6] RELEASE HOSTING & BUFFER SOCIAL PUBLISHING ---")

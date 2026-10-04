@@ -7,7 +7,9 @@ guarantees the loops can replace a lost moment with the next-best non-overlappin
 candidate instead of ending in a shortfall.
 """
 
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -77,6 +79,60 @@ class TestDetectionPool(unittest.TestCase):
         extras = [_moment(40, 80)]
         pool, _ = self._run_pool(primary, extras)
         self.assertEqual(len(pool), 2)
+
+
+class TestRenumberRenderedClips(unittest.TestCase):
+    """Published file names must be sequential even when a candidate was lost."""
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.dir = Path(self._dir.name)
+
+    def tearDown(self) -> None:
+        self._dir.cleanup()
+
+    def _clip(self, name: str, thumb: str | None = None):
+        path = self.dir / name
+        path.write_bytes(b"x")
+        item: dict = {"path": str(path), "moment": "m"}
+        if thumb:
+            thumb_path = self.dir / thumb
+            thumb_path.write_bytes(b"x")
+            item["thumbnail"] = str(thumb_path)
+        return item
+
+    def test_gapped_indices_are_renumbered_to_publish_order(self) -> None:
+        clips = [
+            self._clip("clip_1_A.mp4", "clip_1_A_thumb.jpg"),
+            self._clip("clip_3_B.mp4"),
+            self._clip("clip_4_C.mp4"),
+        ]
+        out = main._renumber_rendered_clips(clips)
+        self.assertEqual(
+            [Path(item["path"]).name for item in out],
+            ["clip_1_A.mp4", "clip_2_B.mp4", "clip_3_C.mp4"],
+        )
+        for item in out:
+            self.assertTrue(Path(item["path"]).exists())
+        self.assertEqual(Path(out[0]["thumbnail"]).name, "clip_1_A_thumb.jpg")
+        self.assertFalse((self.dir / "clip_3_B.mp4").exists())
+
+    def test_existing_target_is_not_overwritten(self) -> None:
+        # A failed candidate already wrote clip_1_B.mp4; it is diagnosis evidence.
+        (self.dir / "clip_1_B.mp4").write_bytes(b"failed")
+        out = main._renumber_rendered_clips([self._clip("clip_3_B.mp4")])
+        self.assertEqual(Path(out[0]["path"]).name, "clip_3_B.mp4")
+        self.assertEqual((self.dir / "clip_1_B.mp4").read_bytes(), b"failed")
+
+    def test_non_clip_names_are_left_alone(self) -> None:
+        item = {"path": str(self.dir / "custom_name.mp4")}
+        (self.dir / "custom_name.mp4").write_bytes(b"x")
+        out = main._renumber_rendered_clips([item])
+        self.assertEqual(Path(out[0]["path"]).name, "custom_name.mp4")
+
+    def test_missing_file_is_tolerated(self) -> None:
+        out = main._renumber_rendered_clips([{"path": str(self.dir / "clip_2_X.mp4")}])
+        self.assertEqual(Path(out[0]["path"]).name, "clip_2_X.mp4")
 
 
 if __name__ == "__main__":
