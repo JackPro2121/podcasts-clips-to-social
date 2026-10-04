@@ -70,6 +70,18 @@ SHORT_FORM_MAX_DURATION_S = float(os.getenv("SHORT_FORM_MAX_DURATION", "55"))
 # added up to 8 seconds with no re-check, which could push a 140s clip to 148s.
 ENDPOINT_EXTENSION_MAX_S = 6.0
 
+# How far the endpoint-completion step may move an endpoint *backwards*, to the
+# previous complete sentence, when the next sentence does not fit the contract.
+# A longer trim would cut into the story itself; beyond this the endpoint is
+# left alone and the QA layer reports it honestly.
+ENDPOINT_TRIM_MAX_S = 2.0
+
+# A rendered clip can quantize to a frame boundary (33ms at 29.97fps) past the
+# exact times the pipeline asked for. The pixel verdict blocks above
+# SHORT_FORM_MAX_DURATION_S, so endpoint completion stops this far short of the
+# ceiling rather than lose a clip to one frame of rounding.
+DURATION_QUANTIZATION_MARGIN_S = 0.15
+
 # --- platform safe zones (ARCHITECTURE section 6) ---------------------------
 
 SAFE_ZONE_TOP_PX = 240        # 12.5% -- search bars, audio icon, headers

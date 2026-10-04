@@ -31,6 +31,7 @@ from src.config import (
 )
 
 from src.transcriber import TranscriptSegment
+from src.endpoint import word_boundary_ends as _complete_boundary_ends
 
 # Suppress the non-blocking AFC function-calling advisory notice from google.genai
 warnings.filterwarnings("ignore", message=".*Direct use of automatic function calling.*")
@@ -286,18 +287,6 @@ def strip_emojis(text: str) -> str:
         flags=re.UNICODE
     )
     return emoji_pattern.sub(r"", text).strip()
-
-
-def _complete_boundary_ends(segments: List[TranscriptSegment]) -> List[float]:
-    words = sorted((word for segment in segments for word in segment.words), key=lambda word: word.start)
-    boundaries: List[float] = []
-    for index, word in enumerate(words):
-        clean_word = word.word.rstrip("\"')]} ").lower()
-        next_word = words[index + 1] if index + 1 < len(words) else None
-        gap = next_word.start - word.end if next_word else 0.0
-        if clean_word.endswith((".", "?", "!")) or gap >= 1.2:
-            boundaries.append(word.end)
-    return boundaries
 
 
 def _safe_start_boundary(segments: List[TranscriptSegment], requested: float, lookback: float = 8.0) -> float:

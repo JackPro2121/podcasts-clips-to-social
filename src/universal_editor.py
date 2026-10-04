@@ -15,6 +15,7 @@ from src.composition_planner import (
     build_composition_plan,
 )
 from src.edit_director import EditPlan, HookCandidate, StoryBeat, build_semantic_edit_plans
+from src.endpoint import endpoint_is_complete
 from src.source_index import SourceIndex, build_source_index, save_source_index
 from src.transcriber import TranscriptSegment, WordTimestamp
 
@@ -99,18 +100,35 @@ ENDPOINT_FRAGMENT_WORDS = {
 }
 
 
-def _endpoint_warnings(segments: Sequence[TranscriptSegment]) -> List[str]:
-    if not segments:
+def _endpoint_warnings(
+    segments: Sequence[TranscriptSegment],
+    clip_start: float,
+    clip_end: float,
+) -> List[str]:
+    """Warn when the window does not end on a sentence boundary.
+
+    Boundary policy is shared with the moment normalizer and the render-time
+    endpoint repair (``src.endpoint``): a terminal word or a spoken pause both
+    count. A previous text-only check flagged valid gap-terminated windows and
+    missed run-on segments whose text ended with punctuation far inside the
+    window.
+    """
+    window = [
+        segment
+        for segment in segments
+        if segment.end > clip_start and segment.start < clip_end
+    ]
+    if not window:
         return []
-    text = segments[-1].text.strip()
-    if not text:
+    if not endpoint_is_complete(segments, clip_end):
         return ["endpoint_not_proven_complete"]
     warnings: List[str] = []
-    if not text.endswith((".", "?", "!")):
-        warnings.append("endpoint_not_proven_complete")
-        return warnings
-    words = re.findall(r"[A-Za-z0-9']+", text.lower())
-    if len(words) < 2 or words[-1] in ENDPOINT_FRAGMENT_WORDS:
+    words = [word for segment in window for word in segment.words if word.start < clip_end]
+    if words:
+        tokens = re.findall(r"[A-Za-z0-9']+", " ".join(word.word for word in words).lower())
+    else:
+        tokens = re.findall(r"[A-Za-z0-9']+", " ".join(segment.text for segment in window).lower())
+    if len(tokens) < 2 or (tokens and tokens[-1] in ENDPOINT_FRAGMENT_WORDS):
         warnings.append("endpoint_caption_fragment")
     return warnings
 
@@ -183,7 +201,7 @@ def build_clip_editor_artifacts(
     source_path = artifact_dir / f"clip_{clip_index}_source_index.json"
     save_source_index(source_index, source_path)
     suggestions = build_semantic_edit_plans(relative_segments, source_index, num_clips=1)
-    warnings = _endpoint_warnings(relative_segments)
+    warnings = _endpoint_warnings(segments, clip_start, clip_end)
     plan = EditPlan(
         plan_id=f"{run_id}_clip_{clip_index}",
         start=0.0,

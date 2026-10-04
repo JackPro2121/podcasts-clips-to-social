@@ -52,6 +52,12 @@ from src.director_v2 import (
 from src.repair import render_with_repair
 from src.run_state import RunStateStore
 from src.universal_editor import ClipEditorArtifacts, build_clip_editor_artifacts
+from src.creative_spec import (
+    DURATION_QUANTIZATION_MARGIN_S,
+    MAX_CLIP_DURATION_S,
+    MIN_CLIP_DURATION_S,
+)
+from src.endpoint import resolve_endpoint
 
 
 def _manual_framing(video_path: Path, framing_mode: str) -> FramingDecision:
@@ -121,21 +127,41 @@ def _clip_transcript_text(
 
 
 def _extend_moment_to_complete_transcript(segments: List[TranscriptSegment], moment: Any) -> None:
+    """Move a clip endpoint onto a sentence boundary inside the 30-55s contract.
+
+    The moment normalizer already ends windows on word-level sentence
+    boundaries; this pass repairs endpoints that are still mid-sentence.
+    It extends forward when the completing sentence fits the contract (minus
+    one frame of quantization margin), trims back to the previous complete
+    sentence when the next one does not fit but is at most
+    ``ENDPOINT_TRIM_MAX_S`` away, and otherwise leaves the endpoint alone and
+    says so. It never claims a completion it did not make: the old version
+    clamped to ``start + 54`` mid-sentence and printed "Extended clip endpoint
+    to complete transcript sentence", which is what the QA layer then flagged.
+    """
+    start_time = float(moment.start_time)
     original_end = float(moment.end_time)
-    hard_contract_ceiling = float(moment.start_time) + 54.0
-    max_end = min(original_end + 8.0, hard_contract_ceiling)
-    if max_end <= original_end:
+    ceiling = start_time + MAX_CLIP_DURATION_S - DURATION_QUANTIZATION_MARGIN_S
+    resolution = resolve_endpoint(
+        segments,
+        start=start_time,
+        requested_end=original_end,
+        ceiling=ceiling,
+        min_duration=MIN_CLIP_DURATION_S,
+    )
+    if resolution.status == "complete":
         return
-    for segment in sorted(segments, key=lambda item: (item.start, item.end)):
-        if segment.end <= original_end + 0.05:
-            continue
-        if segment.start > max_end:
-            break
-        if segment.text.rstrip().endswith((".", "?", "!")):
-            moment.end_time = min(segment.end, max_end)
-            moment.duration = moment.end_time - moment.start_time
-            print(f"[+] Extended clip endpoint to complete transcript sentence at {moment.end_time:.2f}s.")
-            return
+    if resolution.status == "incomplete":
+        print(
+            f"[!] Clip endpoint {original_end:.2f}s does not land on a complete sentence "
+            f"within the {MIN_CLIP_DURATION_S:.0f}-{MAX_CLIP_DURATION_S:.0f}s contract; "
+            "keeping the detected window."
+        )
+        return
+    moment.end_time = resolution.end
+    moment.duration = resolution.end - start_time
+    verb = "Extended" if resolution.status == "extended" else "Trimmed"
+    print(f"[+] {verb} clip endpoint to a complete sentence at {resolution.end:.2f}s.")
 
 
 def _build_universal_shadow(
