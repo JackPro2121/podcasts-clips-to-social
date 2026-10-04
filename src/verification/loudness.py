@@ -45,6 +45,10 @@ TARGET_TRUE_PEAK_DBFS = -1.5
 # small margin.
 LUFS_TOLERANCE = 0.5
 TRUE_PEAK_TOLERANCE = 0.3
+# Measured exactly at the tolerance is inside it. Float subtraction put
+# -1.2 dBFS against the -1.5 ceiling at 0.30000000000000004 and blocked a clip
+# from run 37208970507 that measured -14.0 LUFS.
+_FLOAT_EPSILON = 1e-9
 
 # True peak is a ceiling, not a target. Loud-on-purpose audio must not exceed
 # the ceiling (that is the distortion guard), but genuinely quiet audio is not a
@@ -121,14 +125,14 @@ def grade(
     else:
         report.peak_error = 0.0
 
-    if report.lufs_error > LUFS_TOLERANCE:
+    if report.lufs_error > LUFS_TOLERANCE + _FLOAT_EPSILON:
         report.ok = False
         report.reason = (
             f"integrated loudness {integrated_lufs:.1f} LUFS is "
             f"{report.lufs_error:.2f} LU from the {TARGET_LUFS:.1f} target "
             f"(tolerance {LUFS_TOLERANCE})"
         )
-    elif report.peak_error > TRUE_PEAK_TOLERANCE:
+    elif report.peak_error > TRUE_PEAK_TOLERANCE + _FLOAT_EPSILON:
         report.ok = False
         report.reason = (
             f"true peak {peak_dbfs:.1f} dBFS is {report.peak_error:.2f} dB above "

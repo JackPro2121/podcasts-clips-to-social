@@ -25,6 +25,14 @@ class TestGrade(unittest.TestCase):
         self.assertFalse(report.ok)
         self.assertIn("integrated loudness", report.reason)
 
+    def test_peak_exactly_at_tolerance_passes(self) -> None:
+        # -1.2 vs the -1.5 ceiling is exactly the 0.3 tolerance; float
+        # subtraction makes it 0.30000000000000004. Run 37208970507's clip #1
+        # measured -14.0 LUFS with this peak and was blocked by the rounding.
+        report = loudness.grade(-14.0, -1.2)
+        self.assertTrue(report.ok, report.reason)
+        self.assertEqual(report.reason, "")
+
     def test_ceiling_is_strict(self) -> None:
         report = loudness.grade(-14.0, -1.0)
         self.assertFalse(report.ok)
