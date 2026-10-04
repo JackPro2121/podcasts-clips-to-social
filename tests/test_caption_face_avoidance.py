@@ -339,6 +339,50 @@ class TestHumanShotsNeverUseTheUpperBand(unittest.TestCase):
         )
 
 
+class TestMultiFaceBandSelection(unittest.TestCase):
+    """The pixel repair must clear every detected face, not just the largest.
+
+    Measured failure: on the probe clip of run 37199237072 the repair's 14-frame
+    analysis ranked the lower speaker's face first while the pixel verdict's
+    analysis ranked the upper speaker's face first. The chosen ``top_safe`` band
+    cleared the lower face and sat exactly on the upper one:
+    "Face-safe caption re-render still blocked: ['caption_on_face']", and the
+    clip was lost.
+    """
+
+    def test_two_faces_at_opposite_heights_choose_the_centre_band(self) -> None:
+        from main import _caption_band_clearing_faces
+
+        chosen = _caption_band_clearing_faces(
+            [(117.0, 733.0), (1115.0, 1875.0)], 1920.0, margin=76.8
+        )
+        self.assertIsNotNone(chosen)
+        name, alignment, y0, y1 = chosen  # type: ignore[misc]
+        self.assertEqual(name, "center")
+        self.assertEqual(alignment, 2)
+        self.assertGreater(y0, 733.0)
+        self.assertLess(y1, 1115.0)
+
+    def test_single_upper_face_prefers_a_lower_band(self) -> None:
+        from main import _caption_band_clearing_faces
+
+        chosen = _caption_band_clearing_faces([(117.0, 733.0)], 1920.0, margin=76.8)
+        self.assertEqual(chosen[0], "lower_center")  # type: ignore[index]
+
+    def test_single_lower_face_prefers_the_top_band(self) -> None:
+        from main import _caption_band_clearing_faces
+
+        chosen = _caption_band_clearing_faces([(1115.0, 1875.0)], 1920.0, margin=76.8)
+        self.assertEqual(chosen[0], "top_safe")  # type: ignore[index]
+
+    def test_face_covering_every_band_picks_the_least_overlap(self) -> None:
+        from main import _caption_band_clearing_faces
+
+        chosen = _caption_band_clearing_faces([(0.0, 1920.0)], 1920.0, margin=0.0)
+        self.assertIsNotNone(chosen)
+        self.assertIn(chosen[0], {"top_safe", "lower_center", "center", "bottom_safe"})  # type: ignore[index]
+
+
 def _caption_rect_for(anchor: str) -> NormalizedRect:
     from src.composition_planner import _caption_rect
 

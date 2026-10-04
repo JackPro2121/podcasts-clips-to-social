@@ -30,7 +30,7 @@ from src.transcriber import (
     transcribe_audio_whisper,
     verify_audio_language,
 )
-from src.viral_detector import detect_viral_moments
+from src.viral_detector import detect_viral_moments, fallback_rule_based_detector
 from src.face_tracker import analyze_faces_in_clip, FramingDecision
 from src.subtitle_generator import create_styled_ass_subtitles
 from src.video_editor import render_viral_clip
@@ -162,6 +162,49 @@ def _extend_moment_to_complete_transcript(segments: List[TranscriptSegment], mom
     moment.duration = resolution.end - start_time
     verb = "Extended" if resolution.status == "extended" else "Trimmed"
     print(f"[+] {verb} clip endpoint to a complete sentence at {resolution.end:.2f}s.")
+
+
+def _moments_overlap(first: Any, second: Any) -> bool:
+    return not (
+        first.end_time <= second.start_time or first.start_time >= second.end_time
+    )
+
+
+def _detection_pool(
+    segments: List[TranscriptSegment],
+    num_clips: int,
+    niche: str,
+) -> List[Any]:
+    """Primary viral moments plus spaced semantic backfill candidates.
+
+    AGENTS.md 3.5 requires exactly ``num_clips`` delivered, but any individual
+    moment can be lost later (audio-language rejection, QA veto, pixel-verdict
+    veto) and every loss is a bare ``continue`` in the render loops. A pool
+    larger than ``num_clips`` lets those loops keep going until the contract is
+    met. Primary detections stay first - the semantic detector's evenly spaced
+    windows are strictly backfill and never displace a scored moment.
+    """
+    primary = detect_viral_moments(segments, num_clips=num_clips, niche=niche) or []
+    pool = list(primary)
+    target = num_clips + 2
+    if len(pool) >= target:
+        return pool
+    try:
+        extras = fallback_rule_based_detector(segments, num_clips=target, niche=niche) or []
+    except Exception as error:
+        print(f"[!] Backfill candidate generation failed: {error}")
+        return pool
+    added = 0
+    for candidate in extras:
+        if len(pool) >= target:
+            break
+        if any(_moments_overlap(candidate, existing) for existing in pool):
+            continue
+        pool.append(candidate)
+        added += 1
+    if added:
+        print(f"[+] Added {added} backfill candidate(s) for clip-count resilience.")
+    return pool
 
 
 def _build_universal_shadow(
@@ -345,6 +388,52 @@ def _evaluate_universal_qa(
     return True, []
 
 
+_FACE_SAFE_CAPTION_BANDS = (
+    # name, ASS alignment, band top, band bottom (fractions of frame height)
+    ("top_safe", 8, 0.15, 0.27),
+    ("lower_center", 2, 0.62, 0.76),
+    ("center", 2, 0.42, 0.56),
+    ("bottom_safe", 2, 0.72, 0.85),
+)
+
+
+def _caption_band_clearing_faces(
+    face_spans: List[Tuple[float, float]],
+    frame_height: float,
+    margin: float = 0.04 * OUTPUT_HEIGHT,
+) -> Optional[Tuple[str, int, float, float]]:
+    """Caption band with the smallest worst-case overlap against every face.
+
+    The first version of the pixel repair dodged only ``report.boxes[0]``, the
+    single largest face. In a ``multi_shot_dynamic`` clip the framing switches
+    between speakers at different heights, so the repair dodged the lower
+    speaker on one render while the pixel verdict measured against the upper
+    speaker on the retry: the chosen ``top_safe`` band cleared one face and sat
+    exactly on the other, and the clip was lost with "still blocked". Scoring
+    every band against every detected face picks the ``center`` band that clears
+    both. Ties keep the declared preference order.
+    """
+    padded = [
+        (max(0.0, top - margin), min(frame_height, bottom + margin))
+        for top, bottom in face_spans
+    ]
+    chosen: Optional[Tuple[str, int, float, float]] = None
+    best_score: Optional[float] = None
+    for name, alignment, top_fraction, bottom_fraction in _FACE_SAFE_CAPTION_BANDS:
+        y0 = top_fraction * frame_height
+        y1 = bottom_fraction * frame_height
+        score = max(
+            (max(0.0, min(bottom, y1) - max(top, y0)) for top, bottom in padded),
+            default=0.0,
+        )
+        if best_score is None or score < best_score:
+            best_score = score
+            chosen = (name, alignment, y0, y1)
+        if score <= 0.0:
+            break
+    return chosen
+
+
 def _face_free_caption_placements(rendered_path: Path, duration: float) -> List[Any]:
     """One forced caption placement that clears the faces in a rendered clip.
 
@@ -352,7 +441,8 @@ def _face_free_caption_placements(rendered_path: Path, duration: float) -> List[
     in the rendered crop; a tight crop can put the face exactly where the plan
     thought it was safe. The rendered clip is the only authority on where the
     face ended up, so when the pixel gate reports caption_on_face this derives
-    the band from the pixels and re-renders once.
+    the band from the pixels and re-renders once. Every detected face is
+    avoided, not just the largest; see ``_caption_band_clearing_faces``.
     """
     from src.composition_planner import CaptionPlacement
     from src.verification import faces
@@ -361,29 +451,11 @@ def _face_free_caption_placements(rendered_path: Path, duration: float) -> List[
     if not report.any_faces or not report.boxes:
         return []
     scale_y = OUTPUT_HEIGHT / 360.0
-    face = report.boxes[0]
-    top = max(0.0, face.y * scale_y - 0.04 * OUTPUT_HEIGHT)
-    bottom = min(
-        float(OUTPUT_HEIGHT),
-        (face.y + face.height) * scale_y + 0.04 * OUTPUT_HEIGHT,
-    )
-
-    candidates = (
-        ("top_safe", 8, 0.15 * OUTPUT_HEIGHT, 0.27 * OUTPUT_HEIGHT),
-        ("lower_center", 2, 0.62 * OUTPUT_HEIGHT, 0.76 * OUTPUT_HEIGHT),
-        ("center", 2, 0.42 * OUTPUT_HEIGHT, 0.56 * OUTPUT_HEIGHT),
-        ("bottom_safe", 2, 0.72 * OUTPUT_HEIGHT, 0.85 * OUTPUT_HEIGHT),
-    )
-    chosen = None
-    best_overlap = None
-    for name, alignment, y0, y1 in candidates:
-        overlap = max(0.0, min(bottom, y1) - max(top, y0))
-        if overlap <= 0.0:
-            chosen = (name, alignment, y0, y1)
-            break
-        if best_overlap is None or overlap < best_overlap:
-            best_overlap = overlap
-            chosen = (name, alignment, y0, y1)
+    face_spans = [
+        (box.y * scale_y, (box.y + box.height) * scale_y)
+        for box in report.boxes
+    ]
+    chosen = _caption_band_clearing_faces(face_spans, float(OUTPUT_HEIGHT))
     if chosen is None:
         return []
     name, alignment, y0, y1 = chosen
@@ -714,9 +786,9 @@ def run_pipeline(
 
     viral_moments = None
     if segments:
-        viral_moments = detect_viral_moments(segments, num_clips=num_clips, niche=niche)
+        viral_moments = _detection_pool(segments, num_clips=num_clips, niche=niche)
         if viral_moments:
-            print(f"\n[+] Gemini identified {len(viral_moments)} viral clips:")
+            print(f"\n[+] Viral moment pool: {len(viral_moments)} candidate(s), primary scored first:")
             for idx, m in enumerate(viral_moments, 1):
                 print(f"   #{idx}: [{m.start_time:.1f}s -> {m.end_time:.1f}s] ({m.duration:.0f}s) | Score: {m.viral_score}/100 | '{m.title}'")
         else:
@@ -739,6 +811,9 @@ def run_pipeline(
         DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
         for idx, moment in enumerate(viral_moments, 1):
+            if len(rendered_clips) >= num_clips:
+                print(f"[+] Clip-count contract met ({num_clips}/{num_clips}); skipping remaining backfill candidates.")
+                break
             if segments:
                 _extend_moment_to_complete_transcript(segments, moment)
             print(f"\n>>> Clip #{idx}: '{moment.title}' [{moment.start_time:.1f}s -> {moment.end_time:.1f}s]")
@@ -1011,12 +1086,15 @@ def run_pipeline(
                     segments = []
                 if segments:
                     print(f"[+] Whisper produced {len(segments)} segments from probe. Running viral detection...")
-                    viral_moments = detect_viral_moments(segments, num_clips=num_clips, niche=niche)
+                    viral_moments = _detection_pool(segments, num_clips=num_clips, niche=niche)
                     if viral_moments:
-                        print(f"[+] Viral moments detected from Whisper probe. Downloading {len(viral_moments)} targeted clips...")
+                        print(f"[+] Viral moments detected from Whisper probe. Downloading up to {len(viral_moments)} targeted clips...")
                         DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
                         rendered_clips = []
                         for idx, moment in enumerate(viral_moments, 1):
+                            if len(rendered_clips) >= num_clips:
+                                print(f"[+] Clip-count contract met ({num_clips}/{num_clips}); skipping remaining backfill candidates.")
+                                break
                             try:
                                 _extend_moment_to_complete_transcript(segments, moment)
                                 clip_info = download_clip_segment(
@@ -1238,17 +1316,20 @@ def run_pipeline(
                 sys.exit(1)
 
             print("\n--- [3b/6] VIRAL MOMENT HUNTING & HOOK SCORING (Fallback) ---")
-            viral_moments = detect_viral_moments(segments, num_clips=num_clips, niche=niche)
+            viral_moments = _detection_pool(segments, num_clips=num_clips, niche=niche)
             if not viral_moments:
                 print("[-] No viral moments detected. Exiting.")
                 sys.exit(1)
 
-            print(f"\n[+] Top {len(viral_moments)} Viral Moments Identified:")
+            print(f"\n[+] Top {len(viral_moments)} Viral Moment candidates (primary scored first):")
             for idx, m in enumerate(viral_moments, 1):
                 print(f"   #{idx}: [{m.start_time:.1f}s - {m.end_time:.1f}s] (Virality: {m.viral_score}/100) '{m.title}'")
 
             print("\n--- [4/6 & 5/6] EDITING, FACE TRACKING, AUDIO MASTERING & RENDERING ---")
             for idx, moment in enumerate(viral_moments, 1):
+                if len(rendered_clips) >= num_clips:
+                    print(f"[+] Clip-count contract met ({num_clips}/{num_clips}); skipping remaining backfill candidates.")
+                    break
                 _extend_moment_to_complete_transcript(segments, moment)
                 print(f"\n>>> Processing Clip #{idx}: {moment.title} ({moment.duration:.1f}s)")
                 try:
