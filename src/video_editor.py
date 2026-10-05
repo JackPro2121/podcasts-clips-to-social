@@ -11,6 +11,7 @@ from src.config import (
     SFX_ASSETS_DIR, ENABLE_SFX, ENABLE_DYNAMIC_DUCKING
 )
 from src.face_tracker import FramingDecision
+from src.creative_spec import LUFS_TOLERANCE, TRUE_PEAK_TOLERANCE
 
 def sanitize_ffmpeg_path(path: Path) -> str:
     """Escapes path for FFmpeg filter arguments across Windows and Unix."""
@@ -104,6 +105,20 @@ _LOUDNESS_PASS_LADDER = (
     (False, 0.71),
     (False, 0.63),
 )
+
+
+def _loudness_within_contract(measured: Dict[str, float]) -> bool:
+    """The renderer must certify exactly the contract the pixel verdict checks.
+
+    It used to accept +-1.0 LUFS / ceiling+0.5 dB while the verdict blocks
+    beyond the creative_spec contract (+-0.5 LU / ceiling+0.3 dB), so run
+    37221814417 rendered a "loudness_verified" clip at -14.6 LUFS that the
+    verdict then rejected. With the real contract here the ladder keeps trying
+    limiter passes until it is met; only genuinely unmixable audio fails.
+    """
+    lufs_ok = abs(measured["input_i"] - TARGET_LUFS) <= LUFS_TOLERANCE + 1e-9
+    peak_ok = measured["input_tp"] <= TARGET_TRUE_PEAK + TRUE_PEAK_TOLERANCE + 1e-9
+    return lufs_ok and peak_ok
 
 
 def _apply_measured_loudness(
@@ -898,9 +913,7 @@ def render_viral_clip(
                 verification = _measure_loudness(destination)
                 if verification is None:
                     raise RuntimeError(f"Could not verify loudness for clip {output_clip_path.name}")
-                lufs_ok = abs(verification["input_i"] - TARGET_LUFS) <= 1.0
-                peak_ok = verification["input_tp"] <= TARGET_TRUE_PEAK + 0.5
-                if lufs_ok and peak_ok:
+                if _loudness_within_contract(verification):
                     loudness_verified = True
                     attempt_outputs.append(destination)
                     break

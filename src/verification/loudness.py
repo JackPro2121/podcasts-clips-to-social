@@ -33,18 +33,17 @@ from typing import Any, Dict
 
 from . import probe
 
-# ARCHITECTURE_AND_METHODOLOGY.md section 5, and ARCHITECTURE section 5's
-# stated platform targets for Shorts, Reels and TikTok.
-TARGET_LUFS = -14.0
-TARGET_TRUE_PEAK_DBFS = -1.5
-
-# Tolerances. The second loudnorm pass plus AAC re-encode moves the integrated
-# value by a fraction of a LU, and true peak by a couple of tenths of a dB, so a
-# tolerance tighter than this would be measuring the encoder rather than the
-# pipeline. 0.5 LU and 0.3 dB bracket the observed spread (0.4 LU, 0.2 dB) with a
-# small margin.
-LUFS_TOLERANCE = 0.5
-TRUE_PEAK_TOLERANCE = 0.3
+# The numbers live in src.creative_spec (the single contract source) and are
+# re-exported here for the existing callers and tests. The golden masters
+# measured -14.0..-14.4 LUFS / -1.4..-1.7 dBTP, i.e. within 0.4 LU and 0.2 dB;
+# the 0.5/0.3 tolerances are the contract, not a tuning knob - a tolerance
+# tighter than this would measure the encoder rather than the pipeline.
+from src.creative_spec import (
+    LUFS_TOLERANCE,
+    TARGET_LUFS,
+    TARGET_TRUE_PEAK_DBFS,
+    TRUE_PEAK_TOLERANCE,
+)
 # Measured exactly at the tolerance is inside it. Float subtraction put
 # -1.2 dBFS against the -1.5 ceiling at 0.30000000000000004 and blocked a clip
 # from run 37208970507 that measured -14.0 LUFS.

@@ -50,5 +50,37 @@ class TestGrade(unittest.TestCase):
         self.assertIn("floor", report.warn_reason)
 
 
+class TestRenderContract(unittest.TestCase):
+    """The renderer certifies exactly the contract the verdict checks.
+
+    Run 37221814417 rendered a "loudness_verified" clip at -14.6 LUFS, then the
+    verdict blocked it against the 0.5 LU contract - the renderer accepted
+    +-1.0. The renderer now enforces creative_spec's numbers.
+    """
+
+    def test_renderer_accepts_only_within_the_verdict_contract(self) -> None:
+        from src.video_editor import _loudness_within_contract
+
+        self.assertTrue(_loudness_within_contract({"input_i": -14.4, "input_tp": -1.6}))
+        self.assertFalse(_loudness_within_contract({"input_i": -14.6, "input_tp": -1.6}))
+        self.assertFalse(_loudness_within_contract({"input_i": -14.0, "input_tp": -1.19}))
+
+    def test_tolerance_boundary_is_inside_on_both_sides(self) -> None:
+        from src.video_editor import _loudness_within_contract
+
+        # -1.2 vs the -1.5 ceiling is exactly the 0.3 tolerance; float
+        # subtraction must not flip it (the trap the verdict fixed).
+        self.assertTrue(_loudness_within_contract({"input_i": -14.0, "input_tp": -1.2}))
+        self.assertTrue(_loudness_within_contract({"input_i": -14.5, "input_tp": -1.8}))
+
+    def test_renderer_and_verdict_share_the_contract_constants(self) -> None:
+        from src import creative_spec, video_editor
+
+        self.assertEqual(video_editor.LUFS_TOLERANCE, creative_spec.LUFS_TOLERANCE)
+        self.assertEqual(
+            video_editor.TRUE_PEAK_TOLERANCE, creative_spec.TRUE_PEAK_TOLERANCE
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
