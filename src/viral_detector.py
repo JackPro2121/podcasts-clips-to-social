@@ -100,15 +100,21 @@ def query_gemini_models(
     key: str,
     image_path: Optional[Path] = None,
     context_note: str = "",
+    model_ladder: Optional[List[str]] = None,
 ) -> Optional[str]:
     """
-    Queries the Gemini free tier across GEMINI_MODEL_LADDER with exponential backoff.
+    Queries Gemini across a model ladder with exponential backoff.
+
+    The ladder defaults to ``GEMINI_MODEL_LADDER`` (detection). Pass
+    ``model_ladder`` for a task-specific set - the director-v2 vision call uses
+    ``GEMINI_VISION_MODEL_LADDER`` so a frontier text model is not spent on a
+    contact-sheet decision.
 
     When `image_path` is supplied the model also receives that image, which is
     how the director v2 pass "watches" the clip. The image rides in the same
-    request rather than a second call, so the free-tier quota is unaffected.
+    request rather than a second call, so quota is unaffected.
     """
-    models_to_try = list(GEMINI_MODEL_LADDER) or ["gemini-2.5-flash"]
+    models_to_try = list(model_ladder) if model_ladder else (list(GEMINI_MODEL_LADDER) or ["gemini-2.5-flash"])
     image_part = _gemini_image_part(image_path) if (HAS_NEW_GENAI and image_path) else None
     if image_path is not None and image_part is None:
         print(f"[-] Image {Path(image_path).name} could not be attached; sending text only.")
@@ -132,7 +138,9 @@ def query_gemini_models(
                         model=model_name,
                         contents=contents,
                         config=genai_types.GenerateContentConfig(
-                            temperature=0.4,
+                            # temperature/top_p/top_k are deprecated sampling
+                            # parameters as of the 2026-09-01 changelog; the
+                            # model default is used instead.
                             response_mime_type="application/json"
                         )
                     )
@@ -149,7 +157,6 @@ def query_gemini_models(
                     response = model.generate_content(
                         legacy_contents,
                         generation_config=legacy_genai.GenerationConfig(
-                            temperature=0.4,
                             response_mime_type="application/json"
                         ),
                         request_options={"timeout": 60},

@@ -79,12 +79,33 @@ if MAX_CLIP_DURATION < MIN_CLIP_DURATION:
 # Gemini model ladder. Ordered strongest-first; query_gemini_models walks the
 # ladder and rotates on 429/503 so a busy or deprecating model never fails a run.
 # Override with GEMINI_MODEL_LADDER="gemini-3.8-flash,gemini-3.5-flash-lite".
+#
+# Verified live 2026-10-04; retired IDs removed the same day:
+# * gemini-2.0-flash and gemini-2.5-flash-lite return 404 (already shut down).
+# * gemini-2.5-flash still answers but is scheduled to shut down 2026-10-16.
+# * gemini-3.7-flash and gemini-3.1-flash-lite are alive but were congested on
+#   the test day (504/503); they stay behind the long-lived 3.5 models.
+# gemini-3.5-flash / gemini-3.5-flash-lite are stable with no announced
+# shutdown before 2027 and give the ladder a durable tail.
 GEMINI_MODEL_LADDER = [
     model.strip()
     for model in (
         os.getenv("GEMINI_MODEL_LADDER")
-        or "gemini-3.8-flash,gemini-3.7-flash,gemini-3.6-flash,gemini-3.5-flash-lite,"
-           "gemini-3.1-flash-lite,gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flash"
+        or "gemini-3.8-flash,gemini-3.7-flash,gemini-3.6-flash,gemini-3.5-flash,"
+           "gemini-3.5-flash-lite,gemini-3.1-flash-lite"
+    ).split(",")
+    if model.strip()
+]
+
+# Director-v2 "watches" the contact sheet; only that call needs a vision model,
+# so it gets its own ladder instead of the detection one. Verified live with a
+# real frame: gemini-3.5-flash-lite returns valid JSON and has no announced
+# shutdown before 2027; gemini-3.1-flash-lite is the fallback.
+GEMINI_VISION_MODEL_LADDER = [
+    model.strip()
+    for model in (
+        os.getenv("GEMINI_VISION_MODEL_LADDER")
+        or "gemini-3.5-flash-lite,gemini-3.1-flash-lite"
     ).split(",")
     if model.strip()
 ]

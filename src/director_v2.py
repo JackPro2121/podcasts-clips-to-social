@@ -660,7 +660,7 @@ def plan_shot_directives(
     undecodable clip, or a malformed reply must all degrade to "no directives"
     rather than abort a render that the existing tracker can already produce.
     """
-    from src.config import DIRECTOR_V2_ENABLED, GEMINI_API_KEY
+    from src.config import DIRECTOR_V2_ENABLED, GEMINI_API_KEY, GEMINI_VISION_MODEL_LADDER
     from src.viral_detector import query_gemini_models
 
     if not DIRECTOR_V2_ENABLED:
@@ -700,6 +700,7 @@ def plan_shot_directives(
             key,
             image_path=sheet.path,
             context_note=f"contact sheet {sheet.path.name} with {len(sheet.tiles)} keyframes",
+            model_ladder=GEMINI_VISION_MODEL_LADDER,
         )
     except Exception as error:
         review.failure = f"api_error:{error}"

@@ -15,6 +15,63 @@ class TestGeminiModelLadder(unittest.TestCase):
             self.assertTrue(model.strip())
             self.assertEqual(model, model.strip())
 
+    def test_no_retired_model_ids(self):
+        """Verified live 2026-10-04: 2.0-flash and 2.5-flash-lite are 404 and
+        2.5-flash shuts down 2026-10-16; none may stay in a default ladder."""
+        for ladder in (
+            config_module.GEMINI_MODEL_LADDER,
+            config_module.GEMINI_VISION_MODEL_LADDER,
+        ):
+            for model in ladder:
+                self.assertFalse(
+                    model.startswith("gemini-2."),
+                    f"{model} is retired or scheduled for shutdown",
+                )
+            self.assertEqual(len(ladder), len(set(ladder)), "ladder has duplicates")
+
+    def test_ladder_has_a_long_lived_tail(self):
+        ladder = config_module.GEMINI_MODEL_LADDER
+        self.assertIn("gemini-3.5-flash", ladder)
+        self.assertIn("gemini-3.5-flash-lite", ladder)
+
+    def test_vision_ladder_is_separate_and_cost_appropriate(self):
+        vision = config_module.GEMINI_VISION_MODEL_LADDER
+        self.assertTrue(vision)
+        self.assertIn("gemini-3.5-flash-lite", vision)
+        self.assertNotEqual(vision, config_module.GEMINI_MODEL_LADDER)
+
+    def test_custom_ladder_is_honored(self):
+        calls = []
+
+        class _FakeResponse:
+            text = ('{"clips": [{"start_time": 10.0, "end_time": 55.0, '
+                    '"hook": "a real hook"}]}')
+
+        class _FakeModels:
+            def generate_content(self, model, contents, config):
+                calls.append(model)
+                return _FakeResponse()
+
+        class _FakeClient:
+            def __init__(self, api_key, http_options):
+                self.models = _FakeModels()
+
+        fake_genai = mock.Mock()
+        fake_genai.Client = _FakeClient
+        fake_types = mock.Mock()
+        fake_types.HttpOptions = mock.Mock()
+        fake_types.GenerateContentConfig = mock.Mock()
+
+        with mock.patch("src.viral_detector.HAS_NEW_GENAI", True), \
+             mock.patch("src.viral_detector.genai", fake_genai), \
+             mock.patch("src.viral_detector.genai_types", fake_types), \
+             mock.patch("src.viral_detector.GEMINI_MODEL_LADDER", ["global-model"]), \
+             mock.patch("src.viral_detector.time.sleep", lambda *_: None):
+            result = query_gemini_models("prompt", "key", model_ladder=["only-model"])
+
+        self.assertIsNotNone(result)
+        self.assertEqual(calls, ["only-model"])
+
     def test_ladder_is_configurable_from_the_environment(self):
         with mock.patch.dict(os.environ, {"GEMINI_MODEL_LADDER": "a-model, b-model ,"}, clear=False):
             ladder = [
