@@ -114,7 +114,7 @@ def query_gemini_models(
     how the director v2 pass "watches" the clip. The image rides in the same
     request rather than a second call, so quota is unaffected.
     """
-    models_to_try = list(model_ladder) if model_ladder else (list(GEMINI_MODEL_LADDER) or ["gemini-2.5-flash"])
+    models_to_try = list(model_ladder) if model_ladder else (list(GEMINI_MODEL_LADDER) or ["gemini-3.5-flash-lite"])
     image_part = _gemini_image_part(image_path) if (HAS_NEW_GENAI and image_path) else None
     if image_path is not None and image_part is None:
         print(f"[-] Image {Path(image_path).name} could not be attached; sending text only.")

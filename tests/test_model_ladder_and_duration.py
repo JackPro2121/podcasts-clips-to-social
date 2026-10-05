@@ -29,10 +29,21 @@ class TestGeminiModelLadder(unittest.TestCase):
                 )
             self.assertEqual(len(ladder), len(set(ladder)), "ladder has duplicates")
 
-    def test_ladder_has_a_long_lived_tail(self):
+    def test_ladder_has_a_long_lived_free_tail(self):
         ladder = config_module.GEMINI_MODEL_LADDER
-        self.assertIn("gemini-3.5-flash", ladder)
         self.assertIn("gemini-3.5-flash-lite", ladder)
+        self.assertIn("gemini-3.1-flash-lite", ladder)
+
+    def test_paid_models_are_excluded(self):
+        """Owner policy 2026-10-04: free-tier models only. The AI Studio model
+        list marks these Paid, so no ladder may include them."""
+        paid = {"gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-pro-preview"}
+        for ladder in (
+            config_module.GEMINI_MODEL_LADDER,
+            config_module.GEMINI_VISION_MODEL_LADDER,
+        ):
+            for model in paid:
+                self.assertNotIn(model, ladder)
 
     def test_vision_ladder_is_separate_and_cost_appropriate(self):
         vision = config_module.GEMINI_VISION_MODEL_LADDER
