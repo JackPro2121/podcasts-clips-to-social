@@ -99,6 +99,19 @@ def _gemini_image_part(image_path: Path) -> Optional[Any]:
     return genai_types.Part.from_bytes(data=data, mime_type="image/jpeg")
 
 
+# The attempt budget for ONE decision call.
+#
+# Real run 37301857585 took 54 minutes end to end: 4 keys x 4 models x up to 3
+# attempts each, with a 60s HTTP timeout per request, had no ceiling. The budget
+# bounds any single ``query_gemini_models`` call; the caller then falls through
+# to the next tier (Ollama -> Groq -> OpenRouter -> semantic). Key rotation
+# itself is cheap (429s fail in about a second), so the request ceiling still
+# covers the observed recovery path: every key rotated on the first model, then
+# the next model serves.
+GEMINI_MAX_REQUESTS_PER_CALL = 16
+GEMINI_CALL_WALL_CLOCK_S = 90.0
+
+
 def query_gemini_models(
     prompt: str,
     key: str,
@@ -119,12 +132,18 @@ def query_gemini_models(
     rate-limited key does not cost the whole ladder. Rotation fixes 429s for
     certain (limits are per key/project); capacity 503s only sometimes.
 
+    Every request is charged against ``GEMINI_MAX_REQUESTS_PER_CALL`` and the
+    call gives up at ``GEMINI_CALL_WALL_CLOCK_S`` so a wall of transient
+    failures cannot multiply into a 50-minute run.
+
     When `image_path` is supplied the model also receives that image, which is
     how the director v2 pass "watches" the clip. The image rides in the same
     request rather than a second call, so quota is unaffected.
     """
     models_to_try = list(model_ladder) if model_ladder else (list(GEMINI_MODEL_LADDER) or ["gemini-3.5-flash-lite"])
     key_chain = [key] if not key else [key] + [extra for extra in GEMINI_API_KEYS if extra != key]
+    deadline = time.monotonic() + GEMINI_CALL_WALL_CLOCK_S
+    requests_made = 0
     image_part = _gemini_image_part(image_path) if (HAS_NEW_GENAI and image_path) else None
     if image_path is not None and image_part is None:
         print(f"[-] Image {Path(image_path).name} could not be attached; sending text only.")
@@ -136,6 +155,17 @@ def query_gemini_models(
             key_label = f" [key {key_index + 1}/{len(key_chain)}]" if len(key_chain) > 1 else ""
             print(f"[*] Trying Gemini Flash ({model_name}){key_label}...")
             for attempt in range(3):
+                if (
+                    requests_made >= GEMINI_MAX_REQUESTS_PER_CALL
+                    or time.monotonic() >= deadline
+                ):
+                    print(
+                        f"[-] Gemini attempt budget exhausted after {requests_made} "
+                        f"requests ({GEMINI_CALL_WALL_CLOCK_S:.0f}s cap); "
+                        "falling through to the next tier."
+                    )
+                    return None
+                requests_made += 1
                 try:
                     response: Any
                     if HAS_NEW_GENAI:
@@ -186,8 +216,11 @@ def query_gemini_models(
                     transient = "503" in err_str or "429" in err_str or "UNAVAILABLE" in err_str
                     if transient and attempt < 2:
                         wait_sec = 2 ** (attempt + 1)
-                        print(f"[-] Model {model_name} busy ({e}). Retrying in {wait_sec}s...")
-                        time.sleep(wait_sec)
+                        if time.monotonic() + wait_sec < deadline:
+                            print(f"[-] Model {model_name} busy ({e}). Retrying in {wait_sec}s...")
+                            time.sleep(wait_sec)
+                        # No time left for a backoff: retry immediately; the
+                        # budget check at the top of the loop bounds it.
                     elif transient and key_index + 1 < len(key_chain):
                         print(
                             f"[-] Model {model_name} busy on key {key_index + 1}; "

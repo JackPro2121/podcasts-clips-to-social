@@ -10,6 +10,7 @@ order, the short-circuit behaviour, and the final semantic fallback.
 from __future__ import annotations
 
 import unittest
+from contextlib import ExitStack
 from unittest import mock
 
 from src.transcriber import TranscriptSegment, WordTimestamp
@@ -167,6 +168,77 @@ class TestFallbackCaption(unittest.TestCase):
         self.assertNotIn("What are your thoughts", caption)
         self.assertIn("holding cash during a crisis", caption)
         self.assertLessEqual(len(caption), 240)
+
+
+class TestGeminiAttemptBudget(unittest.TestCase):
+    """P2: one Gemini decision call is bounded in requests and in wall clock.
+
+    Real run 37301857585 took 54 minutes end to end: 4 keys x 4 models x up to
+    3 attempts each with a 60s per-request timeout and no ceiling. The budget
+    keeps the fast key rotation (which fixes 429s) but caps the worst case; the
+    pipeline then falls through to Ollama/Groq/semantic.
+    """
+
+    def _patches(self, vd, ladder, keys):
+        return [
+            mock.patch.object(vd, "GEMINI_MODEL_LADDER", ladder),
+            mock.patch.object(vd, "GEMINI_API_KEYS", keys),
+            mock.patch.object(vd, "HAS_NEW_GENAI", True),
+            mock.patch.object(vd, "genai", mock.MagicMock()),
+            mock.patch.object(vd, "genai_types", mock.MagicMock()),
+            mock.patch.object(vd.time, "sleep", lambda _seconds: None),
+        ]
+
+    def test_transient_failures_stop_at_the_request_ceiling(self):
+        from src import viral_detector as vd
+
+        fake_client = mock.MagicMock()
+        fake_client.models.generate_content.side_effect = RuntimeError("503 UNAVAILABLE")
+        with ExitStack() as stack:
+            for patch in self._patches(vd, ["m1", "m2", "m3", "m4"], ["k2", "k3", "k4"]):
+                stack.enter_context(patch)
+            vd.genai.Client.return_value = fake_client
+            result = vd.query_gemini_models("prompt", "primary")
+        self.assertIsNone(result)
+        self.assertEqual(
+            fake_client.models.generate_content.call_count,
+            vd.GEMINI_MAX_REQUESTS_PER_CALL,
+        )
+
+    def test_wall_clock_cap_stops_even_fast_failures(self):
+        from src import viral_detector as vd
+
+        clock = {"now": 0.0}
+
+        def advancing_monotonic():
+            clock["now"] += 45.0
+            return clock["now"]
+
+        fake_client = mock.MagicMock()
+        fake_client.models.generate_content.side_effect = RuntimeError("503 UNAVAILABLE")
+        with ExitStack() as stack:
+            for patch in self._patches(vd, ["m1", "m2", "m3", "m4"], ["k2", "k3", "k4"]):
+                stack.enter_context(patch)
+            stack.enter_context(
+                mock.patch.object(vd.time, "monotonic", side_effect=advancing_monotonic)
+            )
+            vd.genai.Client.return_value = fake_client
+            result = vd.query_gemini_models("prompt", "primary")
+        self.assertIsNone(result)
+        self.assertLess(fake_client.models.generate_content.call_count, 4)
+
+    def test_success_before_the_budget_is_returned_unchanged(self):
+        from src import viral_detector as vd
+
+        fake_client = mock.MagicMock()
+        fake_client.models.generate_content.return_value.text = "x" * 40
+        with ExitStack() as stack:
+            for patch in self._patches(vd, ["m1", "m2"], ["k2"]):
+                stack.enter_context(patch)
+            vd.genai.Client.return_value = fake_client
+            result = vd.query_gemini_models("prompt", "primary")
+        self.assertEqual(result, "x" * 40)
+        self.assertEqual(fake_client.models.generate_content.call_count, 1)
 
 
 if __name__ == "__main__":  # pragma: no cover
