@@ -503,29 +503,32 @@ _FACE_SAFE_CAPTION_BANDS = (
     ("bottom_safe", 2, 0.72, 0.85),
 )
 
+# Time-ranged repair: one band choice per window instead of one per clip.
+_CAPTION_WINDOW_S = 3.0
+# Cost of changing bands between adjacent windows, in overlap-pixels. Must be
+# smaller than any overlap the caption would accept (a real collision is tens
+# of px), so safety always outranks aesthetics; large enough that tie-break
+# flapping does not happen (see _BAND_TIE_BREAK).
+_CAPTION_SWITCH_COST_PX = 1.0
+# Aesthetic tie-breaks, only meaningful while every band scores zero overlap.
+_BAND_TIE_BREAK = {"lower_center": 0.0, "bottom_safe": 0.5, "center": 1.0, "top_safe": 1.5}
 
-def _caption_band_clearing_faces(
+
+def _caption_band_scores(
     face_spans: List[Tuple[float, float]],
     frame_height: float,
     margin: float = 0.04 * OUTPUT_HEIGHT,
-) -> Optional[Tuple[str, int, float, float]]:
-    """Caption band with the smallest worst-case overlap against every face.
+) -> List[Tuple[str, int, float, float, float]]:
+    """Every band with its worst-case overlap against the given faces.
 
-    The first version of the pixel repair dodged only ``report.boxes[0]``, the
-    single largest face. In a ``multi_shot_dynamic`` clip the framing switches
-    between speakers at different heights, so the repair dodged the lower
-    speaker on one render while the pixel verdict measured against the upper
-    speaker on the retry: the chosen ``top_safe`` band cleared one face and sat
-    exactly on the other, and the clip was lost with "still blocked". Scoring
-    every band against every detected face picks the ``center`` band that clears
-    both. Ties keep the declared preference order.
+    Returns ``(name, alignment, y0, y1, score)`` per band, where ``score`` is
+    the worst overlap across ALL padded face spans (0 means clears every face).
     """
     padded = [
         (max(0.0, top - margin), min(frame_height, bottom + margin))
         for top, bottom in face_spans
     ]
-    chosen: Optional[Tuple[str, int, float, float]] = None
-    best_score: Optional[float] = None
+    scored: List[Tuple[str, int, float, float, float]] = []
     for name, alignment, top_fraction, bottom_fraction in _FACE_SAFE_CAPTION_BANDS:
         y0 = top_fraction * frame_height
         y1 = bottom_fraction * frame_height
@@ -533,6 +536,27 @@ def _caption_band_clearing_faces(
             (max(0.0, min(bottom, y1) - max(top, y0)) for top, bottom in padded),
             default=0.0,
         )
+        scored.append((name, alignment, y0, y1, score))
+    return scored
+
+
+def _caption_band_clearing_faces(
+    face_spans: List[Tuple[float, float]],
+    frame_height: float,
+    margin: float = 0.04 * OUTPUT_HEIGHT,
+) -> Optional[Tuple[str, int, float, float]]:
+    """Single band with the smallest worst-case overlap against every face.
+
+    Superseded by ``_plan_time_ranged_placements`` for the repair path (a
+    multi_shot clip needs per-window bands); kept for single-band callers and
+    as the documented reference for the scoring rule. Ties keep the declared
+    preference order.
+    """
+    chosen: Optional[Tuple[str, int, float, float]] = None
+    best_score: Optional[float] = None
+    for name, alignment, y0, y1, score in _caption_band_scores(
+        face_spans, frame_height, margin
+    ):
         if best_score is None or score < best_score:
             best_score = score
             chosen = (name, alignment, y0, y1)
@@ -541,41 +565,117 @@ def _caption_band_clearing_faces(
     return chosen
 
 
-def _face_free_caption_placements(rendered_path: Path, duration: float) -> List[Any]:
-    """One forced caption placement that clears the faces in a rendered clip.
-
-    Plan-time face boxes are normalized in source coordinates, but captions live
-    in the rendered crop; a tight crop can put the face exactly where the plan
-    thought it was safe. The rendered clip is the only authority on where the
-    face ended up, so when the pixel gate reports caption_on_face this derives
-    the band from the pixels and re-renders once. Every detected face is
-    avoided, not just the largest; see ``_caption_band_clearing_faces``.
-    """
+def _placement_for_band(band_index: int, start_s: float, end_s: float, duration: float) -> Any:
+    """Build one time-ranged CaptionPlacement for a chosen band."""
     from src.composition_planner import CaptionPlacement
-    from src.verification import faces
 
-    report = faces.analyse(rendered_path, samples=14)
-    if not report.any_faces or not report.boxes:
-        return []
-    scale_y = OUTPUT_HEIGHT / 360.0
-    face_spans = [
-        (box.y * scale_y, (box.y + box.height) * scale_y)
-        for box in report.boxes
-    ]
-    chosen = _caption_band_clearing_faces(face_spans, float(OUTPUT_HEIGHT))
-    if chosen is None:
-        return []
-    name, alignment, y0, y1 = chosen
+    name, alignment, top_fraction, bottom_fraction = _FACE_SAFE_CAPTION_BANDS[band_index][:4]
+    y0 = top_fraction * OUTPUT_HEIGHT
+    y1 = bottom_fraction * OUTPUT_HEIGHT
     margin_v = int(round(y0)) if alignment == 8 else int(round(OUTPUT_HEIGHT - y1))
-    return [CaptionPlacement(
-        start=0.0,
-        end=max(0.1, float(duration)),
+    start = max(0.0, float(start_s))
+    end = max(start + 0.1, min(float(duration), float(end_s)))
+    return CaptionPlacement(
+        start=start,
+        end=end,
         anchor=name,
         shot_id="face_safe_retry",
         alignment=alignment,
         margin_v=max(0, margin_v),
         collision_avoidance=True,
-    )]
+    )
+
+
+def _plan_time_ranged_placements(
+    face_windows: List[Tuple[float, float, List[Tuple[float, float]]]],
+    duration: float,
+) -> List[Any]:
+    """Choose one caption band per time window, with a small Viterbi pass.
+
+    ``face_windows`` is ``(start_s, end_s, face_spans)`` per window. Cost per
+    band = worst-case overlap with that window's faces + aesthetic tie-break;
+    switching bands between adjacent windows costs a fixed penalty so a stable
+    layout stays one placement. This is the fix for the class of failures where
+    no single static band can clear two speakers at different heights: each
+    window dodges the speaker who is actually on screen.
+    """
+    if not face_windows:
+        return []
+    band_count = len(_FACE_SAFE_CAPTION_BANDS)
+    band_names = [band[0] for band in _FACE_SAFE_CAPTION_BANDS]
+    costs: List[List[float]] = []
+    for _start, _end, spans in face_windows:
+        scored = _caption_band_scores(spans, float(OUTPUT_HEIGHT))
+        costs.append(
+            [score + _BAND_TIE_BREAK.get(band_names[index], 0.0) for index, (_n, _a, _y0, _y1, score) in enumerate(scored)]
+        )
+    window_count = len(face_windows)
+    dp = [[0.0] * band_count for _ in range(window_count)]
+    parent = [[-1] * band_count for _ in range(window_count)]
+    for band_index in range(band_count):
+        dp[0][band_index] = costs[0][band_index]
+    for window in range(1, window_count):
+        for band_index in range(band_count):
+            best_cost = float("inf")
+            best_prev = band_index
+            for prev_index in range(band_count):
+                switch = 0.0 if prev_index == band_index else _CAPTION_SWITCH_COST_PX
+                candidate = dp[window - 1][prev_index] + switch
+                if candidate < best_cost:
+                    best_cost = candidate
+                    best_prev = prev_index
+            dp[window][band_index] = best_cost + costs[window][band_index]
+            parent[window][band_index] = best_prev
+    last = min(range(band_count), key=lambda index: dp[-1][index])
+    path = [last]
+    for window in range(window_count - 1, 0, -1):
+        path.append(parent[window][path[-1]])
+    path.reverse()
+    placements: List[Any] = []
+    run_start = face_windows[0][0]
+    for index in range(1, window_count):
+        if path[index] != path[index - 1]:
+            placements.append(
+                _placement_for_band(path[index - 1], run_start, face_windows[index][0], duration)
+            )
+            run_start = face_windows[index][0]
+    placements.append(
+        _placement_for_band(path[-1], run_start, face_windows[-1][1], duration)
+    )
+    return placements
+
+
+def _face_free_caption_placements(rendered_path: Path, duration: float) -> List[Any]:
+    """Time-ranged caption placements that clear the faces in a rendered clip.
+
+    Plan-time face boxes are normalized in source coordinates, but captions live
+    in the rendered crop; the rendered pixels are the only authority. The old
+    repair chose ONE static band for the whole clip and lost the run whenever
+    two speakers sat at different heights. This samples a face timeline
+    (``faces.analyse_timeline``), buckets it into ``_CAPTION_WINDOW_S`` windows,
+    and lets ``_plan_time_ranged_placements`` pick a band per window.
+    """
+    from src.verification import faces
+
+    timeline = faces.analyse_timeline(rendered_path, samples=24)
+    if not timeline:
+        return []
+    scale_y = OUTPUT_HEIGHT / 360.0
+    window_count = max(1, int(float(duration) // _CAPTION_WINDOW_S) + (1 if float(duration) % _CAPTION_WINDOW_S else 0))
+    buckets: Dict[int, List[Tuple[float, float]]] = {index: [] for index in range(window_count)}
+    for fraction, boxes in timeline:
+        index = min(window_count - 1, int(fraction * float(duration) / _CAPTION_WINDOW_S))
+        for box in boxes:
+            buckets[index].append((box.y * scale_y, (box.y + box.height) * scale_y))
+    face_windows = [
+        (
+            index * _CAPTION_WINDOW_S,
+            min(float(duration), (index + 1) * _CAPTION_WINDOW_S),
+            buckets[index],
+        )
+        for index in range(window_count)
+    ]
+    return _plan_time_ranged_placements(face_windows, duration)
 
 
 def _render_pixel_safe_captions(

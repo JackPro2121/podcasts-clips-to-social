@@ -295,6 +295,42 @@ def analyse(
     return report
 
 
+def analyse_timeline(
+    path: Path,
+    samples: int = DEFAULT_SAMPLES,
+) -> List[Tuple[float, List[FaceBox]]]:
+    """Per-sample faces with their time position, for time-ranged captions.
+
+    ``analyse`` merges every sampled frame into one report, which is why the
+    caption repair could only ever choose one static band. A
+    ``multi_shot_dynamic`` clip switches speakers at different heights, so each
+    time window needs to avoid the faces that are actually on screen in that
+    window. Returns ``(time_fraction, boxes)`` per decoded frame, evenly spaced
+    across the clip; fractions are exact because ``decode_colour_frames``
+    samples uniformly.
+    """
+    try:
+        import cv2  # noqa: F401
+    except ImportError:  # pragma: no cover
+        return []
+
+    detector, _reason = _load_yunet()
+    if detector is None:
+        return []
+
+    frames, _decode_reason = probe.decode_colour_frames(
+        path, DETECT_WIDTH, DETECT_HEIGHT, max_frames=samples
+    )
+    if not frames:
+        return []
+
+    denominator = max(1, len(frames) - 1)
+    return [
+        (index / denominator, detect_in_frame(frame, detector) or [])
+        for index, frame in enumerate(frames)
+    ]
+
+
 def avoid_rects(
     report: FaceReport,
     use_largest_only: bool = True,

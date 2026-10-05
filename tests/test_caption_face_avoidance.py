@@ -389,5 +389,44 @@ def _caption_rect_for(anchor: str) -> NormalizedRect:
     return _caption_rect(anchor, DEFAULT_SAFE_ZONE)
 
 
+class TestTimeRangedPlacementPlanning(unittest.TestCase):
+    """Per-window band choice: one static band cannot clear two speaker heights.
+
+    Run 37301857585 lost three candidates to caption_on_face after a single
+    full-clip band was chosen while the framing switched between an upper and a
+    lower speaker.
+    """
+
+    def test_two_speakers_at_different_heights_switch_bands(self) -> None:
+        from main import _plan_time_ranged_placements
+
+        windows = [
+            (0.0, 3.0, [(117.0, 733.0)]),      # upper speaker
+            (3.0, 6.0, [(1192.0, 1798.0)]),    # lower speaker
+        ]
+        placements = _plan_time_ranged_placements(windows, 6.0)
+        self.assertEqual(len(placements), 2)
+        self.assertNotEqual(placements[0].anchor, placements[1].anchor)
+        self.assertNotEqual(placements[0].anchor, "top_safe")
+        self.assertNotEqual(placements[1].anchor, "bottom_safe")
+
+    def test_stable_layout_merges_into_one_placement(self) -> None:
+        from main import _plan_time_ranged_placements
+
+        spans = [(117.0, 733.0)]
+        windows = [(0.0, 3.0, spans), (3.0, 6.0, spans), (6.0, 9.0, spans)]
+        placements = _plan_time_ranged_placements(windows, 9.0)
+        self.assertEqual(len(placements), 1)
+        self.assertEqual(placements[0].start, 0.0)
+        self.assertGreaterEqual(placements[0].end, 6.0)
+
+    def test_no_faces_defaults_to_the_lower_band(self) -> None:
+        from main import _plan_time_ranged_placements
+
+        placements = _plan_time_ranged_placements([(0.0, 3.0, [])], 3.0)
+        self.assertEqual(len(placements), 1)
+        self.assertEqual(placements[0].anchor, "lower_center")
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
