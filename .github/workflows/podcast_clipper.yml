@@ -208,6 +208,11 @@ jobs:
       - name: Run AI Podcast Clipper & Publisher
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # Optional rotation keys: a busy/rate-limited key is retried with the
+          # next one before the model ladder drops a tier (config.GEMINI_API_KEYS).
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+          GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
+          GEMINI_API_KEY_4: ${{ secrets.GEMINI_API_KEY_4 }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY || secrets.groq_api_key }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY || secrets.openrouter_api_key }}
           OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}

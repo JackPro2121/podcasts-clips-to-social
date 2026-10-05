@@ -154,6 +154,7 @@ class TestGeminiModelLadder(unittest.TestCase):
              mock.patch("src.viral_detector.genai", fake_genai), \
              mock.patch("src.viral_detector.genai_types", fake_types), \
              mock.patch("src.viral_detector.GEMINI_MODEL_LADDER", ["busy-model", "ok-model"]), \
+             mock.patch("src.viral_detector.GEMINI_API_KEYS", []), \
              mock.patch("src.viral_detector.time.sleep", lambda *_: None):
             result = query_gemini_models("prompt", "key")
 
@@ -181,8 +182,102 @@ class TestGeminiModelLadder(unittest.TestCase):
              mock.patch("src.viral_detector.genai", fake_genai), \
              mock.patch("src.viral_detector.genai_types", fake_types), \
              mock.patch("src.viral_detector.GEMINI_MODEL_LADDER", ["a", "b"]), \
+             mock.patch("src.viral_detector.GEMINI_API_KEYS", []), \
              mock.patch("src.viral_detector.time.sleep", lambda *_: None):
             self.assertIsNone(query_gemini_models("prompt", "bad-key"))
+
+    def test_gemini_key_collection_orders_and_dedupes(self):
+        from src.config import collect_gemini_api_keys
+
+        keys = collect_gemini_api_keys(
+            {
+                "GEMINI_API_KEY": "primary",
+                "GEMINI_API_KEY_2": "second",
+                "GEMINI_API_KEY_3": "",
+                "GEMINI_API_KEYS": "second, third ,",
+            }
+        )
+        self.assertEqual(keys, ["primary", "second", "third"])
+        self.assertEqual(collect_gemini_api_keys({}), [])
+
+    def test_busy_model_rotates_to_the_next_key_before_the_next_model(self):
+        calls = []
+
+        class _FakeResponse:
+            text = ('{"clips": [{"start_time": 10.0, "end_time": 55.0, '
+                    '"hook": "a real hook"}]}')
+
+        class _FakeModels:
+            def __init__(self, key):
+                self._key = key
+
+            def generate_content(self, model, contents, config):
+                calls.append((model, self._key))
+                if self._key == "key-a":
+                    raise RuntimeError("503 UNAVAILABLE high demand")
+                return _FakeResponse()
+
+        class _FakeClient:
+            def __init__(self, api_key, http_options):
+                self.models = _FakeModels(api_key)
+
+        fake_genai = mock.Mock()
+        fake_genai.Client = _FakeClient
+        fake_types = mock.Mock()
+        fake_types.HttpOptions = mock.Mock()
+        fake_types.GenerateContentConfig = mock.Mock()
+
+        with mock.patch("src.viral_detector.HAS_NEW_GENAI", True), \
+             mock.patch("src.viral_detector.genai", fake_genai), \
+             mock.patch("src.viral_detector.genai_types", fake_types), \
+             mock.patch("src.viral_detector.GEMINI_MODEL_LADDER", ["only-model"]), \
+             mock.patch("src.viral_detector.GEMINI_API_KEYS", ["key-b"]), \
+             mock.patch("src.viral_detector.time.sleep", lambda *_: None):
+            result = query_gemini_models("prompt", "key-a")
+
+        self.assertIsNotNone(result)
+        keys_used = [used for _, used in calls]
+        self.assertEqual(keys_used.count("key-a"), 3, "full retry budget before rotating")
+        self.assertEqual(calls[-1], ("only-model", "key-b"))
+
+    def test_all_keys_busy_moves_to_the_next_model(self):
+        calls = []
+
+        class _FakeModels:
+            def __init__(self, key):
+                self._key = key
+
+            def generate_content(self, model, contents, config):
+                calls.append((model, self._key))
+                if model == "busy-model":
+                    raise RuntimeError("503 UNAVAILABLE high demand")
+                return _FakeResponse()
+
+        class _FakeResponse:
+            text = ('{"clips": [{"start_time": 10.0, "end_time": 55.0, '
+                    '"hook": "a real hook"}]}')
+
+        class _FakeClient:
+            def __init__(self, api_key, http_options):
+                self.models = _FakeModels(api_key)
+
+        fake_genai = mock.Mock()
+        fake_genai.Client = _FakeClient
+        fake_types = mock.Mock()
+        fake_types.HttpOptions = mock.Mock()
+        fake_types.GenerateContentConfig = mock.Mock()
+
+        with mock.patch("src.viral_detector.HAS_NEW_GENAI", True), \
+             mock.patch("src.viral_detector.genai", fake_genai), \
+             mock.patch("src.viral_detector.genai_types", fake_types), \
+             mock.patch("src.viral_detector.GEMINI_MODEL_LADDER", ["busy-model", "ok-model"]), \
+             mock.patch("src.viral_detector.GEMINI_API_KEYS", ["key-b"]), \
+             mock.patch("src.viral_detector.time.sleep", lambda *_: None):
+            result = query_gemini_models("prompt", "key-a")
+
+        self.assertIsNotNone(result)
+        self.assertIn(("busy-model", "key-b"), calls)
+        self.assertEqual(calls[-1], ("ok-model", "key-a"))
 
 
 class TestDurationWarnings(unittest.TestCase):

@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Mapping, Optional
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -30,6 +30,36 @@ BROLL_DIR.mkdir(exist_ok=True, parents=True)
 
 # API Keys & Credentials
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+
+
+def collect_gemini_api_keys(environ: Optional[Mapping[str, str]] = None) -> List[str]:
+    """All configured Gemini keys, primary first, deduplicated.
+
+    Rotation is resilience: rate limits (429) are per key/project, so a second
+    key can carry a run the first one has exhausted. Capacity 503s are not
+    guaranteed to differ per key, but trying one more key costs almost nothing
+    when the ladder already has to walk models. Declare extras as
+    ``GEMINI_API_KEY_2``..``GEMINI_API_KEY_4`` or comma-separated in
+    ``GEMINI_API_KEYS``.
+    """
+    source = environ if environ is not None else os.environ
+    candidates: List[str] = []
+    for name in ("GEMINI_API_KEY", "GEMINI_API_KEY_2", "GEMINI_API_KEY_3", "GEMINI_API_KEY_4"):
+        value = (source.get(name) or "").strip()
+        if value:
+            candidates.append(value)
+    for part in (source.get("GEMINI_API_KEYS") or "").split(","):
+        part = part.strip()
+        if part:
+            candidates.append(part)
+    ordered: List[str] = []
+    for candidate in candidates:
+        if candidate not in ordered:
+            ordered.append(candidate)
+    return ordered
+
+
+GEMINI_API_KEYS = collect_gemini_api_keys()
 BUFFER_ACCESS_TOKEN = (
     os.getenv("BUFFER_ACCESS_TOKEN") or
     os.getenv("BUFFER_API_KEY") or

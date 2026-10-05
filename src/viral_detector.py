@@ -25,7 +25,7 @@ except ImportError:
             legacy_genai = None
 
 from src.config import (
-    GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY,
+    GEMINI_API_KEY, GEMINI_API_KEYS, GROQ_API_KEY, OPENROUTER_API_KEY,
     OLLAMA_API_KEY, OLLAMA_MODEL, OLLAMA_BASE_URL, GEMINI_MODEL_LADDER,
     GROQ_MODEL_LADDER, MIN_CLIP_DURATION, MAX_CLIP_DURATION,
 )
@@ -107,18 +107,24 @@ def query_gemini_models(
     model_ladder: Optional[List[str]] = None,
 ) -> Optional[str]:
     """
-    Queries Gemini across a model ladder with exponential backoff.
+    Queries Gemini across a model ladder and a key chain with exponential backoff.
 
     The ladder defaults to ``GEMINI_MODEL_LADDER`` (detection). Pass
     ``model_ladder`` for a task-specific set - the director-v2 vision call uses
     ``GEMINI_VISION_MODEL_LADDER`` so a frontier text model is not spent on a
     contact-sheet decision.
 
+    ``key`` is the primary key; extra keys from ``GEMINI_API_KEYS`` are tried
+    against the same model before dropping to the next model, so one busy or
+    rate-limited key does not cost the whole ladder. Rotation fixes 429s for
+    certain (limits are per key/project); capacity 503s only sometimes.
+
     When `image_path` is supplied the model also receives that image, which is
     how the director v2 pass "watches" the clip. The image rides in the same
     request rather than a second call, so quota is unaffected.
     """
     models_to_try = list(model_ladder) if model_ladder else (list(GEMINI_MODEL_LADDER) or ["gemini-3.5-flash-lite"])
+    key_chain = [key] if not key else [key] + [extra for extra in GEMINI_API_KEYS if extra != key]
     image_part = _gemini_image_part(image_path) if (HAS_NEW_GENAI and image_path) else None
     if image_path is not None and image_part is None:
         print(f"[-] Image {Path(image_path).name} could not be attached; sending text only.")
@@ -126,62 +132,71 @@ def query_gemini_models(
     if image_path is not None and image_part is None and image_path.exists():
         image_bytes = image_path.read_bytes()
     for model_name in models_to_try:
-        print(f"[*] Trying Gemini Flash ({model_name})...")
-        for attempt in range(3):
-            try:
-                response: Any
-                if HAS_NEW_GENAI:
-                    # 60s HTTP timeout so a hung Gemini call can't stall the whole
-                    # pipeline (the requests-based fallbacks already time out).
-                    client = genai.Client(
-                        api_key=key,
-                        http_options=genai_types.HttpOptions(timeout=60_000),
-                    )
-                    contents: Any = prompt if image_part is None else [prompt, image_part]
-                    response = client.models.generate_content(
-                        model=model_name,
-                        contents=contents,
-                        config=genai_types.GenerateContentConfig(
-                            # temperature/top_p/top_k are deprecated sampling
-                            # parameters as of the 2026-09-01 changelog; the
-                            # model default is used instead.
-                            response_mime_type="application/json"
+        for key_index, active_key in enumerate(key_chain):
+            key_label = f" [key {key_index + 1}/{len(key_chain)}]" if len(key_chain) > 1 else ""
+            print(f"[*] Trying Gemini Flash ({model_name}){key_label}...")
+            for attempt in range(3):
+                try:
+                    response: Any
+                    if HAS_NEW_GENAI:
+                        # 60s HTTP timeout so a hung Gemini call can't stall the whole
+                        # pipeline (the requests-based fallbacks already time out).
+                        client = genai.Client(
+                            api_key=active_key,
+                            http_options=genai_types.HttpOptions(timeout=60_000),
                         )
-                    )
-                    raw = (response.text or "").strip()
-                elif legacy_genai is not None:
-                    legacy_genai.configure(api_key=key)
-                    model = legacy_genai.GenerativeModel(model_name)
-                    legacy_contents: Any = prompt
-                    if image_bytes:
-                        legacy_contents = [
-                            prompt,
-                            {"mime_type": "image/jpeg", "data": image_bytes},
-                        ]
-                    response = model.generate_content(
-                        legacy_contents,
-                        generation_config=legacy_genai.GenerationConfig(
-                            response_mime_type="application/json"
-                        ),
-                        request_options={"timeout": 60},
-                    )
-                    raw = (response.text or "").strip()
-                else:
-                    return None
+                        contents: Any = prompt if image_part is None else [prompt, image_part]
+                        response = client.models.generate_content(
+                            model=model_name,
+                            contents=contents,
+                            config=genai_types.GenerateContentConfig(
+                                # temperature/top_p/top_k are deprecated sampling
+                                # parameters as of the 2026-09-01 changelog; the
+                                # model default is used instead.
+                                response_mime_type="application/json"
+                            )
+                        )
+                        raw = (response.text or "").strip()
+                    elif legacy_genai is not None:
+                        legacy_genai.configure(api_key=active_key)
+                        model = legacy_genai.GenerativeModel(model_name)
+                        legacy_contents: Any = prompt
+                        if image_bytes:
+                            legacy_contents = [
+                                prompt,
+                                {"mime_type": "image/jpeg", "data": image_bytes},
+                            ]
+                        response = model.generate_content(
+                            legacy_contents,
+                            generation_config=legacy_genai.GenerationConfig(
+                                response_mime_type="application/json"
+                            ),
+                            request_options={"timeout": 60},
+                        )
+                        raw = (response.text or "").strip()
+                    else:
+                        return None
 
-                if raw and len(raw) > 20:
-                    if context_note:
-                        print(f"[+] Gemini ({model_name}) returned a decision for {context_note}.")
-                    return raw
-            except Exception as e:
-                err_str = str(e)
-                if ("503" in err_str or "429" in err_str or "UNAVAILABLE" in err_str) and attempt < 2:
-                    wait_sec = 2 ** (attempt + 1)
-                    print(f"[-] Model {model_name} busy ({e}). Retrying in {wait_sec}s...")
-                    time.sleep(wait_sec)
-                else:
-                    print(f"[-] Model {model_name} failed: {e}")
-                    break
+                    if raw and len(raw) > 20:
+                        if context_note:
+                            print(f"[+] Gemini ({model_name}) returned a decision for {context_note}.")
+                        return raw
+                except Exception as e:
+                    err_str = str(e)
+                    transient = "503" in err_str or "429" in err_str or "UNAVAILABLE" in err_str
+                    if transient and attempt < 2:
+                        wait_sec = 2 ** (attempt + 1)
+                        print(f"[-] Model {model_name} busy ({e}). Retrying in {wait_sec}s...")
+                        time.sleep(wait_sec)
+                    elif transient and key_index + 1 < len(key_chain):
+                        print(
+                            f"[-] Model {model_name} busy on key {key_index + 1}; "
+                            "trying the next key."
+                        )
+                        break
+                    else:
+                        print(f"[-] Model {model_name} failed: {e}")
+                        break
     return None
 
 def query_groq_free_models(prompt: str, key: str) -> Optional[str]:
