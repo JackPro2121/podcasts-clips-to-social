@@ -106,6 +106,10 @@ STRUCTURAL_TOLERANCE_MS = 80.0
 # segment it was cut from, so it cannot produce a false positive from content.
 SOURCE_ALIGN_TOLERANCE_MS = 50.0
 SOURCE_ALIGN_MIN_CONFIDENCE = 0.30
+# Even when some lag wins the argmax, a flat surface means the winner is an
+# artefact of noise, not a measurement: the whitened peak must clearly beat the
+# sidelobes (P3 - GCC-PHAT + PSR confidence rule).
+SOURCE_ALIGN_MIN_PSR = 6.0
 SOURCE_ALIGN_SEARCH_S = 5.0
 SOURCE_ALIGN_SAMPLE_RATE = 16000
 
@@ -533,19 +537,29 @@ def _decode_mono(path: Path, sample_rate: int = SOURCE_ALIGN_SAMPLE_RATE):
     return samples if samples.size else None
 
 
-def best_source_offset(clip, window, sample_rate: int = SOURCE_ALIGN_SAMPLE_RATE):
-    """Offset of ``clip`` inside ``window`` in seconds, plus peak confidence.
+def _gcc_phat_offset(clip, window, sample_rate: int = SOURCE_ALIGN_SAMPLE_RATE):
+    """GCC-PHAT offset of ``clip`` inside ``window``, plus confidence and PSR.
 
-    Pure, so the arithmetic is unit-testable with synthetic signals where the
-    answer is known by construction. Both signals are mean-subtracted first:
-    loudnorm and AAC leave a DC offset that would otherwise bias the peak.
+    Plain cross-correlation of two loudnorm-processed AAC signals lets the
+    source's spectral tilt dominate the peak -- run 37213499992 blocked a clip
+    at -115ms on a peak of only 0.392, and two clips in run 37329847616 could
+    not be aligned at all (peaks 0.076 and 0.143). GCC-PHAT whitens the
+    cross-spectrum (divides it by its magnitude) so level and timbre do not
+    decide the peak.
+
+    Confidence stays the normalised cross-correlation of the aligned raw
+    segments (the existing gate semantics). ``psr`` is the peak-to-sidelobe
+    ratio of the whitened surface, excluding a +-50ms main-lobe window: it
+    measures whether one lag clearly beats all competitors. Unrelated signals
+    have a broad noisy surface and a low PSR even when some lag still wins the
+    argmax.
     """
     import numpy as np
 
     clip = np.asarray(clip, dtype=np.float64)
     window = np.asarray(window, dtype=np.float64)
     if clip.size < sample_rate // 2 or window.size <= clip.size:
-        return 0.0, 0.0
+        return 0.0, 0.0, 0.0
     clip = clip - clip.mean()
     window = window - window.mean()
     n = clip.size
@@ -553,14 +567,38 @@ def best_source_offset(clip, window, sample_rate: int = SOURCE_ALIGN_SAMPLE_RATE
     size = 1
     while size < n + m:
         size <<= 1
-    correlation = np.fft.irfft(
-        np.fft.rfft(window, size) * np.conj(np.fft.rfft(clip, size)), size
-    )
-    index = int(np.argmax(correlation[: m - n + 1]))
+    cross = np.fft.rfft(window, size) * np.conj(np.fft.rfft(clip, size))
+    magnitude = np.abs(cross)
+    magnitude[magnitude < 1e-12] = 1e-12
+    correlation = np.fft.irfft(cross / magnitude, size)
+    valid = correlation[: m - n + 1]
+    index = int(np.argmax(valid))
+    peak = float(valid[index])
+    radius = max(1, int(0.05 * sample_rate))
+    sidelobe_mask = np.ones(valid.size, dtype=bool)
+    sidelobe_mask[max(0, index - radius): min(valid.size, index + radius + 1)] = False
+    sidelobes = valid[sidelobe_mask]
+    psr = 0.0
+    if sidelobes.size > 8:
+        std = float(sidelobes.std())
+        if std > 1e-12:
+            psr = (peak - float(sidelobes.mean())) / std
     segment = window[index : index + n]
     denominator = float(np.linalg.norm(segment) * np.linalg.norm(clip))
     confidence = float(np.dot(segment, clip) / denominator) if denominator > 0 else 0.0
-    return index / float(sample_rate), confidence
+    return index / float(sample_rate), confidence, psr
+
+
+def best_source_offset(clip, window, sample_rate: int = SOURCE_ALIGN_SAMPLE_RATE):
+    """Offset of ``clip`` inside ``window`` in seconds, plus peak confidence.
+
+    Pure, so the arithmetic is unit-testable with synthetic signals where the
+    answer is known by construction. The offset is located with GCC-PHAT (see
+    ``_gcc_phat_offset``); the confidence is the normalised correlation of the
+    aligned raw segments.
+    """
+    offset_s, confidence, _psr = _gcc_phat_offset(clip, window, sample_rate)
+    return offset_s, confidence
 
 
 def align_with_source(
@@ -606,13 +644,28 @@ def align_with_source(
     if window.size <= clip.size:
         return SourceAlignment(reason="source window is not longer than the clip")
 
-    offset_s, confidence = best_source_offset(clip, window, sample_rate)
+    offset_s, confidence, psr = _gcc_phat_offset(clip, window, sample_rate)
     offset_s += window_start_s
     drift_ms = (float(expected_start_s) - offset_s) * 1000.0
     if confidence < SOURCE_ALIGN_MIN_CONFIDENCE:
         return SourceAlignment(
             measured=False,
             reason=f"correlation peak too weak ({confidence:.3f} < {SOURCE_ALIGN_MIN_CONFIDENCE})",
+            offset_s=offset_s,
+            expected_s=float(expected_start_s),
+            confidence=confidence,
+        )
+    if psr < SOURCE_ALIGN_MIN_PSR:
+        # An argmax on a flat, noisy surface reports a lag -- just not a
+        # meaningful one. This is the class that blocked run 37213499992's
+        # clip #1 at -115ms on confidence 0.392: an honest "unmeasurable", not
+        # a block, is the correct reading.
+        return SourceAlignment(
+            measured=False,
+            reason=(
+                f"correlation peak ambiguous (PSR {psr:.1f} < "
+                f"{SOURCE_ALIGN_MIN_PSR}); competing lags make the drift unreadable"
+            ),
             offset_s=offset_s,
             expected_s=float(expected_start_s),
             confidence=confidence,

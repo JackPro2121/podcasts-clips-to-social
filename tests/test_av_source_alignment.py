@@ -84,6 +84,34 @@ class TestBestSourceOffset(unittest.TestCase):
         self.assertLess(confidence, av_sync.SOURCE_ALIGN_MIN_CONFIDENCE)
 
 
+class TestGccPhatPsr(unittest.TestCase):
+    """P3: GCC-PHAT locates the lag; PSR decides whether to trust the winner.
+
+    Run 37213499992 blocked a clip at -115ms on a raw-waveform peak of 0.392,
+    and two clips in run 37329847616 could not be aligned at all (0.076/0.143).
+    Whitening removes the spectral-tilt bias; the peak-to-sidelobe ratio then
+    separates "one lag clearly wins" from "some lag won an argmax on noise".
+    """
+
+    def test_related_signal_has_a_sharp_peak(self) -> None:
+        sample_rate = 16000
+        rng = np.random.default_rng(11)
+        source = rng.standard_normal(sample_rate * 10).astype(np.float32)
+        start = sample_rate * 4
+        clip = source[start:start + sample_rate * 3]
+        offset, confidence, psr = av_sync._gcc_phat_offset(clip, source, sample_rate)
+        self.assertAlmostEqual(offset, 4.0, delta=0.01)
+        self.assertGreater(psr, av_sync.SOURCE_ALIGN_MIN_PSR)
+        self.assertGreater(confidence, av_sync.SOURCE_ALIGN_MIN_CONFIDENCE)
+
+    def test_unrelated_signal_has_a_flat_surface(self) -> None:
+        rng = np.random.default_rng(12)
+        clip = rng.standard_normal(16000 * 3).astype(np.float32)
+        other = rng.standard_normal(16000 * 8).astype(np.float32)
+        _offset, _confidence, psr = av_sync._gcc_phat_offset(clip, other, 16000)
+        self.assertLess(psr, av_sync.SOURCE_ALIGN_MIN_PSR)
+
+
 @unittest.skipUnless(HAS_FFMPEG, "ffmpeg/ffprobe required")
 class TestAlignWithSource(unittest.TestCase):
     def setUp(self) -> None:
