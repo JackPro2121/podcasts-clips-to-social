@@ -733,6 +733,69 @@ def build_audio_mastering_filters() -> str:
 def build_audio_filtergraph() -> str:
     return f"{build_audio_processing_filters()},{build_audio_mastering_filters()}"
 
+def _apply_speaker_crop_targets(
+    framing: FramingDecision, source_video_path: Path, effective_start: float
+) -> None:
+    """Re-centre shots on the speaking face (ASD-Lite), in place.
+
+    Root cause this fixes (run 37347481817, clip_2): the show is multi-speaker
+    and the framing is speech-blind, so the crop can sit on the listener for
+    the whole clip (the shown face correlated with the voice at +0.09 with no
+    lag alignment). The talker is measured on the source segment itself
+    (YuNet mouth motion x audio envelope, 2s windows - calibrated on episode
+    XTXMljXX3Is) and each shot's static crop is re-centred on the talking
+    face. Shots where no face confidently speaks are left untouched; silent
+    windows never force a switch, and shots with a face-centre pan expression
+    ignore `crop_x` anyway.
+    """
+    try:
+        from src.active_speaker import (
+            _audio_envelope,
+            shot_speaker_targets,
+            track_mouth_motion_with_positions,
+        )
+    except ImportError:  # pragma: no cover - defensive
+        return
+    if not framing.shots or not any(
+        getattr(shot, "face_boxes", None) for shot in framing.shots
+    ):
+        return
+    try:
+        tracks = track_mouth_motion_with_positions(source_video_path, fps=10)
+        if not tracks:
+            return
+        envelope = _audio_envelope(source_video_path, 10)
+        if not envelope:
+            return
+        spans = [
+            (shot.start + effective_start, shot.end + effective_start)
+            for shot in framing.shots
+        ]
+        boxes = [
+            list(getattr(shot, "face_boxes", None) or []) for shot in framing.shots
+        ]
+        targets = shot_speaker_targets(
+            tracks,
+            envelope,
+            spans,
+            boxes,
+            (framing.video_width, framing.video_height),
+            10.0,
+        )
+    except Exception as error:  # never let the diagnostic block a render
+        print(f"[!] ASD speaker targeting skipped: {error}")
+        return
+    target_crop_w = max(2, int(framing.active_h * 9 / 16)) if framing.active_h else 606
+    for shot, target in zip(framing.shots, targets):
+        if target is None:
+            continue
+        shot.crop_x = int(round(target - target_crop_w / 2))
+        print(
+            f"[*] ASD: shot {shot.start:.1f}-{shot.end:.1f}s re-centred on the "
+            f"speaking face (centre x={target:.0f})."
+        )
+
+
 def render_viral_clip(
     source_video_path: Path,
     start_time: float,
@@ -801,6 +864,8 @@ def render_viral_clip(
             current_input_idx += 1
             input_args.extend(["-stream_loop", "-1", "-i", str(b_path)])
             broll_inputs.append((current_input_idx, bounded_start, bounded_end, bounded_start))
+
+    _apply_speaker_crop_targets(framing, source_video_path, effective_start)
 
     video_filters = build_video_filtergraph(
         framing=framing,
