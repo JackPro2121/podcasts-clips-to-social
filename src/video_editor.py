@@ -145,6 +145,101 @@ def _apply_measured_loudness(
         raise RuntimeError(f"Measured loudness pass failed: {result.stderr[-1500:]}")
 
 
+# The output contract between the streams: the pixel verdict blocks any clip
+# whose container reports audio and video ending more than 80ms apart
+# (``av_sync.STRUCTURAL_TOLERANCE_MS``). The renderer must certify that
+# contract, not hope for it. Run 37329847616's clip_2_THE_BABY_WAKE_UP_CALL.mp4
+# shipped video 45.300s against audio 45.400s (+100ms) even though its source
+# segment covered 47.047s; the exact same filtergraph replayed locally from the
+# same episode does not reproduce the frame loss (it is ffmpeg
+# build/timestamp-dependent at shot boundaries). Whatever the cause, the file
+# must leave the renderer consistent: the audio stream is conformed to the
+# video stream (trimmed when it overruns, silence-padded when it falls short).
+# The video stream is never re-encoded, so freeze/motion evidence is untouched.
+STREAM_DURATION_TOLERANCE_S = 0.05
+
+
+def _probe_stream_durations(path: Path) -> Tuple[Optional[float], Optional[float]]:
+    """``(video_duration_s, audio_duration_s)``, ``(None, None)`` if unreadable."""
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "error",
+            "-show_entries", "stream=codec_type,duration",
+            "-of", "json", str(path),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        return None, None
+    try:
+        streams = json.loads(result.stdout).get("streams", [])
+    except json.JSONDecodeError:
+        return None, None
+    video: Optional[float] = None
+    audio: Optional[float] = None
+    for stream in streams:
+        try:
+            duration = float(stream.get("duration"))
+        except (TypeError, ValueError):
+            continue
+        if stream.get("codec_type") == "video" and video is None:
+            video = duration
+        elif stream.get("codec_type") == "audio" and audio is None:
+            audio = duration
+    return video, audio
+
+
+def _harmonise_stream_durations(path: Path) -> None:
+    """Conform the audio stream to the video stream's length, in place."""
+    video_duration, audio_duration = _probe_stream_durations(path)
+    if video_duration is None or audio_duration is None:
+        return
+    gap = audio_duration - video_duration
+    if abs(gap) <= STREAM_DURATION_TOLERANCE_S:
+        return
+    print(
+        f"[!] Stream duration mismatch for {path.name}: video="
+        f"{video_duration:.3f}s audio={audio_duration:.3f}s ({gap * 1000:+.0f}ms); "
+        f"conforming audio to the video stream."
+    )
+    if gap > 0:
+        audio_filter = f"atrim=duration={video_duration:.3f},asetpts=PTS-STARTPTS"
+    else:
+        audio_filter = f"apad=whole_dur={video_duration:.3f}"
+    patched = path.with_name(
+        f".{path.stem}.{uuid.uuid4().hex}.harmonised{path.suffix or '.mp4'}"
+    )
+    result = subprocess.run(
+        [
+            "ffmpeg", "-y", "-i", str(path),
+            "-map", "0:v:0", "-map", "0:a:0",
+            "-c:v", "copy",
+            "-af", audio_filter,
+            "-c:a", "aac", "-b:a", AUDIO_BITRATE, "-ar", "48000",
+            "-movflags", "+faststart",
+            str(patched),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=600,
+    )
+    if result.returncode != 0 or not patched.exists() or patched.stat().st_size <= 0:
+        if patched.exists():
+            patched.unlink()
+        print(f"[!] Stream harmonisation pass failed for {path.name}; keeping the original.")
+        return
+    os.replace(patched, path)
+    confirmed_video, confirmed_audio = _probe_stream_durations(path)
+    print(
+        f"[+] Streams harmonised for {path.name}: "
+        f"video={confirmed_video} audio={confirmed_audio}"
+    )
+
+
 def _validate_rendered_output(path: Path, expected_duration: float) -> None:
     try:
         result = subprocess.run(
@@ -883,6 +978,7 @@ def render_viral_clip(
         if not temp_output.exists() or temp_output.stat().st_size <= 0:
             raise RuntimeError(f"FFmpeg produced no output for clip {output_clip_path.name}")
         _validate_rendered_output(temp_output, duration)
+        _harmonise_stream_durations(temp_output)
 
         loudness_verified = False
         if source_has_audio or use_bgm or sfx_indices:
