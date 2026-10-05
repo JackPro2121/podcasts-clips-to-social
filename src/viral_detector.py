@@ -45,6 +45,10 @@ class ViralClipCandidate(BaseModel):
     hook_reason: str = Field(description="Why this moment grabs immediate viewer attention")
     social_caption: str = Field(description="Ready-to-post engaging caption for TikTok/Reels/Shorts")
     hashtags: List[str] = Field(description="High-traffic relevant hashtags (e.g. ['#podcast', '#viral', '#mindset'])")
+    # Who wrote the metadata. "llm" = a model wrote title/caption; "backfill" =
+    # the semantic fallback derived them from raw words, and they may be
+    # enriched before publish (see main._enrich_backfill_metadata).
+    origin: str = Field(default="llm", description="llm or backfill")
     peak_intensity_segments: List[Tuple[float, float]] = Field(
         default_factory=list, 
         description="Segments within the clip (relative to start_time) where emotional intensity peaks, for automatic 1.2x zoom. Format: [[start, end], ...]"
@@ -641,6 +645,7 @@ def fallback_rule_based_detector(segments: List[TranscriptSegment], num_clips: i
             hook_reason="Engaging dialogue section with high-retention speech",
             social_caption=strip_emojis(caption_text),
             hashtags=list(profile["hashtags"]),
+            origin="backfill",
             peak_intensity_segments=peaks,
             sfx_cues=sfx,
             keyword_emojis=dict(DEFAULT_KEYWORD_EMOJIS)

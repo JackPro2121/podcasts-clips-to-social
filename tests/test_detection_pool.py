@@ -7,6 +7,7 @@ guarantees the loops can replace a lost moment with the next-best non-overlappin
 candidate instead of ending in a shortfall.
 """
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -133,6 +134,79 @@ class TestRenumberRenderedClips(unittest.TestCase):
     def test_missing_file_is_tolerated(self) -> None:
         out = main._renumber_rendered_clips([{"path": str(self.dir / "clip_2_X.mp4")}])
         self.assertEqual(Path(out[0]["path"]).name, "clip_2_X.mp4")
+
+
+class TestBackfillMetadataEnrichment(unittest.TestCase):
+    """Backfill candidates get LLM-written metadata before publish.
+
+    Run 37287944990 published "DONT THINK ITS ONE MEAN" and an earlier
+    scheduled run shipped "SAM NEW HOUSE WAS BORN" to three Buffer channels;
+    both were raw-word titles from the semantic fallback.
+    """
+
+    def _segments(self):
+        from src.transcriber import TranscriptSegment
+
+        return [
+            TranscriptSegment(
+                start=100.0,
+                end=140.0,
+                text="The real claim of this clip is stated in a full sentence here.",
+                words=[],
+            )
+        ]
+
+    def _backfill(self, start=100.0, end=140.0):
+        return SimpleNamespace(
+            start_time=start,
+            end_time=end,
+            duration=end - start,
+            origin="backfill",
+            title="RAW WORDS HERE",
+            social_caption="old generic caption",
+            hashtags=["#old"],
+        )
+
+    def _run(self, llm_return, key="key"):
+        llm = mock.Mock(return_value=llm_return)
+        primary = [_moment(0, 40)]
+        extras = [self._backfill()]
+        with mock.patch.object(main, "detect_viral_moments", return_value=primary), mock.patch.object(
+            main, "fallback_rule_based_detector", return_value=extras
+        ), mock.patch("src.config.GEMINI_API_KEY", key), mock.patch(
+            "src.viral_detector.query_gemini_models", llm
+        ):
+            pool = main._detection_pool(self._segments(), num_clips=1, niche="finance")
+        return pool, llm
+
+    def _payload(self):
+        return json.dumps(
+            {
+                "title": "THE REAL FIX",
+                "social_caption": "One real sentence. Two real sentences.",
+                "hashtags": ["#finance", "#money"],
+            }
+        )
+
+    def test_backfill_candidate_gets_llm_metadata(self) -> None:
+        pool, llm = self._run(self._payload())
+        backfill = [item for item in pool if getattr(item, "origin", "") == "backfill"]
+        self.assertEqual(len(backfill), 1)
+        self.assertEqual(backfill[0].title, "THE REAL FIX")
+        self.assertEqual(backfill[0].social_caption, "One real sentence. Two real sentences.")
+        self.assertEqual(backfill[0].hashtags, ["#finance", "#money"])
+        llm.assert_called_once()
+
+    def test_failed_call_leaves_the_fallback_text(self) -> None:
+        pool, llm = self._run(None)
+        backfill = [item for item in pool if getattr(item, "origin", "") == "backfill"]
+        self.assertEqual(backfill[0].title, "RAW WORDS HERE")
+        self.assertEqual(backfill[0].social_caption, "old generic caption")
+        llm.assert_called_once()
+
+    def test_no_key_skips_the_call(self) -> None:
+        pool, llm = self._run(self._payload(), key="")
+        llm.assert_not_called()
 
 
 if __name__ == "__main__":

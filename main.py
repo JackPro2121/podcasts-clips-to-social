@@ -171,6 +171,83 @@ def _moments_overlap(first: Any, second: Any) -> bool:
     )
 
 
+def _backfill_metadata_from_json(raw: str) -> Tuple[str, str, List[str]]:
+    """Parse the small metadata reply; tolerant of code fences."""
+    text = (raw or "").strip()
+    if text.startswith("```json"):
+        text = text[7:]
+    elif text.startswith("```"):
+        text = text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    data = json.loads(text.strip())
+    title = " ".join(str(data.get("title", "")).split()).upper()
+    caption = " ".join(str(data.get("social_caption", "")).split())
+    hashtags = [
+        str(tag).strip()
+        for tag in data.get("hashtags", []) or []
+        if str(tag).strip().startswith("#")
+    ]
+    return title[:60], caption[:280], hashtags[:6]
+
+
+def _enrich_backfill_metadata(
+    pool: List[Any],
+    segments: List[TranscriptSegment],
+    niche: str,
+) -> None:
+    """LLM metadata for candidates the semantic fallback wrote.
+
+    Semantic candidates derive titles from raw words ("SAM NEW HOUSE WAS
+    BORN") and one of them was published to three Buffer channels. Every
+    backfill candidate gets one cheap metadata call on the free Gemini ladder;
+    any failure leaves the fallback text exactly as it was.
+    """
+    from src.config import GEMINI_API_KEY
+    from src.viral_detector import NICHE_PROFILES, query_gemini_models
+
+    backfill = [item for item in pool if getattr(item, "origin", "llm") == "backfill"]
+    if not backfill or not GEMINI_API_KEY:
+        return
+    profile = NICHE_PROFILES.get(niche, NICHE_PROFILES.get("finance", {}))
+    for candidate in backfill:
+        window = _clip_transcript_text(
+            segments, candidate.start_time, candidate.end_time
+        ).strip()
+        if len(window) < 40:
+            continue
+        prompt = (
+            "You write metadata for one short-form podcast clip.\n"
+            f"Niche: {profile.get('focus', 'general interest')}\n\n"
+            f"Window transcript:\n{window[:1200]}\n\n"
+            "Return valid JSON only:\n"
+            '{"title": "punchy ALL-CAPS hook, 3-6 words, no emoji or quotes", '
+            '"social_caption": "exactly 2 short sentences stating the clip\'s real '
+            'claim; no generic questions", "hashtags": ["#tag", "... 4-6 niche tags"]}'
+        )
+        try:
+            raw = query_gemini_models(
+                prompt, GEMINI_API_KEY, context_note="backfill metadata"
+            )
+        except Exception as error:
+            print(f"[!] Backfill metadata call failed: {error}")
+            continue
+        if not raw:
+            continue
+        try:
+            title, caption, hashtags = _backfill_metadata_from_json(raw)
+        except Exception as error:
+            print(f"[!] Backfill metadata parse failed: {error}")
+            continue
+        if len(title) >= 8:
+            candidate.title = title
+        if caption:
+            candidate.social_caption = caption
+        if hashtags:
+            candidate.hashtags = hashtags
+        print(f"[+] Backfill metadata written: '{candidate.title}'")
+
+
 def _detection_pool(
     segments: List[TranscriptSegment],
     num_clips: int,
@@ -188,23 +265,23 @@ def _detection_pool(
     primary = detect_viral_moments(segments, num_clips=num_clips, niche=niche) or []
     pool = list(primary)
     target = num_clips + 2
-    if len(pool) >= target:
-        return pool
-    try:
-        extras = fallback_rule_based_detector(segments, num_clips=target, niche=niche) or []
-    except Exception as error:
-        print(f"[!] Backfill candidate generation failed: {error}")
-        return pool
-    added = 0
-    for candidate in extras:
-        if len(pool) >= target:
-            break
-        if any(_moments_overlap(candidate, existing) for existing in pool):
-            continue
-        pool.append(candidate)
-        added += 1
-    if added:
-        print(f"[+] Added {added} backfill candidate(s) for clip-count resilience.")
+    if len(pool) < target:
+        try:
+            extras = fallback_rule_based_detector(segments, num_clips=target, niche=niche) or []
+        except Exception as error:
+            print(f"[!] Backfill candidate generation failed: {error}")
+            extras = []
+        added = 0
+        for candidate in extras:
+            if len(pool) >= target:
+                break
+            if any(_moments_overlap(candidate, existing) for existing in pool):
+                continue
+            pool.append(candidate)
+            added += 1
+        if added:
+            print(f"[+] Added {added} backfill candidate(s) for clip-count resilience.")
+    _enrich_backfill_metadata(pool, segments, niche)
     return pool
 
 

@@ -162,6 +162,7 @@ class TestFallbackCaption(unittest.TestCase):
 
         candidates = fallback_rule_based_detector(self._caption_segments(), num_clips=1)
         self.assertTrue(candidates, "the 40s window must produce a candidate")
+        self.assertEqual(candidates[0].origin, "backfill")
         caption = candidates[0].social_caption
         self.assertNotIn("What are your thoughts", caption)
         self.assertIn("holding cash during a crisis", caption)
