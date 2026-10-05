@@ -509,6 +509,50 @@ def detect_caption_regions(
     return [union], ""
 
 
+# The caption signal is a *persistent* one: our captions are on screen in
+# nearly every frame, while a show's own graphics (logos, intro banners) appear
+# in a few frames and vanish. A row of text must appear in at least this
+# fraction of the text-bearing frames -- and at least half as often as the most
+# persistent row -- to count as caption pixels.
+#
+# Evidence: run 37329847616's clip_3_STOP_MAKING_EXCUSES_NOW.mp4 measured 16%
+# caption-on-face at t=0 with the caption safely at the bottom of every frame.
+# All of the overlap came from the show's own burned-in graphics (the giant
+# "THE DAVE RAMSEY SHOW" logo and the "STOP MAKING EXCUSES NOW" banner during
+# the first ~4s) which ``outlined_text_mask`` cannot tell from captions. Rows
+# carrying captions persist in >80% of frames; the intro graphics in ~15%.
+CAPTION_ROW_MIN_FRACTION = 0.20
+CAPTION_ROW_RELATIVE_FRACTION = 0.5
+
+
+def _persistent_caption_rows(
+    masks: Sequence[Any], height: int
+) -> Optional[Any]:
+    """Boolean row mask of the caption band, filtering transient source text.
+
+    ``masks`` are the per-frame ``outlined_text_mask`` outputs. Returns ``None``
+    when the filter cannot decide (no text at all, or nothing survives), so the
+    caller measures everything rather than silently passing.
+    """
+    import numpy as np
+
+    active = [mask for mask in masks if bool(np.any(mask))]
+    if not active:
+        return None
+    hits = np.zeros(int(height), dtype=int)
+    for mask in active:
+        hits += np.asarray(mask).any(axis=1).astype(int)
+    fractions = hits / float(len(active))
+    threshold = max(
+        CAPTION_ROW_MIN_FRACTION,
+        CAPTION_ROW_RELATIVE_FRACTION * float(fractions.max()),
+    )
+    keep = fractions >= threshold
+    if not bool(keep.any()):
+        return None
+    return keep
+
+
 def measure_on_face(
     path: Path,
     avoid_rects: Sequence[Rect],
@@ -524,6 +568,10 @@ def measure_on_face(
     measurement that the existing QA cannot make: ``editorial_qa`` compares a plan
     rect against plan regions, and the caption that lands on the face is produced
     by the *relocation* that those same regions triggered.
+
+    Only *persistent* text rows count (see ``_persistent_caption_rows``): a
+    programme's own on-screen graphics are transient and must not be measured
+    as if they were our captions.
     """
     import numpy as np
 
@@ -537,11 +585,15 @@ def measure_on_face(
     if not frames:
         return 0.0, 0.0, 0
 
+    masks = [outlined_text_mask(frame) for frame in frames]
+    keep_rows = _persistent_caption_rows(masks, height)
+
     worst = 0.0
     worst_at = 0.0
     measured = 0
-    for index, frame in enumerate(frames):
-        mask = outlined_text_mask(frame)
+    for index, mask in enumerate(masks):
+        if keep_rows is not None:
+            mask = mask & keep_rows[:, None]
         total = int(mask.sum())
         if total == 0:
             continue
