@@ -539,7 +539,18 @@ def download_segment_via_apify(
 # Deduplicated format selectors (were copy-pasted across 7 strategies).
 # Strictly prefer avc1 (H.264) to avoid AV1 decoding loops on GitHub Actions runners.
 # Enforce English/original audio track priority so multi-dub videos do not download foreign audio.
+# Prefer the ORIGINAL audio track over YouTube's auto-dubbed one. A dubbed
+# track often carries language=en too (format_note "dubbed-auto"), so the old
+# language-first order fetched the dub: yt-dlp issues #11753/#11834 and the
+# r/youtubedl report all converge on `format_note*=original` as the reliable
+# marker. Old fallbacks are kept at the end so an unknown-operator failure
+# cannot regress the fetch.
 _AUDIO_EN_PREF = (
+    'bestaudio[format_note*=original][language^=en]/'
+    'bestaudio[format_note*=original]/'
+    'bestaudio[language=en-US][format_note!*=dubbed]/'
+    'bestaudio[language^=en][format_note!*=dubbed]/'
+    'bestaudio[format_note!*=dubbed]/'
     'bestaudio[language=en-US]/'
     'bestaudio[language=en]/'
     'bestaudio[language^=en]/'
