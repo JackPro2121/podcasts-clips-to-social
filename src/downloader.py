@@ -521,6 +521,21 @@ def download_segment_via_apify(
                     if chunk:
                         f.write(chunk)
         height = get_video_height(out_file)
+        from src.preflight import preflight_source
+
+        report = preflight_source(out_file)
+        if not report.ok:
+            print(
+                f"[-] Pre-flight rejected the segment [{report.stage}]: {report.reason}"
+            )
+            return None
+        if report.video_duration and report.audio_duration:
+            mismatch_ms = (report.audio_duration - report.video_duration) * 1000.0
+            if abs(mismatch_ms) > 80.0:
+                print(
+                    f"[!] Pre-flight: stream length mismatch {mismatch_ms:+.0f}ms "
+                    "(the renderer will harmonise it)."
+                )
         segment_start = max(0.0, start_time - float(int_start))
         return {
             "video_path": out_file.resolve(),
