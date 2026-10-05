@@ -963,7 +963,11 @@ def run_pipeline(
                     ),
                 )
                 if fixed_clip and fixed_clip.exists():
-                    clip_path = str(fixed_clip)
+                    # Keep the Path: downstream source alignment calls
+                    # .exists() on this value, and a str crashed every clip in
+                    # run 37296577217 (all four died at pixel verification with
+                    # "'str' object has no attribute 'exists'").
+                    clip_path = fixed_clip
                     clip_info['video_path'] = fixed_clip
                     print(f"[+] Fallback to English audio track ([en-US]) successful for clip #{idx}!")
                 else:

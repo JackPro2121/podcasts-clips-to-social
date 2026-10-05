@@ -128,6 +128,21 @@ class TestAlignWithSource(unittest.TestCase):
         self.assertFalse(alignment.measured)
         self.assertIn("not found", alignment.reason)
 
+    def test_string_paths_measure_the_same(self) -> None:
+        """The English-audio fallback once wrote str(fixed_clip) into the clip
+        path; every affected clip then died at pixel verification with
+        "'str' object has no attribute 'exists'" (run 37296577217)."""
+        alignment = av_sync.align_with_source(str(self.clip), str(self.source), CLIP_START)
+        self.assertTrue(alignment.measured, alignment.reason)
+        self.assertLessEqual(abs(alignment.drift_ms), av_sync.SOURCE_ALIGN_TOLERANCE_MS)
+
+
+class TestPathNormalisation(unittest.TestCase):
+    def test_string_paths_are_normalised_not_crashed(self) -> None:
+        alignment = av_sync.align_with_source("missing_clip.mp4", "missing_source.mp4", 1.0)
+        self.assertFalse(alignment.measured)
+        self.assertIn("not found", alignment.reason)
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

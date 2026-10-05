@@ -76,7 +76,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from . import probe
 
@@ -564,8 +564,8 @@ def best_source_offset(clip, window, sample_rate: int = SOURCE_ALIGN_SAMPLE_RATE
 
 
 def align_with_source(
-    clip_path: Path,
-    source_path: Path,
+    clip_path: Union[str, Path],
+    source_path: Union[str, Path],
     expected_start_s: float,
     search_seconds: float = SOURCE_ALIGN_SEARCH_S,
     sample_rate: int = SOURCE_ALIGN_SAMPLE_RATE,
@@ -577,7 +577,14 @@ def align_with_source(
     edit -- the exact class of defect that shipped when ``asetpts`` ran before
     ``atrim``. This measures it directly, so the verdict can block on it without
     trusting any plan.
+
+    Both paths are normalised here: a caller once handed over a ``str`` (the
+    English-audio fallback wrote ``str(fixed_clip)`` into the clip path) and
+    every affected clip died with "'str' object has no attribute 'exists'" at
+    pixel verification.
     """
+    clip_path = Path(clip_path)
+    source_path = Path(source_path)
     if not clip_path.exists():
         return SourceAlignment(reason=f"clip not found: {clip_path}")
     if not source_path.exists():
