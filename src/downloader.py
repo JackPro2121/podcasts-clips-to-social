@@ -1150,7 +1150,11 @@ def fetch_transcript_via_apify(video_url: str, api_token: Optional[str] = None) 
         return None
     actor_path = quote(APIFY_TRANSCRIPT_ACTOR_ID.replace("/", "~"), safe="~")
     endpoint = f"https://api.apify.com/v2/acts/{actor_path}/run-sync-get-dataset-items"
-    payload: Dict[str, Any] = {"videos": [video_url], "language": "en", "includeSegments": True}
+    # Verified live 2026-10-05 against pintostudio/youtube-transcript-scraper
+    # (5.79M runs): input {"videoUrl": url} -> [{"data": [{start, dur, text}]}].
+    # The previous default actor (om_kh/video-transcript-api) went dead, which is
+    # why every run fell through to the slow Whisper probe.
+    payload: Dict[str, Any] = {"videoUrl": video_url}
     try:
         response = requests.post(
             endpoint,
@@ -1168,6 +1172,25 @@ def fetch_transcript_via_apify(video_url: str, api_token: Optional[str] = None) 
     for record in records:
         if not isinstance(record, dict):
             continue
+        # Current actor shape: {"data": [{"start": "0.12", "dur": "3.0", "text": ...}]}
+        data_segments = record.get("data")
+        if isinstance(data_segments, list):
+            normalized = []
+            for segment in data_segments:
+                if not isinstance(segment, dict) or not str(segment.get("text", "")).strip():
+                    continue
+                try:
+                    start_s = float(segment.get("start", 0) or 0)
+                    duration_s = float(segment.get("dur", segment.get("duration", 0)) or 0)
+                except (TypeError, ValueError):
+                    continue
+                if duration_s > 0:
+                    normalized.append(
+                        {"text": str(segment["text"]), "start": start_s, "duration": duration_s}
+                    )
+            if normalized:
+                print(f"[+] Retrieved {len(normalized)} timestamped transcript segments via Apify.")
+                return normalized
         transcript_record = record.get("transcripts", record)
         if isinstance(transcript_record, list):
             transcript_record = next((item for item in transcript_record if isinstance(item, dict)), None)
