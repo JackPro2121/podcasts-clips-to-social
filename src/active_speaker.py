@@ -15,8 +15,9 @@ synthetic series where the talker is known by construction.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, List, Sequence, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 
 WINDOW_S = 1.0
 FRAME_WIDTH, FRAME_HEIGHT = 480, 270
@@ -142,8 +143,16 @@ def _mouth_patch(grey: Any, box: Any) -> Any:
     return cv2.resize(patch, (20, 10)).astype(np.float32)
 
 
-def track_mouth_motion(clip: Path, fps: int = 10) -> List[List[float]]:
-    """Per-face-track mouth-motion series (frames-indexed, greedy nearest)."""
+@dataclass
+class Track:
+    """One tracked face: mouth-motion series and its per-frame centre x."""
+
+    motion: List[float] = field(default_factory=list)
+    x: List[float] = field(default_factory=list)
+
+
+def track_mouth_motion_with_positions(clip: Path, fps: int = 10) -> List[Track]:
+    """Per-face tracks (motion + positions), greedy nearest association."""
     import numpy as np
 
     from src.verification import faces as faces_mod
@@ -173,14 +182,87 @@ def track_mouth_motion(clip: Path, fps: int = 10) -> List[List[float]]:
                 box = boxes[best]
                 patch = _mouth_patch(grey, box)
                 track["motion"].append(float(np.mean(np.abs(patch - track["prev"]))))
+                track["x"].append(float(box.x + box.width / 2))
                 track["prev"] = patch
                 track["last"] = box
         for box_index, box in enumerate(boxes):
             if box_index not in used and len(tracks) < 4:
                 tracks.append(
-                    {"motion": [], "prev": _mouth_patch(grey, box), "last": box}
+                    {
+                        "motion": [],
+                        "x": [],
+                        "prev": _mouth_patch(grey, box),
+                        "last": box,
+                    }
                 )
-    return [track["motion"] for track in tracks]
+    return [Track(motion=track["motion"], x=track["x"]) for track in tracks]
+
+
+def track_mouth_motion(clip: Path, fps: int = 10) -> List[List[float]]:
+    """Per-face-track mouth-motion series (frames-indexed, greedy nearest)."""
+    return [track.motion for track in track_mouth_motion_with_positions(clip, fps)]
+
+
+def shot_speaker_targets(
+    tracks: Sequence[Track],
+    envelope: Sequence[float],
+    shots: Sequence[Tuple[float, float]],
+    face_boxes_per_shot: Sequence[Sequence[Tuple[float, float, float, float]]],
+    source_size: Tuple[int, int],
+    fps: float,
+    analysis_size: Tuple[int, int] = (FRAME_WIDTH, FRAME_HEIGHT),
+    window_s: float = 2.0,
+    min_score: float = SPEAKER_MIN_CORR,
+) -> List[Optional[float]]:
+    """New crop centre x (source pixels) per shot, or None to leave it alone.
+
+    For each shot span the talker is chosen per window (``windowed_speakers``),
+    votes are confidence-weighted across the span, and the winning track's mean
+    position is mapped to the nearest shot face box. ``None`` is returned when
+    no confident talker exists in the span or the track cannot be mapped; the
+    caller then keeps the framing's geometric choice. This function is pure so
+    the mapping is unit-tested with synthetic tracks where the talker and its
+    position are known by construction.
+    """
+    if not tracks or not envelope:
+        return [None] * len(shots)
+    windows = windowed_speakers(
+        [track.motion for track in tracks], envelope, fps, window_s
+    )
+    analysis_width = float(analysis_size[0])
+    results: List[Optional[float]] = []
+    for shot_index, (start_s, end_s) in enumerate(shots):
+        votes = [0.0] * len(tracks)
+        for window_start, track_index, score in windows:
+            if track_index < 0 or score < min_score:
+                continue
+            if start_s <= window_start < end_s:
+                votes[track_index] += score
+        winner = max(range(len(votes)), key=lambda index: votes[index])
+        if votes[winner] <= 0.0:
+            results.append(None)
+            continue
+        positions = tracks[winner].x
+        if not positions:
+            results.append(None)
+            continue
+        positions_array = positions
+        mean_x_analysis = sum(positions_array) / len(positions_array)
+        mean_x_source = mean_x_analysis * source_size[0] / analysis_width
+        boxes = (
+            face_boxes_per_shot[shot_index]
+            if shot_index < len(face_boxes_per_shot)
+            else []
+        )
+        if not boxes:
+            results.append(None)
+            continue
+        best_centre = min(
+            boxes,
+            key=lambda box: abs((box[0] + box[2] / 2.0) - mean_x_source),
+        )
+        results.append(best_centre[0] + best_centre[2] / 2.0)
+    return results
 
 
 def analyse(clip: Path, fps: int = 10, window_s: float = WINDOW_S) -> List[Tuple[float, int, float]]:

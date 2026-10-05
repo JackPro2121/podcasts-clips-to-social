@@ -16,8 +16,10 @@ import unittest
 import numpy as np
 
 from src.active_speaker import (
+    Track,
     pick_speaker,
     scores_from_series,
+    shot_speaker_targets,
     windowed_speakers,
 )
 
@@ -87,6 +89,65 @@ class TestWindowedSpeakers(unittest.TestCase):
         windows = windowed_speakers([_positive(30, 19, scale=0.5)], envelope, 10.0, 1.0)
         self.assertTrue(windows)
         self.assertTrue(all(index == -1 for _start, index, _score in windows))
+
+
+class TestShotSpeakerTargets(unittest.TestCase):
+    """The integration core: shot span -> talking track -> crop centre."""
+
+    @staticmethod
+    def _track(motion: list[float], x: list[float]) -> Track:
+        return Track(motion=list(motion), x=list(x))
+
+    def test_shot_target_lands_on_the_talking_face(self):
+        fps = 10.0
+        envelope = _positive(80, 20)
+        talker = _follower(envelope, 21)
+        listener = _positive(80, 22, scale=0.5)
+        # Analysis space is 480 wide; the talker sits right (x=400), which maps
+        # to 1600 in a 1920-wide source. The nearest shot face box centre is
+        # 1550, not the listener's 250.
+        tracks = [
+            self._track(listener, [80.0] * 80),
+            self._track(talker, [400.0] * 80),
+        ]
+        boxes = [[(1400.0, 0.0, 300.0, 300.0), (100.0, 0.0, 300.0, 300.0)]]
+        targets = shot_speaker_targets(
+            tracks, envelope, [(0.0, 8.0)], boxes, (1920, 1080), fps
+        )
+        self.assertIsNotNone(targets[0])
+        assert targets[0] is not None
+        self.assertAlmostEqual(targets[0], 1550.0, delta=50.0)
+
+    def test_no_confident_talker_leaves_the_shot_alone(self):
+        envelope = _positive(40, 23)
+        tracks = [self._track(_positive(40, 24, scale=0.5), [100.0] * 40)]
+        targets = shot_speaker_targets(
+            tracks, envelope, [(0.0, 4.0)], [[(0.0, 0.0, 100.0, 100.0)]],
+            (1920, 1080), 10.0,
+        )
+        self.assertIsNone(targets[0])
+
+    def test_absent_face_boxes_leave_the_shot_alone(self):
+        envelope = _positive(40, 25)
+        talker = _follower(envelope, 26)
+        tracks = [self._track(talker, [200.0] * 40)]
+        targets = shot_speaker_targets(
+            tracks, envelope, [(0.0, 4.0)], [[]], (1920, 1080), 10.0
+        )
+        self.assertIsNone(targets[0])
+
+    def test_vote_is_confidence_weighted_across_windows(self):
+        fps = 10.0
+        envelope = _positive(60, 27)
+        # Two faces, both following, but track 1 only in the middle third.
+        track0 = _follower(envelope, 28)
+        track1 = _positive(20, 29, scale=0.5) + _follower(envelope[20:40], 30) + _positive(20, 31, scale=0.5)
+        tracks = [self._track(track0, [60.0] * 60), self._track(track1, [420.0] * 60)]
+        boxes = [[(100.0, 0.0, 200.0, 200.0), (1700.0, 0.0, 200.0, 200.0)]]
+        targets = shot_speaker_targets(
+            tracks, envelope, [(0.0, 6.0)], boxes, (1920, 1080), fps
+        )
+        self.assertIsNotNone(targets[0])
 
 
 if __name__ == "__main__":
