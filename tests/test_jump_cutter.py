@@ -8,9 +8,17 @@ so that guard has its own test.
 
 from __future__ import annotations
 
+import shutil
+import subprocess
+import tempfile
 import unittest
+from pathlib import Path
+
+import numpy as np
 
 from src.jump_cutter import build_cut_plan
+
+HAS_FFMPEG = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
 
 
 class TestCutPlan(unittest.TestCase):
@@ -77,6 +85,94 @@ class TestRemap(unittest.TestCase):
         self.assertFalse(plan.applied)
         for moment in (0.0, 1.15, 2.9):
             self.assertAlmostEqual(plan.remap(moment), moment, places=6)
+
+
+@unittest.skipUnless(HAS_FFMPEG, "ffmpeg required")
+class TestCompactMedia(unittest.TestCase):
+    """End-to-end proof of the cut mechanics on real media.
+
+    A 4s source carries two tone bursts (centre 0.7s and 3.325s). The plan
+    removes 2.14s of dead air; the compacted file must contain exactly the two
+    bursts, each at its ``plan.remap()`` position - the same call the caption
+    layer will use.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.workspace = Path(self.tmp.name)
+        self.source = self.workspace / "source.mp4"
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-v", "error",
+                "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=10:duration=4",
+                "-f", "lavfi", "-i", "sine=frequency=880:duration=0.4",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=0.25",
+                "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono",
+                "-filter_complex",
+                "[1:a]adelay=500|500[b1];[2:a]adelay=3200|3200[b2];"
+                "[3:a]atrim=duration=4[base];"
+                "[base][b1][b2]amix=inputs=3:duration=first:normalize=0[a]",
+                "-map", "0:v", "-map", "[a]", "-t", "4",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+                str(self.source),
+            ],
+            capture_output=True,
+            check=True,
+            timeout=180,
+        )
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _burst_centres(self, path: Path) -> list[float]:
+        raw = subprocess.run(
+            [
+                "ffmpeg", "-v", "error", "-i", str(path),
+                "-ac", "1", "-ar", "16000", "-f", "s16le", "-",
+            ],
+            capture_output=True,
+        ).stdout
+        samples = (
+            np.frombuffer(raw[: len(raw) // 2 * 2], dtype="<i2").astype(np.float32)
+            / 32768.0
+        )
+        hop = 320  # 20ms
+        rms = np.asarray(
+            [
+                float(np.sqrt(np.mean(samples[i:i + hop] ** 2)))
+                for i in range(0, max(1, len(samples) - hop), hop)
+            ]
+        )
+        active = rms > max(0.01, float(rms.max()) * 0.3)
+        centres: list[float] = []
+        run_start = None
+        for index, on in enumerate(active):
+            if on and run_start is None:
+                run_start = index
+            if not on and run_start is not None:
+                centres.append((run_start + index - 1) / 2 * 0.02)
+                run_start = None
+        if run_start is not None:
+            centres.append((run_start + len(active) - 1) / 2 * 0.02)
+        return centres
+
+    def test_compacted_media_places_every_burst_at_its_remapped_time(self):
+        from src.jump_cutter import compact_media
+
+        source_centres = self._burst_centres(self.source)
+        self.assertEqual(len(source_centres), 2, source_centres)
+        plan = build_cut_plan([(0.5, 0.9), (3.2, 3.45)], 4.0, min_duration_s=1.0)
+        self.assertTrue(plan.applied)
+        output = self.workspace / "compact.mp4"
+        self.assertTrue(compact_media(self.source, plan, output))
+
+        centres = self._burst_centres(output)
+        self.assertEqual(len(centres), 2, f"expected exactly two bursts, got {centres}")
+        for original, compacted in zip(source_centres, centres):
+            self.assertAlmostEqual(
+                compacted, plan.remap(original), delta=0.12,
+                msg=f"burst at {original:.2f}s moved to {compacted:.2f}s",
+            )
 
 
 if __name__ == "__main__":

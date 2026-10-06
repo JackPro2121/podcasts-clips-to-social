@@ -14,8 +14,10 @@ access, so every rule is unit-tested with constructed word lists.
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass, field
-from typing import List, Sequence, Tuple
+from pathlib import Path
+from typing import List, Sequence, Tuple, Union
 
 # Gaps shorter than this are natural speech rhythm, not dead air.
 MIN_DEAD_AIR_S = 0.65
@@ -128,4 +130,73 @@ def build_cut_plan(
         original_duration_s=float(clip_duration_s),
         removed_s=removed,
         applied=True,
+    )
+
+
+def build_concat_filtergraph(plan: CutPlan) -> str:
+    """A ``filter_complex`` graph that compacts input 0 into ``[outv][outa]``.
+
+    One trim/atrim per keep-segment, joined by ``concat``: this is the ffmpeg
+    standard for jump cuts (research: TimeBolt/SavvyCut). Raises on an empty
+    plan so a caller can never render a silent black clip by accident.
+    """
+    if not plan.keep_segments:
+        raise ValueError("cannot build a concat graph from an empty cut plan")
+    video_parts: List[str] = []
+    audio_parts: List[str] = []
+    pairs: List[str] = []
+    for index, (start, end) in enumerate(plan.keep_segments):
+        video_parts.append(
+            f"[0:v]trim=start={start:.3f}:end={end:.3f},setpts=PTS-STARTPTS[v{index}]"
+        )
+        audio_parts.append(
+            f"[0:a]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS[a{index}]"
+        )
+        pairs.append(f"[v{index}][a{index}]")
+    concat = (
+        f"{''.join(pairs)}concat=n={len(plan.keep_segments)}:v=1:a=1[outv][outa]"
+    )
+    return ";".join(video_parts + audio_parts + [concat])
+
+
+def compact_media(
+    source_path: Union[str, Path],
+    plan: CutPlan,
+    destination_path: Union[str, Path],
+    crf: int = 18,
+    preset: str = "fast",
+) -> bool:
+    """Physically apply the cut plan to a media file.
+
+    Returns False when the plan is not applied or the encode fails, so the
+    caller keeps the original file rather than shipping a broken one. The
+    renderer integration re-encodes anyway, so the intermediate uses a
+    quality-preserving CRF rather than the final delivery settings.
+    """
+    if not plan.applied:
+        return False
+    source = Path(source_path)
+    destination = Path(destination_path)
+    graph = build_concat_filtergraph(plan)
+    result = subprocess.run(
+        [
+            "ffmpeg", "-y", "-v", "error",
+            "-i", str(source),
+            "-filter_complex", graph,
+            "-map", "[outv]", "-map", "[outa]",
+            "-c:v", "libx264", "-crf", str(crf), "-preset", preset,
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+            "-movflags", "+faststart",
+            str(destination),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=900,
+    )
+    return (
+        result.returncode == 0
+        and destination.exists()
+        and destination.stat().st_size > 0
     )
