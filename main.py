@@ -1176,6 +1176,35 @@ def run_pipeline(
                 if clip_words:
                     broll_cues = find_broll_cues_for_clip(clip_words, clip_duration=clip_duration)
 
+            # P5 emphasis choreography: impact dings + push-in shots follow the
+            # emphasised words (numbers first). Uses the existing renderer
+            # plumbing (sfx_cues + ShotPlan.motion); never blocks a render.
+            choreography_sfx: List[Tuple[float, str]] = []
+            if clip_words:
+                try:
+                    from src.emphasis_choreography import plan_choreography
+
+                    choreography = plan_choreography(
+                        words=[w.word for w in clip_words],
+                        word_times=[(w.start, w.end) for w in clip_words],
+                        shot_spans=[(shot.start, shot.end) for shot in framing.shots],
+                    )
+                    choreography_sfx = list(choreography.sfx_cues)
+                    for shot_index in choreography.push_in_shots:
+                        if (
+                            0 <= shot_index < len(framing.shots)
+                            and getattr(framing.shots[shot_index], "motion", "drift") == "drift"
+                        ):
+                            framing.shots[shot_index].motion = "push_in"
+                    if choreography_sfx:
+                        print(
+                            f"[*] Emphasis choreography for clip #{idx}: "
+                            f"{len(choreography_sfx)} impact cue(s) "
+                            f"{[round(t, 1) for t, _ in choreography_sfx]}."
+                        )
+                except Exception as choreography_error:
+                    print(f"[!] Emphasis choreography skipped: {choreography_error}")
+
             try:
                 caption_override_a: Dict[str, Any] = {}
                 def _render_attempt(adjustment: Any) -> Path:
@@ -1212,7 +1241,10 @@ def run_pipeline(
                         peak_intensity_segments=getattr(moment, "peak_intensity_segments", []),
                         ass_subtitle_path=ass_path,
                         burn_subtitles=burn_subtitles,
-                        sfx_cues=getattr(moment, "sfx_cues", []),
+                        sfx_cues=[
+                            *(getattr(moment, "sfx_cues", None) or []),
+                            *choreography_sfx,
+                        ],
                         broll_cues=broll_cues,
                         cover_image_path=None,
                         motion_gain=adjustment.motion_gain,
