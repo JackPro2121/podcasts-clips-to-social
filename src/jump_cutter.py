@@ -200,3 +200,32 @@ def compact_media(
         and destination.exists()
         and destination.stat().st_size > 0
     )
+
+
+def prepare_compacted_clip(
+    source_path: Union[str, Path],
+    words: Sequence[Tuple[float, float]],
+    clip_duration_s: float,
+    work_dir: Union[str, Path],
+    min_duration_s: float = MIN_RESULT_DURATION_S,
+) -> "tuple[Path, List[Tuple[float, float]], float] | None":
+    """Everything the render path needs to adopt a jump-cut in one call.
+
+    Returns ``(compacted_path, remapped_words, new_duration_s)`` or ``None``
+    when no cut is warranted (or the encode fails), in which case the caller
+    keeps the original source, words and duration untouched. Word times are
+    remapped with ``CutPlan.remap`` - the same function the end-to-end burst
+    test proves against real media. The caller renders the compacted file from
+    ``start_time=0`` since it begins at the clip's first kept segment.
+    """
+    plan = build_cut_plan(words, clip_duration_s, min_duration_s=min_duration_s)
+    if not plan.applied:
+        return None
+    destination = (
+        Path(work_dir)
+        / f"{Path(source_path).stem}_compacted_{int(plan.removed_s * 1000)}ms.mp4"
+    )
+    if not compact_media(source_path, plan, destination):
+        return None
+    remapped = [(plan.remap(start), plan.remap(end)) for start, end in words]
+    return destination, remapped, plan.duration_s

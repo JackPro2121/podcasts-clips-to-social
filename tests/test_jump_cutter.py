@@ -175,5 +175,65 @@ class TestCompactMedia(unittest.TestCase):
             )
 
 
+@unittest.skipUnless(HAS_FFMPEG, "ffmpeg required")
+class TestPrepareCompactedClip(unittest.TestCase):
+    """The one call the render path will make: source + words -> compacted."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.workspace = Path(self.tmp.name)
+        self.source = self.workspace / "source.mp4"
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-v", "error",
+                "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=10:duration=4",
+                "-f", "lavfi", "-i", "sine=frequency=880:duration=4",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+                str(self.source),
+            ],
+            capture_output=True,
+            check=True,
+            timeout=180,
+        )
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_prepare_returns_compacted_media_and_remapped_words(self):
+        from src.jump_cutter import prepare_compacted_clip
+
+        words = [(0.5, 0.9), (3.2, 3.45)]
+        prepared = prepare_compacted_clip(
+            self.source, words, 4.0, self.workspace, min_duration_s=1.0
+        )
+        self.assertIsNotNone(prepared)
+        assert prepared is not None
+        path, remapped, duration = prepared
+        self.assertTrue(path.exists())
+        self.assertAlmostEqual(duration, 1.86, places=2)
+        self.assertEqual(len(remapped), 2)
+        self.assertAlmostEqual(remapped[0][0], 0.5, places=2)
+        self.assertAlmostEqual(remapped[1][0], 1.06, places=2)
+        self.assertAlmostEqual(remapped[1][1], 1.31, places=2)
+        # The rendered clip must fit the contract floor and the cut plan.
+        self.assertGreaterEqual(duration, 1.0)
+
+    def test_no_cut_needed_returns_none(self):
+        from src.jump_cutter import prepare_compacted_clip
+
+        prepared = prepare_compacted_clip(
+            self.source, [(0.0, 3.9)], 4.0, self.workspace, min_duration_s=1.0
+        )
+        self.assertIsNone(prepared)
+
+    def test_floor_guard_returns_none(self):
+        from src.jump_cutter import prepare_compacted_clip
+
+        prepared = prepare_compacted_clip(
+            self.source, [(0.5, 0.9), (3.2, 3.45)], 4.0, self.workspace
+        )
+        self.assertIsNone(prepared, "4s clip cannot afford cuts under the 30s floor")
+
+
 if __name__ == "__main__":
     unittest.main()
