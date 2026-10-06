@@ -77,6 +77,7 @@ class TestDownloaderClassification(unittest.TestCase):
     def test_download_segment_via_apify_integer_timestamps_and_offset(self):
         from unittest.mock import MagicMock
         from src.downloader import download_segment_via_apify
+        from src.preflight import PreflightReport
         import tempfile
 
         fake_start_response = MagicMock()
@@ -97,7 +98,8 @@ class TestDownloaderClassification(unittest.TestCase):
             with patch("requests.post", return_value=fake_start_response) as mock_post, \
                  patch("requests.get", side_effect=[fake_poll_response, fake_stream_response]), \
                  patch("src.downloader.get_video_height", return_value=1080), \
-                 patch("src.downloader.get_video_duration", return_value=30.6):
+                 patch("src.downloader.get_video_duration", return_value=30.6), \
+                 patch("src.preflight.preflight_source", return_value=PreflightReport(ok=True)):
                 result = download_segment_via_apify(
                     video_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
                     output_dir=out_dir,
