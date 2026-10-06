@@ -7,6 +7,7 @@ from src.config import (
     ENABLE_TOP_HOOK_BADGE, HOOK_BADGE_MARGIN_V,
     get_subtitle_margin_v
 )
+from src.caption_emphasis import is_emphasis_word
 from src.creative_spec import (
     MAX_WORDS_PER_CAPTION, MAX_WORDS_PER_CAPTION_FAST_SPEECH, FAST_SPEECH_WPM_THRESHOLD,
     HOOK_BADGE_DURATION_S, hex_to_ass_color,
@@ -291,10 +292,20 @@ def create_styled_ass_subtitles(
         w_end = chunk[-1].end
         animation_end_ms = max(70, min(140, int(round((w_end - w_start) * 1000))))
         animation_mid_ms = max(35, animation_end_ms // 2)
-        word_elements = [
-            f"{{\\c{word_color(word)}}}{escape_ass_text(word.word)}"
-            for word in chunk
-        ]
+        # P3 emphasis: the emphasised word (money, numbers, power words) pops
+        # harder than the chunk-wide pulse - 112% settling over 9cs - while
+        # the keyword colouring above stays as it was.
+        def _word_element(word: WordTimestamp) -> str:
+            # Kept as a separate override group so the colour override string
+            # is byte-identical to before for every word.
+            pop = (
+                r"{\fscx112\fscy112\t(0,90,\fscx100\fscy100)}"
+                if is_emphasis_word(word.word)
+                else ""
+            )
+            return f"{pop}{{\\c{word_color(word)}}}{escape_ass_text(word.word)}"
+
+        word_elements = [_word_element(word) for word in chunk]
         dialogue_text = " ".join(word_elements)
         animation_prefix = (
             f"{{\\fad(0,100)\\bord3\\shad2"
