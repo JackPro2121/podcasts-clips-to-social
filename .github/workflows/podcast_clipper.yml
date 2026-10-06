@@ -233,7 +233,10 @@ jobs:
           COBALT_API_URL: ${{ secrets.COBALT_API_URL || 'https://api.cobalt.tools' }}
           APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
           APIFY_SEGMENT_ACTOR_ID: ${{ vars.APIFY_SEGMENT_ACTOR_ID || 'vidkraken/youtube-video-audio-downloader-reliable' }}
-          APIFY_TRANSCRIPT_ACTOR_ID: ${{ vars.APIFY_TRANSCRIPT_ACTOR_ID || 'om_kh/video-transcript-api' }}
+          # Verified live 2026-10-05 (pin to the revived actor; the old
+          # om_kh/video-transcript-api default is dead and silently forced the
+          # Whisper probe fallback whenever the repo variable was unset).
+          APIFY_TRANSCRIPT_ACTOR_ID: ${{ vars.APIFY_TRANSCRIPT_ACTOR_ID || 'pintostudio/youtube-transcript-scraper' }}
           CLIP_ONLY_MODE: 'true'
           MAX_CLIP_DURATION: '50'
           SHORT_FORM_MAX_DURATION: '55'
