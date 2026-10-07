@@ -133,12 +133,17 @@ def build_cut_plan(
     )
 
 
-def build_concat_filtergraph(plan: CutPlan) -> str:
+def build_concat_filtergraph(plan: CutPlan, source_offset_s: float = 0.0) -> str:
     """A ``filter_complex`` graph that compacts input 0 into ``[outv][outa]``.
 
     One trim/atrim per keep-segment, joined by ``concat``: this is the ffmpeg
     standard for jump cuts (research: TimeBolt/SavvyCut). Raises on an empty
     plan so a caller can never render a silent black clip by accident.
+
+    ``source_offset_s`` shifts the keep-segments into the source file's own
+    timeline: the render path's plan is clip-relative (0 = clip start) while
+    the downloaded segment file begins at its own start, so the adoption
+    passes the segment-relative clip window here.
     """
     if not plan.keep_segments:
         raise ValueError("cannot build a concat graph from an empty cut plan")
@@ -146,11 +151,13 @@ def build_concat_filtergraph(plan: CutPlan) -> str:
     audio_parts: List[str] = []
     pairs: List[str] = []
     for index, (start, end) in enumerate(plan.keep_segments):
+        file_start = start + float(source_offset_s)
+        file_end = end + float(source_offset_s)
         video_parts.append(
-            f"[0:v]trim=start={start:.3f}:end={end:.3f},setpts=PTS-STARTPTS[v{index}]"
+            f"[0:v]trim=start={file_start:.3f}:end={file_end:.3f},setpts=PTS-STARTPTS[v{index}]"
         )
         audio_parts.append(
-            f"[0:a]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS[a{index}]"
+            f"[0:a]atrim=start={file_start:.3f}:end={file_end:.3f},asetpts=PTS-STARTPTS[a{index}]"
         )
         pairs.append(f"[v{index}][a{index}]")
     concat = (
@@ -165,6 +172,7 @@ def compact_media(
     destination_path: Union[str, Path],
     crf: int = 18,
     preset: str = "fast",
+    source_offset_s: float = 0.0,
 ) -> bool:
     """Physically apply the cut plan to a media file.
 
@@ -177,7 +185,7 @@ def compact_media(
         return False
     source = Path(source_path)
     destination = Path(destination_path)
-    graph = build_concat_filtergraph(plan)
+    graph = build_concat_filtergraph(plan, source_offset_s=source_offset_s)
     result = subprocess.run(
         [
             "ffmpeg", "-y", "-v", "error",
@@ -208,6 +216,7 @@ def prepare_compacted_clip(
     clip_duration_s: float,
     work_dir: Union[str, Path],
     min_duration_s: float = MIN_RESULT_DURATION_S,
+    source_offset_s: float = 0.0,
 ) -> "tuple[Path, List[Tuple[float, float]], float] | None":
     """Everything the render path needs to adopt a jump-cut in one call.
 
@@ -225,7 +234,7 @@ def prepare_compacted_clip(
         Path(work_dir)
         / f"{Path(source_path).stem}_compacted_{int(plan.removed_s * 1000)}ms.mp4"
     )
-    if not compact_media(source_path, plan, destination):
+    if not compact_media(source_path, plan, destination, source_offset_s=source_offset_s):
         return None
     remapped = [(plan.remap(start), plan.remap(end)) for start, end in words]
     return destination, remapped, plan.duration_s

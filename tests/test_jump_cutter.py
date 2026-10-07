@@ -156,6 +156,21 @@ class TestCompactMedia(unittest.TestCase):
             centres.append((run_start + len(active) - 1) / 2 * 0.02)
         return centres
 
+    def test_source_offset_shifts_the_window_into_the_file(self):
+        # Same file, but the clip window starts 0.5s in: clip-relative words
+        # (0.0-0.4) and (2.7-2.95) must compact the FILE's 0.5-0.9 and
+        # 3.2-3.45 bursts, landing at remap() positions in the output.
+        from src.jump_cutter import compact_media
+
+        plan = build_cut_plan([(0.0, 0.4), (2.7, 2.95)], 3.5, min_duration_s=1.0)
+        self.assertTrue(plan.applied)
+        output = self.workspace / "compact_offset.mp4"
+        self.assertTrue(compact_media(self.source, plan, output, source_offset_s=0.5))
+        centres = self._burst_centres(output)
+        self.assertEqual(len(centres), 2, f"expected two bursts, got {centres}")
+        self.assertAlmostEqual(centres[0], plan.remap(0.2), delta=0.12)
+        self.assertAlmostEqual(centres[1], plan.remap(2.825), delta=0.12)
+
     def test_compacted_media_places_every_burst_at_its_remapped_time(self):
         from src.jump_cutter import compact_media
 
