@@ -246,8 +246,7 @@ def shot_speaker_targets(
         if not positions:
             results.append(None)
             continue
-        positions_array = positions
-        mean_x_analysis = sum(positions_array) / len(positions_array)
+        mean_x_analysis = sum(positions) / len(positions)
         mean_x_source = mean_x_analysis * source_size[0] / analysis_width
         boxes = (
             face_boxes_per_shot[shot_index]
@@ -255,7 +254,11 @@ def shot_speaker_targets(
             else []
         )
         if not boxes:
-            results.append(None)
+            # The planner's face boxes are often absent (run 37466588808 had
+            # zero of them on every shot, which silently disabled this whole
+            # fix). The talker track's own position IS a face centre - use it
+            # directly rather than giving up.
+            results.append(mean_x_source)
             continue
         best_centre = min(
             boxes,

@@ -754,18 +754,23 @@ def _apply_speaker_crop_targets(
             shot_speaker_targets,
             track_mouth_motion_with_positions,
         )
-    except ImportError:  # pragma: no cover - defensive
+    except ImportError as import_error:  # pragma: no cover - defensive
+        print(f"[!] ASD speaker targeting unavailable: {import_error}")
         return
-    if not framing.shots or not any(
-        getattr(shot, "face_boxes", None) for shot in framing.shots
-    ):
+    if not framing.shots:
         return
+    # No face_boxes requirement: the analysis detects its own faces and the
+    # talker track's position is the crop target. Run 37466588808 silently
+    # skipped this entire fix because the planner attached no face boxes to
+    # any shot - silent skips hide the feature from CI evidence.
     try:
         tracks = track_mouth_motion_with_positions(source_video_path, fps=10)
         if not tracks:
+            print("[*] ASD: no face tracks found; keeping the planned crop.")
             return
         envelope = _audio_envelope(source_video_path, 10)
         if not envelope:
+            print("[*] ASD: audio envelope unavailable; keeping the planned crop.")
             return
         spans = [
             (shot.start + effective_start, shot.end + effective_start)

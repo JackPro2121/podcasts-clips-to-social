@@ -127,14 +127,19 @@ class TestShotSpeakerTargets(unittest.TestCase):
         )
         self.assertIsNone(targets[0])
 
-    def test_absent_face_boxes_leave_the_shot_alone(self):
+    def test_absent_face_boxes_fall_back_to_the_talker_position(self):
+        # Run 37466588808 had zero face boxes on every shot; giving up there
+        # silently disabled the whole fix. The talker track's own position is
+        # a face centre: x=200 in the 480-wide analysis maps to 800 in 1920.
         envelope = _positive(40, 25)
         talker = _follower(envelope, 26)
         tracks = [self._track(talker, [200.0] * 40)]
         targets = shot_speaker_targets(
             tracks, envelope, [(0.0, 4.0)], [[]], (1920, 1080), 10.0
         )
-        self.assertIsNone(targets[0])
+        self.assertIsNotNone(targets[0])
+        assert targets[0] is not None
+        self.assertAlmostEqual(targets[0], 800.0, delta=1.0)
 
     def test_vote_is_confidence_weighted_across_windows(self):
         fps = 10.0
