@@ -67,6 +67,8 @@ class BufferClient:
                     ch_items = ch_res.json().get("data", {}).get("channels", [])
                     for ch in ch_items:
                         ch["organizationName"] = org.get("name")
+                        # The posts query needs the owning organization id.
+                        ch["organizationId"] = org_id
                         channels.append(ch)
                 else:
                     self.last_error = f"Buffer channels query failed for organization {org_id}: {ch_res.status_code}"
@@ -91,19 +93,29 @@ class BufferClient:
             return {}
         active_urls = {}
 
-        # We need to iterate through channels to get posts
-        # Since listPosts is per channel in Buffer's GraphQL typically, or can be filtered
+        # Buffer's current schema requires the owning organization on the posts
+        # input and exposes the video URL as VideoAsset.source. The previous
+        # query (channelId + assets.video.url) fails GraphQL validation, and
+        # because the failure is silent the cleaner used to read "0 active
+        # posts" while posts were scheduled - risking deletion of releases the
+        # queue still references (run 37466588808). Verified live 2026-10-06:
+        # this query returns each channel's scheduled/sent posts.
         for ch in connected:
             channel_id = ch["id"]
+            organization_id = ch.get("organizationId")
+            if not organization_id:
+                self.last_error = f"Channel {channel_id} has no organization id"
+                print(f"[-] {self.last_error}")
+                return {}
             query = """
-            query ListPosts($channelId: ID!) {
-              posts(input: { channelId: $channelId }) {
+            query ListPosts($organizationId: OrganizationId!, $channelIds: [ChannelId!]) {
+              posts(input: {organizationId: $organizationId, filter: {channelIds: $channelIds}}) {
                 edges {
                   node {
                     status
                     assets {
-                      video {
-                        url
+                      ... on VideoAsset {
+                        source
                       }
                     }
                   }
@@ -115,25 +127,31 @@ class BufferClient:
                 res = requests.post(
                     BUFFER_GRAPHQL_ENDPOINT,
                     headers=self.headers,
-                    json={"query": query, "variables": {"channelId": channel_id}},
+                    json={
+                        "query": query,
+                        "variables": {
+                            "organizationId": organization_id,
+                            "channelIds": [channel_id],
+                        },
+                    },
                     timeout=20
                 )
-                if res.status_code == 200:
-                    data = res.json().get("data", {}).get("posts", {}).get("edges", [])
-                    for edge in data:
-                        node = edge.get("node", {})
-                        status = node.get("status")
-                        assets = node.get("assets", [])
-                        
-                        # Only care about posts that aren't sent yet
-                        if status != "sent":
-                            for asset in assets:
-                                video = asset.get("video")
-                                if video and video.get("url"):
-                                    active_urls[video["url"]] = status
-                if res.status_code != 200:
-                    self.last_error = f"Buffer posts query failed for channel {channel_id}: {res.status_code}"
+                body = res.json() if res.status_code == 200 else {}
+                if res.status_code != 200 or body.get("errors"):
+                    detail = body.get("errors") or res.text[:200]
+                    self.last_error = f"Buffer posts query failed for channel {channel_id}: {detail}"
                     print(f"[-] {self.last_error}")
+                    continue
+                for edge in body.get("data", {}).get("posts", {}).get("edges", []):
+                    node = edge.get("node", {})
+                    status = node.get("status")
+                    # Only care about posts that aren't sent yet.
+                    if status == "sent":
+                        continue
+                    for asset in node.get("assets", []):
+                        source = asset.get("source")
+                        if source:
+                            active_urls[source] = status
             except Exception as e:
                 self.last_error = f"Error fetching posts for channel {channel_id}: {e}"
                 print(f"[-] {self.last_error}")
@@ -347,10 +365,20 @@ class BufferClient:
                             print(f"[-] Buffer cannot read URL yet: {error_msg}. Retrying...")
                             attempt += 1
                             continue
+                        # The free plan caps scheduled posts per channel (10).
+                        # A full channel is an external limit, not a publish
+                        # failure: mark it so the caller can host the clip and
+                        # move on without failing the run (run 37466588808).
+                        if "scheduled post" in error_msg.lower() and "limit" in error_msg.lower():
+                            print(
+                                f"[!] Buffer channel {channel_id} is at its scheduled-post "
+                                f"limit; skipping it this run."
+                            )
+                            results.append({"channel_id": channel_id, "limited": True})
                         else:
                             print(f"[-] Buffer rejected post on {channel_id}: {error_msg}")
                             results.append({"channel_id": channel_id, "status_code": res.status_code, "response": res_data})
-                            break
+                        break
                 except Exception as e:
                     print(f"[-] Request error posting to Buffer channel {channel_id}: {e}")
                     if attempt < max_retries:

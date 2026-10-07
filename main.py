@@ -1813,14 +1813,29 @@ def run_pipeline(
                     for result in schedule_results
                     if (((result.get("response") or {}).get("data") or {}).get("createPost") or {}).get("post")
                 )
-                if schedule_results and successful_posts == len(schedule_results):
+                # A channel at its scheduled-post limit is an external cap,
+                # not a publish failure: post what fits and keep the run green
+                # (run 37466588808 failed only because the free plan allows 10
+                # scheduled posts per channel).
+                limit_skips = sum(1 for result in schedule_results if result.get("limited"))
+                attempted_posts = len(schedule_results) - limit_skips
+                if limit_skips and attempted_posts == 0:
+                    buffer_status = "Channel Full"
+                    print(
+                        f"[!] Every Buffer channel for clip #{idx} is at its "
+                        "scheduled-post limit; the clip is hosted and can be "
+                        "posted by a later run."
+                    )
+                elif attempted_posts and successful_posts == attempted_posts:
                     buffer_status = "Scheduled"
                 elif successful_posts:
                     buffer_status = "Partial"
                     publish_failed = True
-                else:
+                elif attempted_posts:
                     buffer_status = "Failed"
                     publish_failed = True
+                else:
+                    buffer_status = "Channel Full"
         elif post_to_buffer and not direct_url:
             print("[-] Cannot post to Buffer because direct video URL is not available.")
             buffer_status = "No URL"
