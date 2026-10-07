@@ -28,6 +28,26 @@ HOOK_MAX_LEAD_IN_S = 1.6
 HOOK_LINE_MAX_CHARS = 42
 
 
+# The pixel verdict's duration contract is 30-55s. A hook lead-in extends the
+# clip backwards, so keep headroom below the ceiling rather than discover the
+# overage at the verdict.
+HOOK_MAX_CLIP_S = 53.5
+
+
+def can_extend_with_lead_in(
+    clip_duration_s: float, lead_in_s: float, max_clip_s: float = HOOK_MAX_CLIP_S
+) -> bool:
+    """True when the lead-in keeps the clip inside the duration contract.
+
+    The call-site refuses the lead-in otherwise - a hook is never worth a
+    duration block (the render window, caption base and shadow window all move
+    together by exactly ``lead_in_s``).
+    """
+    if lead_in_s <= 0.0:
+        return True
+    return float(clip_duration_s) + float(lead_in_s) <= float(max_clip_s)
+
+
 @dataclass
 class HookPlan:
     start_s: float = 0.0

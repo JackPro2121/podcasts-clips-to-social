@@ -92,5 +92,24 @@ class TestBuildHookPlan(unittest.TestCase):
         self.assertEqual(plan.first_line, "Listen.")
 
 
+class TestLeadInGuard(unittest.TestCase):
+    def test_lead_in_inside_the_contract_is_allowed(self):
+        from src.hook_engine import can_extend_with_lead_in
+
+        self.assertTrue(can_extend_with_lead_in(42.0, 1.4))
+        self.assertTrue(can_extend_with_lead_in(53.5, 0.0))
+
+    def test_lead_in_that_breaks_the_ceiling_is_refused(self):
+        from src.hook_engine import can_extend_with_lead_in
+
+        self.assertFalse(can_extend_with_lead_in(53.0, 1.4))
+        self.assertFalse(can_extend_with_lead_in(55.0, 0.5))
+
+    def test_zero_lead_in_is_always_fine(self):
+        from src.hook_engine import can_extend_with_lead_in
+
+        self.assertTrue(can_extend_with_lead_in(55.0, 0.0))
+
+
 if __name__ == "__main__":
     unittest.main()
