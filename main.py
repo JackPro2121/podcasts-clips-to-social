@@ -1074,7 +1074,39 @@ def run_pipeline(
                     print(f"[-] Skipping non-English clip #{idx}: {language_error}")
                     continue
 
-            render_start = float(clip_info.get("segment_start", 0.0))
+            # P2 hook lead-in: start the clip on the spoken word before the
+            # moment (research: 50-60% of viewers drop off in the first 3s).
+            # The render window, the caption base and the shadow window all
+            # move together by hook_lead_in; the guard refuses any lead-in
+            # that would push the clip past the duration contract.
+            hook_lead_in = 0.0
+            hook_abs_start = moment.start_time
+            try:
+                from src.hook_engine import build_hook_plan, can_extend_with_lead_in
+
+                preceding = []
+                moment_words = []
+                for segment in segments or []:
+                    for word in getattr(segment, "words", []) or []:
+                        if word.end <= moment.start_time:
+                            preceding.append((word.word, word.start, word.end))
+                        elif moment.start_time <= word.start <= moment.end_time:
+                            moment_words.append((word.word, word.start, word.end))
+                hook_plan = build_hook_plan(preceding[-4:], moment_words, moment.start_time)
+                if hook_plan.lead_in_s > 0 and can_extend_with_lead_in(
+                    moment.end_time - moment.start_time, hook_plan.lead_in_s
+                ):
+                    hook_lead_in = hook_plan.lead_in_s
+                    hook_abs_start = hook_plan.start_s
+                    clip_duration += hook_lead_in
+                    print(
+                        f"[*] Hook lead-in for clip #{idx}: starting "
+                        f"{hook_lead_in:.2f}s early (\"{hook_plan.first_line}\")."
+                    )
+            except Exception as hook_error:
+                print(f"[!] Hook lead-in skipped for clip #{idx}: {hook_error}")
+
+            render_start = float(clip_info.get("segment_start", 0.0)) - hook_lead_in
             render_end = render_start + clip_duration
             downloaded_duration = get_video_duration(Path(clip_path))
             if downloaded_duration > 0 and downloaded_duration + 0.5 < render_end:
@@ -1097,7 +1129,7 @@ def run_pipeline(
                 state_store=state_store,
                 video_path=Path(clip_path),
                 segments=clip_segments,
-                clip_start=moment.start_time,
+                clip_start=hook_abs_start,
                 clip_end=moment.end_time,
                 clip_index=idx,
             )
@@ -1167,11 +1199,11 @@ def run_pipeline(
                 clip_words = []
                 for s in clip_segments:
                     for w in getattr(s, "words", []):
-                        if moment.start_time <= w.start <= moment.end_time:
+                        if hook_abs_start <= w.start <= moment.end_time:
                             clip_words.append(WordTimestamp(
                                 word=w.word,
-                                start=w.start - moment.start_time,
-                                end=w.end - moment.start_time,
+                                start=w.start - hook_abs_start,
+                                end=w.end - hook_abs_start,
                             ))
                 if clip_words:
                     broll_cues = find_broll_cues_for_clip(clip_words, clip_duration=clip_duration)
@@ -1221,7 +1253,7 @@ def run_pipeline(
                     if placements is not None and burn_subtitles and ass_path is not None and ass_path.exists():
                         create_styled_ass_subtitles(
                             segments=clip_segments,
-                            clip_start=moment.start_time,
+                            clip_start=hook_abs_start,
                             clip_end=moment.end_time,
                             output_ass_path=ass_path,
                             theme_key=subtitle_style,
