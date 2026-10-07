@@ -1108,6 +1108,52 @@ def run_pipeline(
 
             render_start = float(clip_info.get("segment_start", 0.0)) - hook_lead_in
             render_end = render_start + clip_duration
+
+            # P1 jump-cut: remove dead air from the segment before any render
+            # spends time on it. Words are remapped onto the compacted
+            # timeline at the clip_segments step below; the render then runs
+            # from 0 over the compacted file. Guards: the plan refuses cuts
+            # under the 30s floor, and every failure prints and continues.
+            p1_plan = None
+            try:
+                from src.jump_cutter import build_cut_plan, prepare_compacted_clip
+
+                p1_words = []
+                for segment in segments or []:
+                    for word in getattr(segment, "words", []) or []:
+                        if hook_abs_start <= word.start <= moment.end_time:
+                            p1_words.append(
+                                (word.start - hook_abs_start, word.end - hook_abs_start)
+                            )
+                p1_plan = build_cut_plan(p1_words, clip_duration)
+                if p1_plan.applied:
+                    prepared = prepare_compacted_clip(
+                        clip_path,
+                        p1_words,
+                        clip_duration,
+                        Path(clip_path).parent,
+                        source_offset_s=render_start,
+                    )
+                    if prepared:
+                        compacted_path, _remapped_words, new_duration = prepared
+                        clip_path = compacted_path
+                        clip_duration = new_duration
+                        render_start = 0.0
+                        render_end = clip_duration
+                        print(
+                            f"[*] Jump-cut for clip #{idx}: removed "
+                            f"{p1_plan.removed_s:.2f}s of dead air "
+                            f"({len(p1_plan.keep_segments)} kept segments; "
+                            f"clip now {clip_duration:.2f}s)."
+                        )
+                    else:
+                        p1_plan = None
+                else:
+                    p1_plan = None
+            except Exception as jump_error:
+                p1_plan = None
+                print(f"[!] Jump-cut skipped for clip #{idx}: {jump_error}")
+
             downloaded_duration = get_video_duration(Path(clip_path))
             if downloaded_duration > 0 and downloaded_duration + 0.5 < render_end:
                 print(f"[-] Downloaded segment #{idx} is short ({downloaded_duration:.2f}s < {render_end:.2f}s). Skipping before render.")
@@ -1124,13 +1170,43 @@ def run_pipeline(
             burn_subtitles = subtitles_mode in ("auto", "burn")
             ass_path = None
             clip_segments: List[TranscriptSegment] = segments or []
+            if p1_plan is not None:
+                # Move every word onto the compacted virtual timeline so the
+                # shadow, the captions, broll and choreography all share the
+                # rendered file's clock. Anything unbuildable keeps the
+                # original segment (worst case is the pre-jump-cut timing).
+                remapped_segments: List[TranscriptSegment] = []
+                for segment in clip_segments:
+                    try:
+                        new_words = [
+                            WordTimestamp(
+                                word=word.word,
+                                start=hook_abs_start
+                                + p1_plan.remap(word.start - hook_abs_start),
+                                end=hook_abs_start
+                                + p1_plan.remap(word.end - hook_abs_start),
+                                is_estimated=getattr(word, "is_estimated", False),
+                            )
+                            for word in (getattr(segment, "words", []) or [])
+                        ]
+                        remapped_segments.append(
+                            TranscriptSegment(
+                                start=hook_abs_start,
+                                end=hook_abs_start + clip_duration,
+                                text=segment.text,
+                                words=new_words,
+                            )
+                        )
+                    except Exception:
+                        remapped_segments.append(segment)
+                clip_segments = remapped_segments
             editor_artifacts = _build_universal_shadow(
                 run_id=run_id,
                 state_store=state_store,
                 video_path=Path(clip_path),
                 segments=clip_segments,
                 clip_start=hook_abs_start,
-                clip_end=moment.end_time,
+                clip_end=hook_abs_start + clip_duration,
                 clip_index=idx,
             )
             if burn_subtitles and segments:
@@ -1199,7 +1275,7 @@ def run_pipeline(
                 clip_words = []
                 for s in clip_segments:
                     for w in getattr(s, "words", []):
-                        if hook_abs_start <= w.start <= moment.end_time:
+                        if hook_abs_start <= w.start <= hook_abs_start + clip_duration:
                             clip_words.append(WordTimestamp(
                                 word=w.word,
                                 start=w.start - hook_abs_start,
@@ -1254,7 +1330,7 @@ def run_pipeline(
                         create_styled_ass_subtitles(
                             segments=clip_segments,
                             clip_start=hook_abs_start,
-                            clip_end=moment.end_time,
+                            clip_end=hook_abs_start + clip_duration,
                             output_ass_path=ass_path,
                             theme_key=subtitle_style,
                             layout_mode=framing.mode,
