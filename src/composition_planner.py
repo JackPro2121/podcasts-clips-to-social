@@ -379,9 +379,11 @@ def _force_collision_avoidance(
 
     candidates = [shot.caption_anchor] + [
         name
-        for name in ("lower_center", "upper_center", "center", "left_safe", "right_safe")
+        for name in ("lower_center", "center", "left_safe", "right_safe")
         if name != shot.caption_anchor
     ]
+    if not shot.face_regions and getattr(shot, "face_count", 0.0) < 1.0 and "upper_center" not in candidates:
+        candidates.append("upper_center")
     best_anchor = shot.caption_anchor
     best_rect = rect
     best_score = score(rect)

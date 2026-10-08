@@ -78,6 +78,7 @@ src/models/*.model
 # ship the weights or drop the branch; do not leave it looking enabled.
 analysis_*/
 test_*.ass
+audit_inspection/
 
 # Local virtualenv. Created by:
 #   C:\...\uv\python\cpython-3.11.15-...\python.exe -m venv .venv

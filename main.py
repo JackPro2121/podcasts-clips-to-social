@@ -231,7 +231,14 @@ def _enrich_backfill_metadata(
             )
         except Exception as error:
             print(f"[!] Backfill metadata call failed: {error}")
-            continue
+            raw = None
+        if not raw:
+            from src.config import GROQ_API_KEY, OPENROUTER_API_KEY
+            from src.viral_detector import query_groq_free_models, query_openrouter_free_models
+            if GROQ_API_KEY:
+                raw = query_groq_free_models(prompt, GROQ_API_KEY)
+            if not raw and OPENROUTER_API_KEY:
+                raw = query_openrouter_free_models(prompt, OPENROUTER_API_KEY)
         if not raw:
             continue
         try:
@@ -1136,6 +1143,23 @@ def run_pipeline(
             render_start = segment_start - hook_lead_in
             render_end = render_start + clip_duration
 
+            clip_segments: List[TranscriptSegment] = segments or []
+            if segments:
+                try:
+                    aligned_segments = align_clip_transcript(
+                        clip_path=Path(clip_path),
+                        render_start=render_start,
+                        output_start=hook_abs_start,
+                        output_end=hook_abs_start + clip_duration,
+                        fallback_segments=segments,
+                        model_size="base.en",
+                    )
+                    if aligned_segments is not segments:
+                        print(f"[+] Local Whisper alignment refreshed clip #{idx} caption timing.")
+                    clip_segments = aligned_segments
+                except Exception as alignment_error:
+                    print(f"[!] Local caption alignment unavailable for clip #{idx}: {alignment_error}")
+
             # P1 jump-cut: remove dead air from the segment before any render
             # spends time on it. Words are remapped onto the compacted
             # timeline at the clip_segments step below; the render then runs
@@ -1150,9 +1174,9 @@ def run_pipeline(
                 )
 
                 p1_words = []
-                for segment in segments or []:
+                for segment in clip_segments:
                     for word in getattr(segment, "words", []) or []:
-                        if hook_abs_start <= word.start <= moment.end_time:
+                        if hook_abs_start <= word.start <= hook_abs_start + clip_duration:
                             p1_words.append(
                                 (word.start - hook_abs_start, word.end - hook_abs_start)
                             )
@@ -1213,7 +1237,6 @@ def run_pipeline(
 
             burn_subtitles = subtitles_mode in ("auto", "burn")
             ass_path = None
-            clip_segments: List[TranscriptSegment] = segments or []
             if p1_plan is not None:
                 # Move every word onto the compacted virtual timeline so the
                 # shadow, the captions, broll and choreography all share the
@@ -1254,36 +1277,22 @@ def run_pipeline(
                 clip_index=idx,
             )
             if burn_subtitles and segments:
-                try:
-                    aligned_segments = align_clip_transcript(
-                        clip_path=Path(clip_path),
-                        render_start=render_start,
-                        output_start=moment.start_time,
-                        output_end=moment.end_time,
-                        fallback_segments=segments,
-                        model_size="base.en",
-                    )
-                    if aligned_segments is not segments:
-                        print(f"[+] Local Whisper alignment refreshed clip #{idx} caption timing.")
-                    clip_segments = aligned_segments
-                except Exception as alignment_error:
-                    print(f"[!] Local caption alignment unavailable for clip #{idx}: {alignment_error}")
                 framing, _director_review = _apply_director_v2(
                     run_id=run_id,
                     state_store=state_store,
                     clip_index=idx,
                     video_path=Path(clip_path),
                     segments=clip_segments,
-                    clip_start=moment.start_time,
-                    clip_end=moment.end_time,
+                    clip_start=hook_abs_start,
+                    clip_end=hook_abs_start + clip_duration,
                     framing=framing,
                     artifacts=editor_artifacts,
                 )
                 ass_path = SUBTITLES_DIR / f"clip_{idx}_{subtitle_style}.ass"
                 create_styled_ass_subtitles(
                     segments=clip_segments,
-                    clip_start=moment.start_time,
-                    clip_end=moment.end_time,
+                    clip_start=hook_abs_start,
+                    clip_end=hook_abs_start + clip_duration,
                     output_ass_path=ass_path,
                     theme_key=subtitle_style,
                     layout_mode=framing.mode,

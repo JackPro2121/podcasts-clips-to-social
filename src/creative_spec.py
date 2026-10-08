@@ -94,7 +94,7 @@ SAFE_ZONE_RIGHT_PX = 120      # 11.1% -- like, comment, bookmark, share
 # The code is what is actually published, so it is what is recorded here, and the
 # clause is amended to match rather than the other way round.
 HIGHLIGHT_YELLOW = "#FFE600"
-HIGHLIGHT_NEON_GREEN = "#22FF33"   # exact match for the clause
+HIGHLIGHT_NEON_GREEN = "#39FF14"   # Ultra-vibrant high-contrast electric lime
 DANGER_RED = "#FF3333"
 POWER_GOLD = "#FFD700"
 BODY_WHITE = "#FFFFFF"

@@ -308,7 +308,7 @@ def create_styled_ass_subtitles(
         word_elements = [_word_element(word) for word in chunk]
         dialogue_text = " ".join(word_elements)
         animation_prefix = (
-            f"{{\\fad(0,100)\\bord3\\shad2"
+            f"{{\\fad(0,100)\\bord4\\shad2.5"
             f"\\t(0,{animation_mid_ms},\\fscx118\\fscy118)"
             f"\\t({animation_mid_ms},{animation_end_ms},\\fscx100\\fscy100)}}"
         )

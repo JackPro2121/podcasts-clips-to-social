@@ -553,6 +553,12 @@ def _persistent_caption_rows(
     return keep
 
 
+# Minimum outlined pixels in a 640x360 frame to count as a caption line.
+# Prevents specular reflections, studio lights, and background filaments
+# (3-15px) on frames without captions from reading as 100% on-face.
+MIN_CAPTION_FRAME_PIXELS = 35
+
+
 def measure_on_face(
     path: Path,
     avoid_rects: Sequence[Rect],
@@ -595,7 +601,7 @@ def measure_on_face(
         if keep_rows is not None:
             mask = mask & keep_rows[:, None]
         total = int(mask.sum())
-        if total == 0:
+        if total < MIN_CAPTION_FRAME_PIXELS:
             continue
         measured += 1
         inside = np.zeros(mask.shape, dtype=bool)

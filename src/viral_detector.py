@@ -655,13 +655,40 @@ def fallback_rule_based_detector(segments: List[TranscriptSegment], num_clips: i
             if s.end >= start_t and s.start <= end_t:
                 chunk_words.extend(s.text.split())
         
-        # Derive a punchy 4-7 word title from the opening statement, ignoring filler words
-        filler_words = {"um", "uh", "like", "so", "you", "know", "mean", "for", "me", "but", "and", "yeah", "well", "actually", "basically", "right", "okay", "just", "the", "a", "an", "to", "in", "it"}
-        content_words = [re.sub(r'[^\w\s]', '', w) for w in chunk_words[:25] if len(w) > 2 and w.lower() not in filler_words]
-        if len(content_words) >= 3:
-            derived_title = " ".join(content_words[:5]).upper()
-        else:
-            derived_title = f"POWERFUL PODCAST INSIGHT #{i+1}"
+        # Derive a punchy, grammatically sensible title from the opening statement
+        stop_words = {
+            "um", "uh", "like", "so", "you", "know", "mean", "for", "me", "but", "and", "yeah",
+            "well", "actually", "basically", "right", "okay", "just", "the", "a", "an", "to", "in",
+            "it", "did", "do", "does", "done", "was", "were", "is", "am", "are", "be", "been",
+            "being", "have", "has", "had", "they", "them", "their", "this", "that", "these",
+            "those", "what", "how", "why", "who", "when", "where", "which", "want", "wanted",
+            "wants", "got", "get", "gets", "say", "said", "would", "could", "should", "some",
+            "any", "not", "too", "also", "with", "from", "at", "by", "on", "as", "if"
+        }
+        raw_sentence = " ".join(chunk_words[:25])
+        clean_content = [
+            re.sub(r'[^\w\s]', '', w)
+            for w in chunk_words[:30]
+            if len(w) > 2 and w.lower() not in stop_words
+        ]
+
+        derived_title = ""
+        first_sentence = re.split(r"[.!?]", raw_sentence)[0].strip()
+        first_words = [w for w in first_sentence.split() if w.lower() not in {"um", "uh", "like", "so"}]
+        if 3 <= len(first_words) <= 6:
+            candidate_hook = " ".join(first_words).upper()
+            if len(candidate_hook) <= 45:
+                derived_title = re.sub(r'[^\w\s]', '', candidate_hook).strip()
+
+        if not derived_title and len(clean_content) >= 2:
+            key_phrase = " ".join(clean_content[:3]).upper()
+            derived_title = f"THE TRUTH ABOUT {key_phrase}"
+            if len(derived_title) > 42:
+                derived_title = f"{key_phrase} STRATEGY"
+
+        if not derived_title:
+            niche_clean = profile.get("focus", "PODCAST").split()[0].upper()
+            derived_title = f"POWERFUL {niche_clean} INSIGHT #{i+1}"
         
         dur = round(end_t - start_t, 1)
 

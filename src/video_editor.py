@@ -1111,6 +1111,8 @@ def render_viral_clip(
         else:
             os.replace(temp_output, output_clip_path)
 
+        _harmonise_stream_durations(output_clip_path)
+
         metadata = {
             "framing_mode": framing.mode,
             "source_duration": source_duration,
