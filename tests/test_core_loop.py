@@ -121,6 +121,49 @@ class TestDownloaderClassification(unittest.TestCase):
                 self.assertAlmostEqual(result["segment_start"], 0.4, places=2)
                 self.assertEqual(result["height"], 1080)
 
+    def test_segment_start_anchors_on_the_moment_when_pre_roll_is_requested(self):
+        from unittest.mock import MagicMock, patch
+        from src.downloader import download_segment_via_apify
+        from src.preflight import PreflightReport
+        import tempfile
+
+        fake_start_response = MagicMock()
+        fake_start_response.status_code = 201
+        fake_start_response.json.return_value = [{"output": {"pollUrl": "https://api.apify.com/poll/123"}}]
+
+        fake_poll_response = MagicMock()
+        fake_poll_response.status_code = 200
+        fake_poll_response.json.return_value = {"status": "COMPLETED", "downloadUrl": "https://cdn.example.com/clip.mp4"}
+
+        fake_stream_response = MagicMock()
+        fake_stream_response.status_code = 200
+        fake_stream_response.iter_content.return_value = [b"x" * 1024]
+        fake_stream_response.__enter__.return_value = fake_stream_response
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir)
+            with patch("requests.post", return_value=fake_start_response) as mock_post, \
+                 patch("requests.get", side_effect=[fake_poll_response, fake_stream_response]), \
+                 patch("src.downloader.get_video_height", return_value=1080), \
+                 patch("src.downloader.get_video_duration", return_value=30.6), \
+                 patch("src.preflight.preflight_source", return_value=PreflightReport(ok=True)):
+                # The download starts 2.4s before the moment (pre-roll) but the
+                # reported offset must still be the MOMENT's offset in the file.
+                result = download_segment_via_apify(
+                    video_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                    output_dir=out_dir,
+                    start_time=72.0,
+                    end_time=105.0,
+                    api_token="dummy-token",
+                    moment_start=74.4,
+                )
+
+                self.assertIsNotNone(result)
+                sent_payload = mock_post.call_args[1]["json"]
+                self.assertEqual(sent_payload["startTime"], 72)
+                self.assertEqual(sent_payload["endTime"], 105)
+                self.assertAlmostEqual(result["segment_start"], 2.4, places=2)
+
     def test_download_clip_segment_prioritizes_apify(self):
         from unittest.mock import patch
         from src.downloader import download_clip_segment

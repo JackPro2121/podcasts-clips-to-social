@@ -293,6 +293,7 @@ def download_via_apify(
     start_time: Optional[float] = None,
     end_time: Optional[float] = None,
     output_label: str = "clip",
+    moment_start: Optional[float] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Downloads a source video using the configured full-download actor. Targeted
@@ -312,6 +313,7 @@ def download_via_apify(
             quality=quality,
             api_token=token,
             output_label=output_label,
+            moment_start=moment_start,
         )
 
     actor_path = quote(APIFY_FULL_DOWNLOAD_ACTOR_ID.replace("/", "~"), safe="~")
@@ -419,8 +421,15 @@ def download_segment_via_apify(
     quality: str = "1080",
     api_token: Optional[str] = None,
     output_label: str = "clip",
+    moment_start: Optional[float] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Download only one selected time range through a segment-capable Actor."""
+    """Download only one selected time range through a segment-capable Actor.
+
+    ``start_time`` may reach back before the moment to provide hook pre-roll
+    material. Pass ``moment_start`` so ``segment_start`` still reports the
+    moment's offset inside the downloaded file (the file begins at the
+    actor's integer grid ``int(start_time)``).
+    """
     token = api_token or APIFY_API_TOKEN
     if not token or end_time <= start_time:
         return None
@@ -536,7 +545,8 @@ def download_segment_via_apify(
                     f"[!] Pre-flight: stream length mismatch {mismatch_ms:+.0f}ms "
                     "(the renderer will harmonise it)."
                 )
-        segment_start = max(0.0, start_time - float(int_start))
+        anchor = float(moment_start) if moment_start is not None else float(start_time)
+        segment_start = max(0.0, anchor - float(int_start))
         return {
             "video_path": out_file.resolve(),
             "title": job.get("title", f"YouTube_{vid_id}"),
@@ -1288,6 +1298,7 @@ def download_clip_segment(
     end_time: float,
     clip_index: int,
     output_dir: Path,
+    moment_start: Optional[float] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Targeted Range Downloader: Downloads ONLY the seconds [start_time, end_time]
@@ -1321,6 +1332,7 @@ def download_clip_segment(
                 output_dir=output_dir,
                 start_time=start_time,
                 end_time=end_time,
+                moment_start=moment_start,
             )
             if apify_result:
                 out_path = Path(apify_result["video_path"])
@@ -1398,13 +1410,21 @@ def download_clip_segment(
                     continue
                 dur = get_video_duration(produced)
                 print(f"  [+] Segment downloaded ({h}p, {produced.stat().st_size / (1024*1024):.1f} MB) via '{label}'")
+                # yt-dlp cuts at the requested section start, so the file
+                # begins at start_time; the moment sits (start_time - moment)
+                # into it. Without a moment anchor the file starts at the clip.
+                ytdlp_segment_start = (
+                    max(0.0, float(moment_start) - float(start_time))
+                    if moment_start is not None
+                    else 0.0
+                )
                 return {
                     'video_path': produced.resolve(),
                     'title': f"clip_{clip_index}",
                     'duration': dur or clip_duration,
                     'height': h,
                     'is_low_res': (0 < h < MIN_VIDEO_HEIGHT),
-                    'segment_start': 0.0,            # clip starts at t=0 in the file
+                    'segment_start': ytdlp_segment_start,
                     'segment_duration': clip_duration,
                     'is_local': False,
                 }
