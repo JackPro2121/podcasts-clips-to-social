@@ -54,7 +54,11 @@ def pick_speaker(face_motion: Sequence[Sequence[float]], envelope: Sequence[floa
 
     best_index, best_score = -1, 0.0
     for index, motion in enumerate(face_motion):
-        if len(motion) < 8 or float(np.mean(motion)) < SPEAKER_MIN_MOTION:
+        if len(motion) < 8:
+            continue
+        valid_motion = [m for m in motion if m > 0.0]
+        motion_for_mean = valid_motion if valid_motion else motion
+        if float(np.mean(motion_for_mean)) < SPEAKER_MIN_MOTION:
             continue
         score = pearson(motion, envelope)
         if score > best_score:
@@ -77,12 +81,16 @@ def windowed_speakers(
     silent) must not force a switch.
     """
     hop = max(1, int(round(fps * window_s)))
-    frame_count = min(
-        [len(motion) for motion in face_motion] + [len(envelope)]
-    ) if face_motion else 0
+    max_motion_len = max((len(motion) for motion in face_motion), default=0)
+    frame_count = min(max_motion_len, len(envelope)) if max_motion_len > 0 else 0
     results: List[Tuple[float, int, float]] = []
     for start in range(0, frame_count - hop + 1, hop):
-        window_motion = [list(motion[start:start + hop]) for motion in face_motion]
+        window_motion: List[List[float]] = []
+        for motion in face_motion:
+            m_slice = list(motion[start:start + hop]) if len(motion) >= start else []
+            if len(m_slice) < hop:
+                m_slice = m_slice + [0.0] * (hop - len(m_slice))
+            window_motion.append(m_slice)
         window_envelope = list(envelope[start:start + hop])
         index = pick_speaker(window_motion, window_envelope)
         score = (
@@ -152,7 +160,7 @@ class Track:
 
 
 def track_mouth_motion_with_positions(clip: Path, fps: int = 10) -> List[Track]:
-    """Per-face tracks (motion + positions), greedy nearest association."""
+    """Per-face tracks (motion + positions) strictly aligned to the clip timeline."""
     import numpy as np
 
     from src.verification import faces as faces_mod
@@ -161,13 +169,14 @@ def track_mouth_motion_with_positions(clip: Path, fps: int = 10) -> List[Track]:
     detector, _reason = faces_mod._load_yunet()
     if not frames or detector is None:
         return []
+    total_frames = len(frames)
     tracks: List[dict] = []
-    for frame in frames:
+    for frame_idx, frame in enumerate(frames):
         grey = frame.mean(axis=2)
         boxes = faces_mod.detect_in_frame(frame, detector) or []
         used: set[int] = set()
         for track in tracks:
-            last = track["last"]
+            last = track["last_box"]
             best, best_dist = None, 1e9
             for box_index, box in enumerate(boxes):
                 if box_index in used:
@@ -181,21 +190,40 @@ def track_mouth_motion_with_positions(clip: Path, fps: int = 10) -> List[Track]:
                 used.add(best)
                 box = boxes[best]
                 patch = _mouth_patch(grey, box)
-                track["motion"].append(float(np.mean(np.abs(patch - track["prev"]))))
-                track["x"].append(float(box.x + box.width / 2))
-                track["prev"] = patch
-                track["last"] = box
+                # Compute difference across consecutive frames; 0.0 on re-entry
+                if track["last_seen_frame"] == frame_idx - 1 and track["prev_patch"] is not None:
+                    diff = float(np.mean(np.abs(patch - track["prev_patch"])))
+                else:
+                    diff = 0.0
+                track["motion"][frame_idx] = diff
+                track["x"][frame_idx] = float(box.x + box.width / 2)
+                track["present"][frame_idx] = True
+                track["prev_patch"] = patch
+                track["last_box"] = box
+                track["last_seen_frame"] = frame_idx
+                track["total_seen"] += 1
         for box_index, box in enumerate(boxes):
-            if box_index not in used and len(tracks) < 4:
-                tracks.append(
-                    {
-                        "motion": [],
-                        "x": [],
-                        "prev": _mouth_patch(grey, box),
-                        "last": box,
-                    }
-                )
-    return [Track(motion=track["motion"], x=track["x"]) for track in tracks]
+            if box_index not in used and len(tracks) < 8:
+                patch = _mouth_patch(grey, box)
+                new_track = {
+                    "motion": [0.0] * total_frames,
+                    "x": [0.0] * total_frames,
+                    "present": [False] * total_frames,
+                    "last_box": box,
+                    "prev_patch": patch,
+                    "last_seen_frame": frame_idx,
+                    "total_seen": 1,
+                }
+                new_track["x"][frame_idx] = float(box.x + box.width / 2)
+                new_track["present"][frame_idx] = True
+                tracks.append(new_track)
+
+    # Filter out spurious 1-2 frame false positive detections
+    valid_tracks = [t for t in tracks if t["total_seen"] >= 4]
+    if not valid_tracks and tracks:
+        valid_tracks = [max(tracks, key=lambda t: t["total_seen"])]
+
+    return [Track(motion=track["motion"], x=track["x"]) for track in valid_tracks]
 
 
 def track_mouth_motion(clip: Path, fps: int = 10) -> List[List[float]]:
@@ -246,7 +274,15 @@ def shot_speaker_targets(
         if not positions:
             results.append(None)
             continue
-        mean_x_analysis = sum(positions) / len(positions)
+        start_f = max(0, int(round(start_s * fps)))
+        end_f = min(len(positions), int(round(end_s * fps)))
+        shot_xs = [pos for pos in positions[start_f:end_f] if pos > 0.0]
+        if not shot_xs:
+            shot_xs = [pos for pos in positions if pos > 0.0]
+        if not shot_xs:
+            results.append(None)
+            continue
+        mean_x_analysis = sum(shot_xs) / len(shot_xs)
         mean_x_source = mean_x_analysis * source_size[0] / analysis_width
         boxes = (
             face_boxes_per_shot[shot_index]

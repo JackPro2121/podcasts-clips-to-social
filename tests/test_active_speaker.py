@@ -154,6 +154,43 @@ class TestShotSpeakerTargets(unittest.TestCase):
         )
         self.assertIsNotNone(targets[0])
 
+    def test_varying_track_lengths_do_not_collapse_windows(self):
+        fps = 10.0
+        envelope = _positive(50, 42)
+        # Track 0: present and following for 50 frames
+        track0 = _follower(envelope, 43)
+        # Track 1: spurious 1-frame detection!
+        track1 = [2.0]
+        # Track 2: brief 10-frame face detection
+        track2 = _positive(10, 44, scale=0.5)
+
+        windows = windowed_speakers([track0, track1, track2], envelope, fps, window_s=1.0)
+        # Must produce 5 windows (for 50 frames at 10 fps with 1s window)
+        self.assertEqual(len(windows), 5)
+        # Track 0 must win all windows despite track1 and track2 being short
+        self.assertTrue(all(speaker == 0 for _start, speaker, _score in windows))
+
+    def test_shot_target_ignores_zero_positions_and_uses_shot_window(self):
+        fps = 10.0
+        envelope = _positive(60, 50)
+        talker = _follower(envelope, 51)
+        # Talker is at x=100 in first half (0-3s), x=400 in second half (3-6s), with 0.0 on absent frames
+        positions = [100.0] * 30 + [400.0] * 30
+        positions[5] = 0.0  # simulated dropped frame
+        positions[35] = 0.0  # simulated dropped frame
+
+        tracks = [self._track(talker, positions)]
+        # Shot 1: 0.0s - 3.0s -> should pick ~100 in analysis space -> ~400 in 1920
+        # Shot 2: 3.0s - 6.0s -> should pick ~400 in analysis space -> ~1600 in 1920
+        targets = shot_speaker_targets(
+            tracks, envelope, [(0.0, 3.0), (3.0, 6.0)], [[], []], (1920, 1080), fps
+        )
+        self.assertIsNotNone(targets[0])
+        self.assertIsNotNone(targets[1])
+        assert targets[0] is not None and targets[1] is not None
+        self.assertAlmostEqual(targets[0], 100.0 * 1920 / 480, delta=1.0)
+        self.assertAlmostEqual(targets[1], 400.0 * 1920 / 480, delta=1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

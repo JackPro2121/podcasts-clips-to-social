@@ -791,13 +791,17 @@ def _apply_speaker_crop_targets(
         print(f"[!] ASD speaker targeting skipped: {error}")
         return
     target_crop_w = max(2, int(framing.active_h * 9 / 16)) if framing.active_h else 606
+    min_crop_x = framing.active_x
+    max_crop_x = max(min_crop_x, framing.active_x + framing.active_w - target_crop_w)
     for shot, target in zip(framing.shots, targets):
         if target is None:
             continue
-        shot.crop_x = int(round(target - target_crop_w / 2))
+        new_crop_x = max(min_crop_x, min(int(round(target - target_crop_w / 2)), max_crop_x))
+        shot.crop_x = new_crop_x
+        shot.face_centers_timeline = []
         print(
             f"[*] ASD: shot {shot.start:.1f}-{shot.end:.1f}s re-centred on the "
-            f"speaking face (centre x={target:.0f})."
+            f"speaking face (centre x={target:.0f}, crop_x={new_crop_x})."
         )
 
 
