@@ -1025,12 +1025,20 @@ def run_pipeline(
                 _extend_moment_to_complete_transcript(segments, moment)
             print(f"\n>>> Clip #{idx}: '{moment.title}' [{moment.start_time:.1f}s -> {moment.end_time:.1f}s]")
 
+            # Hook pre-roll: the P2 lead-in renders footage from BEFORE the
+            # moment, so the segment must include head-room for it. Without
+            # this the render asked for material the file never had and every
+            # hooked clip died on the duration validation (run 37748325314).
+            from src.hook_engine import HOOK_PREROLL_S
+
+            segment_download_start = max(0.0, moment.start_time - HOOK_PREROLL_S)
             clip_info = download_clip_segment(
                 video_url=active_source_url,
-                start_time=moment.start_time,
+                start_time=segment_download_start,
                 end_time=moment.end_time,
                 clip_index=idx,
                 output_dir=DOWNLOADS_DIR,
+                moment_start=moment.start_time,
             )
 
             if not clip_info:
@@ -1051,11 +1059,14 @@ def run_pipeline(
                 print("[*] Triggering fallback: attempting to fetch dedicated English audio track ([en-US]) to remux...")
                 from src.downloader import try_fallback_english_audio
 
+                # The audio must cover the same file range as the video: the
+                # Apify file starts at the integer grid second, so fetch the
+                # English audio from that same second (not from the moment).
                 fixed_clip = try_fallback_english_audio(
                     video_url=active_source_url,
                     clip_path=Path(clip_path),
                     output_dir=DOWNLOADS_DIR,
-                    start_time=moment.start_time,
+                    start_time=float(int(segment_download_start)),
                     end_time=moment.end_time,
                     clip_index=idx,
                     transcript_text=_clip_transcript_text(
@@ -1098,7 +1109,6 @@ def run_pipeline(
                 ):
                     hook_lead_in = hook_plan.lead_in_s
                     hook_abs_start = hook_plan.start_s
-                    clip_duration += hook_lead_in
                     print(
                         f"[*] Hook lead-in for clip #{idx}: starting "
                         f"{hook_lead_in:.2f}s early (\"{hook_plan.first_line}\")."
@@ -1106,7 +1116,24 @@ def run_pipeline(
             except Exception as hook_error:
                 print(f"[!] Hook lead-in skipped for clip #{idx}: {hook_error}")
 
-            render_start = float(clip_info.get("segment_start", 0.0)) - hook_lead_in
+            # The lead-in is capped by the material actually downloaded: the
+            # pre-roll makes room for it, and this clamp keeps any residual
+            # shortfall (keyframe-snapped fallbacks, future callers) honest by
+            # shrinking the extension instead of rendering past the file end.
+            segment_start = float(clip_info.get("segment_start", 0.0))
+            if hook_lead_in > 0:
+                from src.hook_engine import clamp_lead_in_to_segment
+
+                lead_used = clamp_lead_in_to_segment(segment_start, hook_lead_in)
+                if lead_used < hook_lead_in:
+                    hook_abs_start += hook_lead_in - lead_used
+                    print(
+                        f"[!] Hook lead-in clamped from {hook_lead_in:.2f}s to "
+                        f"{lead_used:.2f}s (segment head is {segment_start:.2f}s)."
+                    )
+                hook_lead_in = lead_used
+                clip_duration += hook_lead_in
+            render_start = segment_start - hook_lead_in
             render_end = render_start + clip_duration
 
             # P1 jump-cut: remove dead air from the segment before any render

@@ -769,7 +769,11 @@ class TestPodcastClipperPipeline(unittest.TestCase):
 
         perm_exc = Exception("video unavailable")
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("yt_dlp.YoutubeDL") as MockYDL:
+            # Keep test isolation: a developer .env with a live Apify token
+            # let the Apify strategy make a REAL download and return a dict,
+            # so the yt-dlp permanent-error path under test never ran.
+            with patch("src.downloader.APIFY_API_TOKEN", None), \
+                 patch("yt_dlp.YoutubeDL") as MockYDL:
                 instance = MockYDL.return_value.__enter__.return_value
                 instance.extract_info.side_effect = perm_exc
                 result = download_clip_segment(

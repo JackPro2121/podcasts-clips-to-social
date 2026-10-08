@@ -820,6 +820,12 @@ def render_viral_clip(
     requested_duration = end_time - start_time
     if requested_duration <= 0:
         raise ValueError("Clip duration must be greater than zero")
+    if start_time < -0.001:
+        raise RuntimeError(
+            f"Render window for {output_clip_path.name} starts "
+            f"{abs(start_time):.2f}s before the segment file: the download must "
+            "include hook pre-roll material for the lead-in."
+        )
 
     source_duration = _probe_source_duration(source_video_path)
     if source_duration is not None:
