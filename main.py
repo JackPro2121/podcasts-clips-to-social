@@ -1143,7 +1143,11 @@ def run_pipeline(
             # under the 30s floor, and every failure prints and continues.
             p1_plan = None
             try:
-                from src.jump_cutter import build_cut_plan, prepare_compacted_clip
+                from src.jump_cutter import (
+                    MIN_DEAD_AIR_S,
+                    build_cut_plan,
+                    prepare_compacted_clip,
+                )
 
                 p1_words = []
                 for segment in segments or []:
@@ -1175,8 +1179,21 @@ def run_pipeline(
                         )
                     else:
                         p1_plan = None
+                        print(
+                            f"[!] Jump-cut compaction produced nothing for clip #{idx}; "
+                            "keeping the original segment."
+                        )
                 else:
                     p1_plan = None
+                    ordered = sorted(p1_words)
+                    largest_gap = max(
+                        (b[0] - a[1] for a, b in zip(ordered, ordered[1:])), default=0.0
+                    )
+                    print(
+                        f"[*] Jump-cut for clip #{idx}: not applied "
+                        f"(largest pause {largest_gap:.2f}s across {len(p1_words)} words; "
+                        f"needs >= {MIN_DEAD_AIR_S}s of dead air)."
+                    )
             except Exception as jump_error:
                 p1_plan = None
                 print(f"[!] Jump-cut skipped for clip #{idx}: {jump_error}")
