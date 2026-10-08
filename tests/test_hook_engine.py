@@ -45,6 +45,43 @@ class TestHookStart(unittest.TestCase):
             hook_start(preceding, 50.0), 50.0 - HOOK_MAX_LEAD_IN_S + 0.01, places=3
         )
 
+    def test_a_word_straddling_the_window_start_never_exceeds_the_max(self):
+        # A long word whose onset is BEFORE the window but whose end crosses
+        # into it used to be accepted, producing lead-ins of 2.24-2.28s in
+        # production (run 37748325314) against the 1.6s contract. The onset
+        # must sit inside the window.
+        preceding = [_w("sentence", 47.7, 49.1)]
+        self.assertAlmostEqual(hook_start(preceding, 50.0), 50.0, places=3)
+        plan = build_hook_plan(preceding, [_w("go.", 50.0, 50.3)], 50.0)
+        self.assertLessEqual(plan.lead_in_s, HOOK_MAX_LEAD_IN_S)
+
+    def test_a_bounded_world_still_prefers_the_early_onset_inside_the_window(self):
+        preceding = [_w("straddler", 48.0, 49.0), _w("okay", 48.9, 49.2)]
+        # Window opens at 48.4: the straddling onset is out, "okay" is in.
+        self.assertAlmostEqual(hook_start(preceding, 50.0), 48.9, places=3)
+
+
+class TestClampLeadInToSegment(unittest.TestCase):
+    def test_lead_in_beyond_the_segment_head_is_clamped(self):
+        from src.hook_engine import clamp_lead_in_to_segment
+
+        self.assertAlmostEqual(clamp_lead_in_to_segment(0.4, 1.6), 0.4, places=3)
+
+    def test_enough_head_keeps_the_full_lead_in(self):
+        from src.hook_engine import clamp_lead_in_to_segment
+
+        self.assertAlmostEqual(clamp_lead_in_to_segment(2.9, 1.6), 1.6, places=3)
+
+    def test_nothing_before_the_moment_means_no_lead_in(self):
+        from src.hook_engine import clamp_lead_in_to_segment
+
+        self.assertAlmostEqual(clamp_lead_in_to_segment(0.0, 1.6), 0.0, places=3)
+
+    def test_negative_inputs_never_go_below_zero(self):
+        from src.hook_engine import clamp_lead_in_to_segment
+
+        self.assertAlmostEqual(clamp_lead_in_to_segment(-1.0, 1.6), 0.0, places=3)
+
 
 class TestFirstLine(unittest.TestCase):
     def test_prefers_to_end_on_punctuation_inside_the_cap(self):

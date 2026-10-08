@@ -23,6 +23,13 @@ from typing import List, Sequence, Tuple
 # before the hook. Between 0.5 and 1.6s is the researched sweet spot for a
 # context line ("so I told my wife...").
 HOOK_MAX_LEAD_IN_S = 1.6
+# The segment download must start this much BEFORE the moment so the hook has
+# real footage to reach into. A download window that starts at the moment
+# (the old behaviour) left every hooked clip asking to render material that
+# did not exist: run 37748325314 lost all five candidates to "Rendered output
+# duration is outside the allowed tolerance" and aborted with "No clips were
+# rendered". Bounded by HOOK_MAX_LEAD_IN_S plus margin for grid/rounding drift.
+HOOK_PREROLL_S = 2.5
 # The first caption line should read as one breath: cap it and prefer to end
 # on punctuation when one exists inside the cap.
 HOOK_LINE_MAX_CHARS = 42
@@ -46,6 +53,19 @@ def can_extend_with_lead_in(
     if lead_in_s <= 0.0:
         return True
     return float(clip_duration_s) + float(lead_in_s) <= float(max_clip_s)
+
+
+def clamp_lead_in_to_segment(segment_start_s: float, lead_in_s: float) -> float:
+    """The lead-in the downloaded segment can actually support.
+
+    ``segment_start_s`` is the moment's offset inside the segment file. The
+    render window reaches ``lead_in_s`` before that offset; footage that does
+    not exist cannot be rendered, and asking for it broke every hooked clip in
+    run 37748325314 (the output came out short by exactly the missing lead-in
+    and failed the duration validation). Never returns more than the segment
+    holds, and never a negative.
+    """
+    return max(0.0, min(float(lead_in_s), float(segment_start_s)))
 
 
 @dataclass
@@ -77,8 +97,8 @@ def hook_start(
     """
     best = float(moment_start_s)
     window = float(moment_start_s) - float(max_lead_in_s)
-    for _word, start, end in preceding_words:
-        if end <= window or start >= moment_start_s:
+    for _word, start, _end in preceding_words:
+        if not (window <= start < moment_start_s):
             continue
         if start < best:
             best = float(start)
