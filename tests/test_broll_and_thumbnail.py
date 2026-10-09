@@ -1,9 +1,10 @@
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from src.thumbnail_generator import generate_clip_thumbnail
+from src.thumbnail_generator import generate_clip_thumbnail, calculate_smart_title_y
 from src.broll_manager import select_best_video_file, find_broll_cues_for_clip, download_broll_clip, _broll_cache_path
 from src.transcriber import WordTimestamp
+
 
 
 def fake_loudness_measurement():
@@ -351,5 +352,33 @@ class TestBrollAndThumbnail(unittest.TestCase):
 
             self.assertFalse(any(call[0][0][0] == "ffmpeg" for call in mock_run.call_args_list))
 
+    def test_calculate_smart_title_y_no_faces(self):
+        """When no faces are detected, should return safe default lower-middle position."""
+        y = calculate_smart_title_y(None, total_text_h=180)
+        self.assertGreaterEqual(y, 260)
+        self.assertLessEqual(y, 1680 - 180)
+        # Default y: 1200 - (180 // 2) = 1110
+        self.assertEqual(y, 1110)
+
+    def test_calculate_smart_title_y_high_face_uses_chest(self):
+        """When face is in upper part of frame, title should sit on chest below chin."""
+        from src.face_tracker import FaceBox
+        face = FaceBox(x=300, y=350, w=400, h=450, center_x=500, center_y=575)
+        y = calculate_smart_title_y([face], total_text_h=184)
+        chin_bottom = 350 + 450 + int(450 * 0.15)  # 867
+        self.assertGreaterEqual(y, chin_bottom + 80)
+        self.assertLessEqual(y, 1680 - 184)
+
+    def test_calculate_smart_title_y_low_face_uses_headroom(self):
+        """When face is in lower part of frame, title should sit in headroom above skull."""
+        from src.face_tracker import FaceBox
+        face = FaceBox(x=300, y=1100, w=400, h=450, center_x=500, center_y=1325)
+        y = calculate_smart_title_y([face], total_text_h=184)
+        head_top = 1100 - int(450 * 0.35)  # 943
+        self.assertLessEqual(y + 184, head_top)
+        self.assertGreaterEqual(y, 260)
+
+
 if __name__ == "__main__":
     unittest.main()
+
