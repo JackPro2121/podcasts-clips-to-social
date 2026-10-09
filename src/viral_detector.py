@@ -687,7 +687,8 @@ def fallback_rule_based_detector(segments: List[TranscriptSegment], num_clips: i
                 derived_title = f"{key_phrase} STRATEGY"
 
         if not derived_title:
-            niche_clean = profile.get("focus", "PODCAST").split()[0].upper()
+            focus_val = str(profile.get("focus") or "PODCAST")
+            niche_clean = focus_val.split()[0].upper()
             derived_title = f"POWERFUL {niche_clean} INSIGHT #{i+1}"
         
         dur = round(end_t - start_t, 1)
