@@ -63,6 +63,35 @@ class TestStreamerPipeline(unittest.TestCase):
         self.assertEqual(parsed[0].title, "KAI GOES CRAZY ON STREAM")
         self.assertEqual(parsed[0].streamer_energy, "rage")
         self.assertEqual(len(parsed[0].sfx_cues), 2)
+        self.assertTrue(2 <= len(parsed[0].hashtags) <= 4)
+
+    def test_hashtag_bounds_enforced(self):
+        """Hashtags must strictly be between 2 and 4 tags, never more than 4."""
+        dummy_segments = [TranscriptSegment(start=0.0, end=60.0, text="test", words=[])]
+        
+        # Test case with 7 hashtags -> must be capped at 4
+        json_many = json.dumps({
+            "clips": [{
+                "title": "Nah Kai really crashed out",
+                "start_time": 10.0,
+                "end_time": 40.0,
+                "hashtags": ["#tag1", "#tag2", "#tag3", "#tag4", "#tag5", "#tag6", "#tag7"]
+            }]
+        })
+        parsed_many = parse_streamer_clips_json(json_many, dummy_segments, num_clips=1)
+        self.assertEqual(len(parsed_many[0].hashtags), 4)
+
+        # Test case with 1 hashtag -> must have at least 2 tags
+        json_few = json.dumps({
+            "clips": [{
+                "title": "Nah Kai really crashed out",
+                "start_time": 10.0,
+                "end_time": 40.0,
+                "hashtags": ["#onlyone"]
+            }]
+        })
+        parsed_few = parse_streamer_clips_json(json_few, dummy_segments, num_clips=1)
+        self.assertTrue(2 <= len(parsed_few[0].hashtags) <= 4)
 
     def test_heuristic_streamer_detector(self):
         """Heuristic detector should prioritize shouting and exclamation marks."""

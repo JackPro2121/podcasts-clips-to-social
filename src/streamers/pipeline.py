@@ -46,7 +46,7 @@ STREAMER_BUFFER_ACCESS_TOKEN = os.getenv("STREAMER_BUFFER_ACCESS_TOKEN", "").str
 STREAMER_BUFFER_CHANNEL_IDS = [
     c.strip() for c in os.getenv("STREAMER_BUFFER_CHANNEL_IDS", "").split(",") if c.strip()
 ]
-STREAMER_WATERMARK = os.getenv("STREAMER_WATERMARK", CHANNEL_WATERMARK or "@streamersclips")
+STREAMER_WATERMARK = os.getenv("STREAMER_WATERMARK", "@streamersclips").strip()
 
 
 def run_streamer_pipeline(
@@ -220,6 +220,7 @@ def run_streamer_pipeline(
         framing = analyze_faces_in_clip(clip_path, start_time=0.0, end_time=clip_duration)
 
         # Generate styled ASS kinetic subtitles (Hormozi / Streamer viral style)
+        # Includes persistent TikTok White Meme Hook Box on top + lower-third kinetic captions
         ass_path = SUBTITLES_DIR / f"streamer_clip_{idx}_{video_id}.ass"
         create_styled_ass_subtitles(
             segments=clip_segments,
@@ -227,17 +228,19 @@ def run_streamer_pipeline(
             clip_end=clip_duration,
             output_ass_path=ass_path,
             theme_key="hormozi",
-            watermark=STREAMER_WATERMARK
+            watermark=STREAMER_WATERMARK,
+            top_meme_title=vm.title
         )
 
-        # Generate smart face-aware thumbnail (chest/headroom collision avoidance)
+        # Generate authentic TikTok Meme Thumbnail (Clean action frame + Top White Meme Box)
         thumb_path = STREAMER_CLIPS_DIR / f"streamer_clip_{idx}_{vm.title.replace(' ', '_')[:30]}_thumb.jpg"
         generate_clip_thumbnail(
             clip_path=clip_path,
             title=vm.title,
             output_path=thumb_path,
-            badge_text=f"{target_creator.upper()} LIVE",
-            watermark=STREAMER_WATERMARK
+            badge_text="",
+            watermark=STREAMER_WATERMARK,
+            style="tiktok_meme"
         )
 
         # Remap sound effect cues if dead air was removed

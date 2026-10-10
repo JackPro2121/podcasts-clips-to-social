@@ -125,6 +125,7 @@ Style: Default,{font_name},{font_size},{primary_col},&H000000FF,{outline_col},{s
 Style: DefaultMid,{font_name},{font_size},{primary_col},&H000000FF,{outline_col},{shadow_col},-1,0,0,0,100,100,1.5,0,1,{outline_w},{shadow_d},5,100,100,{margin_v},1
 Style: DefaultTop,{font_name},{font_size},{primary_col},&H000000FF,{outline_col},{shadow_col},-1,0,0,0,100,100,1.5,0,1,{outline_w},{shadow_d},8,100,100,{margin_v},1
 Style: TopHeader,Montserrat Black,42,&H00FFFFFF,&H000000FF,&H00B86B62,&H00000000,-1,0,0,0,100,100,1.2,0,3,11,0,8,100,100,{HOOK_BADGE_MARGIN_V},1
+Style: TikTokMemeBox,Montserrat ExtraBold,38,&H00000000,&H000000FF,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,1.0,0,3,14,0,8,120,120,150,1
 Style: Watermark,Montserrat Black,24,&H90FFFFFF,&H000000FF,&H90000000,&H00000000,-1,0,0,0,100,100,1.2,0,1,1.5,0.0,7,60,60,90,1
 
 [Events]
@@ -152,7 +153,8 @@ def create_styled_ass_subtitles(
     watermark: Optional[str] = None,
     shots: Optional[List[Any]] = None,
     caption_placements: Optional[List[Any]] = None,
-    keyword_emojis: Optional[Dict[str, str]] = None
+    keyword_emojis: Optional[Dict[str, str]] = None,
+    top_meme_title: Optional[str] = None
 ) -> Path:
     """
     Generates word-level animated karaoke-style ASS subtitles for a specific clip window.
@@ -353,6 +355,26 @@ def create_styled_ass_subtitles(
 
         hook_dur = format_ass_timestamp(min(HOOK_BADGE_DURATION_S, clip_end - clip_start))
         lines.insert(0, f"Dialogue: 1,0:00:00.00,{hook_dur},TopHeader,,0,0,0,,{{\\fad(150,350)}}{clean_title}")
+
+    # TikTok Meme Hook Box (Persistent top white box with bold black text)
+    if top_meme_title:
+        clean_meme = normalize_caption_text(top_meme_title)
+        words = clean_meme.split()
+        lines_wrapped = []
+        cur_line = []
+        cur_len = 0
+        for w in words:
+            if cur_len + len(w) + 1 > 30 and cur_line:
+                lines_wrapped.append(" ".join(cur_line))
+                cur_line = [w]
+                cur_len = len(w)
+            else:
+                cur_line.append(w)
+                cur_len += len(w) + 1
+        if cur_line:
+            lines_wrapped.append(" ".join(cur_line))
+        wrapped_meme = "\\N".join(escape_ass_text(line) for line in lines_wrapped[:3])
+        lines.insert(0, f"Dialogue: 3,0:00:00.00,{dur_str},TikTokMemeBox,,0,0,0,,{{\\fad(80,0)}}{wrapped_meme}")
 
     full_content = header + "\n".join(lines) + "\n"
 

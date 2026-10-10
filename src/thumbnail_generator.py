@@ -145,7 +145,8 @@ def generate_clip_thumbnail(
     output_path: Optional[Path] = None,
     extract_time: float = 2.0,
     badge_text: str = "MUST WATCH",
-    watermark: Optional[str] = "@allinonepodcastsss"
+    watermark: Optional[str] = None,
+    style: str = "default"
 ) -> Optional[Path]:
     """
     Generates a viral, high-CTR 9:16 thumbnail/cover for the clip:
@@ -199,76 +200,123 @@ def generate_clip_thumbnail(
     total_text_h = len(lines) * line_height
     start_y = calculate_smart_title_y(faces, total_text_h)
 
-    # Dark gradient overlays for ultra-readable text
-    overlay = Image.new("RGBA", (OUTPUT_WIDTH, OUTPUT_HEIGHT), (0, 0, 0, 0))
-    d_overlay = ImageDraw.Draw(overlay)
+    # Dark gradient overlays for ultra-readable text (default style only)
+    if style != "tiktok_meme":
+        overlay = Image.new("RGBA", (OUTPUT_WIDTH, OUTPUT_HEIGHT), (0, 0, 0, 0))
+        d_overlay = ImageDraw.Draw(overlay)
 
-    # Top gradient for top badge
-    for y in range(350):
-        alpha = int(180 * (1 - y / 350))
-        d_overlay.line([(0, y), (OUTPUT_WIDTH, y)], fill=(0, 0, 0, alpha))
+        # Top gradient for top badge
+        for y in range(350):
+            alpha = int(180 * (1 - y / 350))
+            d_overlay.line([(0, y), (OUTPUT_WIDTH, y)], fill=(0, 0, 0, alpha))
 
-    # Dynamic dark vignette backing behind wherever the title is positioned
-    pad_y = 50
-    tb_top = max(0, start_y - pad_y)
-    tb_bottom = min(OUTPUT_HEIGHT, start_y + total_text_h + pad_y)
-    for y in range(tb_top, tb_bottom):
-        dist = min(y - tb_top, tb_bottom - y)
-        alpha = int(190 * min(1.0, dist / 40.0))
-        d_overlay.line([(0, y), (OUTPUT_WIDTH, y)], fill=(0, 0, 0, alpha))
+        # Dynamic dark vignette backing behind wherever the title is positioned
+        pad_y = 50
+        tb_top = max(0, start_y - pad_y)
+        tb_bottom = min(OUTPUT_HEIGHT, start_y + total_text_h + pad_y)
+        for y in range(tb_top, tb_bottom):
+            dist = min(y - tb_top, tb_bottom - y)
+            alpha = int(190 * min(1.0, dist / 40.0))
+            d_overlay.line([(0, y), (OUTPUT_WIDTH, y)], fill=(0, 0, 0, alpha))
 
-    canvas = Image.alpha_composite(frame, overlay)
+        canvas = Image.alpha_composite(frame, overlay)
+    else:
+        canvas = frame
+
     draw = ImageDraw.Draw(canvas)
 
-    # 1. Top Hook Badge / Pill
-    if badge_text:
-        badge_font = find_best_font(36)
-        clean_badge = badge_text.strip().upper()
-        b_bbox = draw.textbbox((0, 0), clean_badge, font=badge_font)
-        bw = b_bbox[2] - b_bbox[0]
-        bh = b_bbox[3] - b_bbox[1]
-        
-        pad_x, pad_y = 35, 16
-        pill_w = min(OUTPUT_WIDTH - 40, bw + pad_x * 2)
-        pill_h = bh + pad_y * 2
-        pill_x = max(20, (OUTPUT_WIDTH - pill_w) // 2)
-        pill_y = 140
+    # TikTok Meme Style Thumbnail (Authentic TikTok clip channel style from user screenshot)
+    if style == "tiktok_meme":
+        meme_font = find_best_font(42)
+        clean_text = title.strip()
+        wrapped_lines = wrap_text(clean_text, meme_font, OUTPUT_WIDTH - 240, dummy_draw)[:3]
+        line_h = 56
+        box_text_h = len(wrapped_lines) * line_h
 
-        # Draw red/orange vibrant pill capsule
+        pad_x, pad_y = 44, 24
+        max_line_w = max(
+            (dummy_draw.textbbox((0, 0), line, font=meme_font)[2] - dummy_draw.textbbox((0, 0), line, font=meme_font)[0] for line in wrapped_lines),
+            default=200
+        )
+        box_w = min(OUTPUT_WIDTH - 80, max_line_w + pad_x * 2)
+        box_h = box_text_h + pad_y * 2
+        box_x = (OUTPUT_WIDTH - box_w) // 2
+        box_y = 150  # Top safe zone
+
+        # Soft shadow behind white box
         draw.rounded_rectangle(
-            [(pill_x, pill_y), (pill_x + pill_w, pill_y + pill_h)],
-            radius=pill_h // 2,
-            fill=(255, 30, 45, 255),
-            outline=(255, 255, 255, 220),
-            width=3
+            [(box_x + 3, box_y + 4), (box_x + box_w + 3, box_y + box_h + 4)],
+            radius=20,
+            fill=(0, 0, 0, 70)
         )
-        draw.text(
-            (pill_x + pad_x, pill_y + pad_y - 2),
-            clean_badge,
-            font=badge_font,
-            fill=(255, 255, 255, 255)
+        # Crisp solid white rounded box
+        draw.rounded_rectangle(
+            [(box_x, box_y), (box_x + box_w, box_y + box_h)],
+            radius=20,
+            fill=(255, 255, 255, 255),
+            outline=(20, 20, 20, 60),
+            width=2
         )
 
-    # 2. Main Viral Hook Title
-    colors = [(255, 230, 0), (255, 255, 255)]  # Alternating Gold / White
+        # Bold black meme hook text centered inside box
+        for i, line in enumerate(wrapped_lines):
+            l_bbox = draw.textbbox((0, 0), line, font=meme_font)
+            lw = l_bbox[2] - l_bbox[0]
+            lx = (OUTPUT_WIDTH - lw) // 2
+            ly = box_y + pad_y + (i * line_h)
+            draw.text((lx, ly), line, font=meme_font, fill=(10, 10, 10, 255))
 
-    for i, line in enumerate(lines):
-        line_bbox = draw.textbbox((0, 0), line, font=title_font)
-        lw = line_bbox[2] - line_bbox[0]
-        lx = (OUTPUT_WIDTH - lw) // 2
-        ly = start_y + (i * line_height)
+    else:
+        # Default Podcast / High-CTR Style (Unchanged)
+        # 1. Top Hook Badge / Pill
+        if badge_text:
+            badge_font = find_best_font(36)
+            clean_badge = badge_text.strip().upper()
+            b_bbox = draw.textbbox((0, 0), clean_badge, font=badge_font)
+            bw = b_bbox[2] - b_bbox[0]
+            bh = b_bbox[3] - b_bbox[1]
+            
+            pad_x, pad_y = 35, 16
+            pill_w = min(OUTPUT_WIDTH - 40, bw + pad_x * 2)
+            pill_h = bh + pad_y * 2
+            pill_x = max(20, (OUTPUT_WIDTH - pill_w) // 2)
+            pill_y = 140
 
-        text_color = colors[i % len(colors)]
+            # Draw red/orange vibrant pill capsule
+            draw.rounded_rectangle(
+                [(pill_x, pill_y), (pill_x + pill_w, pill_y + pill_h)],
+                radius=pill_h // 2,
+                fill=(255, 30, 45, 255),
+                outline=(255, 255, 255, 220),
+                width=3
+            )
+            draw.text(
+                (pill_x + pad_x, pill_y + pad_y - 2),
+                clean_badge,
+                font=badge_font,
+                fill=(255, 255, 255, 255)
+            )
 
-        # Heavy black drop shadow and outline for ultra-high contrast
-        outline_range = 5
-        for ox in range(-outline_range, outline_range + 1):
-            for oy in range(-outline_range, outline_range + 1):
-                if ox != 0 or oy != 0:
-                    draw.text((lx + ox, ly + oy), line, font=title_font, fill=(0, 0, 0, 255))
+        # 2. Main Viral Hook Title
+        colors = [(255, 230, 0), (255, 255, 255)]  # Alternating Gold / White
 
-        # Main text
-        draw.text((lx, ly), line, font=title_font, fill=text_color)
+        for i, line in enumerate(lines):
+            line_bbox = draw.textbbox((0, 0), line, font=title_font)
+            lw = line_bbox[2] - line_bbox[0]
+            lx = (OUTPUT_WIDTH - lw) // 2
+            ly = start_y + (i * line_height)
+
+            text_color = colors[i % len(colors)]
+
+            # Heavy black drop shadow and outline for ultra-high contrast
+            outline_range = 5
+            for ox in range(-outline_range, outline_range + 1):
+                for oy in range(-outline_range, outline_range + 1):
+                    if ox != 0 or oy != 0:
+                        draw.text((lx + ox, ly + oy), line, font=title_font, fill=(0, 0, 0, 255))
+
+            # Main text
+            draw.text((lx, ly), line, font=title_font, fill=text_color)
 
     # 3. Watermark
     if watermark:

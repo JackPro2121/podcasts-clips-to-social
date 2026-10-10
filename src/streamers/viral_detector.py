@@ -45,7 +45,7 @@ STREAMER_KEYWORDS = {
 }
 
 
-def build_streamer_detection_prompt(
+def _build_streamer_detection_prompt(
     transcript_text: str,
     creator_name: str,
     num_clips: int = 3
@@ -53,7 +53,7 @@ def build_streamer_detection_prompt(
     return f"""You are the world's #1 viral short-form video editor for top US Twitch and YouTube streamers (Kai Cenat, IShowSpeed, Jynxzi, CaseOh, xQc).
 Your goal is to extract EXACTLY {num_clips} of the MOST EXPLOSIVE, FUNNY, OR UNHINGED VIRAL MOMENTS from this stream by {creator_name}.
 
-### STREAMER VIRALITY FORMULA:
+### STREAMER TIKTOK VIRALITY FORMULA:
 1. **Immediate Chaos / Hook (0-2s)**: The clip MUST start right before a massive spike in energy or right as the funny/shocking situation unfolds.
    - PURE RAGE: Screaming, table slams, rage quitting, unhinged disbelief.
    - COMEDY / FAILS: Getting roasted by chat/donations, failing a game in a ridiculous way, laughing uncontrollably.
@@ -62,21 +62,23 @@ Your goal is to extract EXACTLY {num_clips} of the MOST EXPLOSIVE, FUNNY, OR UNH
 2. **Optimal Pacing (20s - 45s Sweet Spot)**: Keep it tight and fast-paced! Never drag past 45 seconds.
 3. **Standalone Cohesive Scene**: The moment must make complete sense on TikTok/Reels without context.
 4. **Clean Complete Boundaries**: Do not cut off in the middle of a scream or punchline.
-5. **Hook Title in ALL CAPS**: Under 45 characters, curiosity-driven (e.g. "KAI CANNOT BELIEVE THIS HAPPENED", "SPEED RAGES OVER NEW UPDATE", "CASEOH GETS ROASTED BY DONATION").
-6. **NO EMOJIS**: Strictly NO emojis in titles, captions, or hashtags.
+5. **TikTok Meme Hook Title**: Under 45 characters. Write like top TikTok clip channels (e.g. "Nah Kai really started crashing out", "Kai's cooked", "No way Kai responded to this", "Bro had Kevin Hart in tears", "Nah Kai you knew what you were doing").
+6. **Social Caption**: 1 short punchy sentence matching authentic TikTok viewer tone (e.g. "Bro was not ready for this at all.").
+7. **HASHTAGS (STRICT REQUIREMENT)**: EXACTLY 2 to 4 hashtags ONLY! Never more than 4, never less than 2.
+   Examples: ["#kaicenat", "#streamer", "#funny", "#fyp"]
 
 ### OUTPUT JSON FORMAT:
 {{
   "clips": [
     {{
-      "title": "CATCHY VIRAL HOOK TITLE",
+      "title": "Nah Kai really started crashing out",
       "start_time": 120.5,
       "end_time": 155.0,
       "duration": 34.5,
       "viral_score": 95,
       "hook_reason": "High emotional spike and loud streamer reaction",
       "social_caption": "Wait until you see how this ended. Bro was not ready.",
-      "hashtags": ["#streamer", "#twitch", "#funny", "#shorts", "#viral"],
+      "hashtags": ["#kaicenat", "#streamer", "#funny", "#fyp"],
       "streamer_energy": "rage",
       "sfx_cues": [[0.1, "whoosh"], [12.0, "pop"], [32.0, "ding"]]
     }}
@@ -114,10 +116,37 @@ def parse_streamer_clips_json(
         start, end = normalized
         dur = end - start
 
-        title = strip_emojis(re.sub(r'[^\w\s\-\'\,\.\?]', '', str(c.get("title", "STREAMER VIRAL MOMENT"))).strip().upper())
-        caption = strip_emojis(str(c.get("social_caption", "Bro was not ready for this. #streamer #shorts")))
-        raw_hashtags = c.get("hashtags", ["#streamer", "#twitch", "#funny", "#shorts"])
-        clean_hashtags = [strip_emojis(str(h)).strip() for h in raw_hashtags if strip_emojis(str(h)).strip()]
+        # Title formatting: Keep natural TikTok casing or uppercase without invalid symbols
+        raw_title = str(c.get("title", "STREAMER VIRAL MOMENT"))
+        clean_title = re.sub(r'[^\w\s\-\'\,\.\?]', '', raw_title).strip()
+        if not clean_title:
+            clean_title = "STREAMER VIRAL MOMENT"
+
+        caption = strip_emojis(str(c.get("social_caption", "Bro was not ready for this.")))
+
+        # Enforce strictly 2 to 4 hashtags (user requirement)
+        raw_hashtags = c.get("hashtags", [])
+        if not isinstance(raw_hashtags, list):
+            raw_hashtags = [str(raw_hashtags)]
+        formatted_hashtags: List[str] = []
+        for h in raw_hashtags:
+            clean_h = strip_emojis(str(h)).strip()
+            if not clean_h:
+                continue
+            tag = clean_h if clean_h.startswith("#") else f"#{clean_h}"
+            tag = re.sub(r"[^\w#]", "", tag)
+            if tag and tag not in formatted_hashtags:
+                formatted_hashtags.append(tag)
+
+        # Strictly 2 to 4 hashtags
+        if len(formatted_hashtags) > 4:
+            formatted_hashtags = formatted_hashtags[:4]
+        elif len(formatted_hashtags) < 2:
+            default_tags = ["#streamer", "#funny", "#fyp", "#viral"]
+            for dt in default_tags:
+                if dt not in formatted_hashtags and len(formatted_hashtags) < 4:
+                    formatted_hashtags.append(dt)
+        clean_hashtags = formatted_hashtags[:4]
 
         raw_sfx = c.get("sfx_cues", [])
         clean_sfx = []
@@ -135,14 +164,14 @@ def parse_streamer_clips_json(
             clean_sfx = [(0.1, "whoosh"), (max(1.0, dur - 1.5), "ding")]
 
         candidates.append(StreamerClipCandidate(
-            title=title or "UNBELIEVABLE STREAM MOMENT",
+            title=clean_title,
             start_time=start,
             end_time=end,
             duration=dur,
             viral_score=_safe_int(c.get("viral_score", 90), default=90),
             hook_reason=strip_emojis(str(c.get("hook_reason", "High energy stream reaction"))),
             social_caption=caption,
-            hashtags=clean_hashtags or ["#streamer", "#funny", "#twitch", "#shorts"],
+            hashtags=clean_hashtags,
             streamer_energy=str(c.get("streamer_energy", "hype")),
             sfx_cues=clean_sfx
         ))
