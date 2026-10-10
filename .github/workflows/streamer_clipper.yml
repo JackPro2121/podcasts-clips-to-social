@@ -1,0 +1,97 @@
+name: Streamer Viral Clips to Social (V2)
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'YouTube Stream/VOD URL (Leave blank to auto-discover latest stream)'
+        required: false
+        default: ''
+        type: string
+      streamer:
+        description: 'Target Streamer for Auto-Discovery'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - 'all'
+          - 'kai_cenat'
+          - 'ishowspeed'
+          - 'jynxzi'
+          - 'caseoh'
+          - 'xqc'
+          - 'adin_ross'
+      num_clips:
+        description: 'Number of viral clips to extract (1 to 5)'
+        required: true
+        default: '3'
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '3'
+          - '4'
+          - '5'
+      post_to_buffer:
+        description: 'Post to Streamer Buffer Queue (Isolated - Requires STREAMER_BUFFER_ACCESS_TOKEN)'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  clip-streamers:
+    name: Clip Streamers & Generate Shorts (V2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install System Dependencies (FFmpeg)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-montserrat libgl1 libglib2.0-0
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run V2 Streamer Clipper
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+          GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
+          GEMINI_API_KEY_4: ${{ secrets.GEMINI_API_KEY_4 }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          # Dedicated Streamer Buffer Credentials (isolated from Podcast Buffer)
+          STREAMER_BUFFER_ACCESS_TOKEN: ${{ secrets.STREAMER_BUFFER_ACCESS_TOKEN }}
+          STREAMER_BUFFER_CHANNEL_IDS: ${{ secrets.STREAMER_BUFFER_CHANNEL_IDS }}
+        run: |
+          args=()
+          [ -n "${{ github.event.inputs.video_url }}" ] && args+=(--video-url "${{ github.event.inputs.video_url }}")
+          [ "${{ github.event.inputs.streamer }}" != "all" ] && args+=(--streamer "${{ github.event.inputs.streamer }}")
+          args+=(--num-clips "${{ github.event.inputs.num_clips || 3 }}")
+          [ "${{ github.event.inputs.post_to_buffer }}" = "true" ] && args+=(--post-to-buffer)
+
+          python main_streamer.py "${args[@]}"
+
+      - name: Upload Streamer Clips as Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: streamer-viral-clips
+          path: clips/streamers/
+          retention-days: 14
