@@ -76,6 +76,7 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
           # Dedicated Streamer Buffer Credentials (isolated from Podcast Buffer)
           STREAMER_BUFFER_ACCESS_TOKEN: ${{ secrets.STREAMER_BUFFER_ACCESS_TOKEN }}
           STREAMER_BUFFER_CHANNEL_IDS: ${{ secrets.STREAMER_BUFFER_CHANNEL_IDS }}

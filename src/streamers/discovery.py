@@ -167,12 +167,54 @@ def fetch_rss_feed_videos(feed_url: str, limit: int = 5) -> List[Dict[str, str]]
     return candidates
 
 
+def search_stream_via_firecrawl(query: str, limit: int = 5) -> List[Dict[str, str]]:
+    """Uses Firecrawl API to search for fresh streamer stream VODs on YouTube."""
+    from src.config import FIRECRAWL_API_KEY
+    if not FIRECRAWL_API_KEY:
+        return []
+
+    headers = {
+        "Authorization": f"Bearer {FIRECRAWL_API_KEY}",
+        "Content-Type": "application/json",
+        "User-Agent": "StreamerClipper/2.0"
+    }
+    payload = {
+        "query": f"site:youtube.com {query} full stream VOD",
+        "limit": limit
+    }
+    candidates = []
+    try:
+        req = urllib.request.Request(
+            "https://api.firecrawl.dev/v1/search",
+            headers=headers,
+            data=json.dumps(payload).encode("utf-8")
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        results = data.get("data", [])
+        for r in results:
+            url = r.get("url", "")
+            title = r.get("title", "")
+            vid_id = extract_video_id_from_url(url)
+            if vid_id and ("watch?v=" in url or "/live/" in url):
+                candidates.append({
+                    "video_id": vid_id,
+                    "url": f"https://www.youtube.com/watch?v={vid_id}",
+                    "title": title
+                })
+    except Exception as e:
+        print(f"[-] Firecrawl search note: {e}")
+    return candidates
+
+
 def discover_streamer_candidates(
     creator: Optional[str] = None,
     category: Optional[str] = None,
     max_candidates: int = 10
 ) -> List[Dict[str, str]]:
-    """Discovers fresh, unprocessed streamer VODs and stream clips."""
+    """Discovers fresh, unprocessed streamer VODs via Firecrawl and RSS feeds."""
+    from src.config import FIRECRAWL_API_KEY
+
     history = set(load_streamer_history())
     selected_streamers: List[Dict[str, Any]] = []
 
@@ -185,6 +227,26 @@ def discover_streamer_candidates(
             selected_streamers.append(s)
 
     discovered = []
+
+    # Tier 1: Firecrawl Intelligent Search
+    if FIRECRAWL_API_KEY:
+        for s in selected_streamers:
+            print(f"[*] Firecrawl: Searching fresh stream VODs for {s['name']}...")
+            fc_videos = search_stream_via_firecrawl(s["name"], limit=4)
+            for v in fc_videos:
+                vid_id = v["video_id"]
+                if vid_id not in history:
+                    discovered.append({
+                        "creator": s["name"],
+                        "category": s.get("category", "streamer"),
+                        "video_id": vid_id,
+                        "url": v["url"],
+                        "title": v["title"],
+                    })
+                if len(discovered) >= max_candidates:
+                    return discovered
+
+    # Tier 2: RSS Feed parsing fallback
     for s in selected_streamers:
         feeds = s.get("rss_feeds", [])
         for feed in feeds:

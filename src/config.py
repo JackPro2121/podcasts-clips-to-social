@@ -78,6 +78,7 @@ APIFY_API_TOKEN = (
     os.getenv("APIFY_API_TOKEN_NEW") or
     ""
 )
+FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY", "").strip()
 # The maintained Streamers actor is retained for explicitly requested full
 # downloads. It does not support time ranges, so it must never be used for
 # clip extraction. The segment actor accepts startTime/endTime and is invoked
