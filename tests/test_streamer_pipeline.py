@@ -75,6 +75,26 @@ class TestStreamerPipeline(unittest.TestCase):
         self.assertTrue(len(candidates) >= 1)
         self.assertGreaterEqual(candidates[0].viral_score, 70)
 
+    def test_dead_air_remapping_synchronizes_captions(self):
+        """When dead-air silence is cut, words must shift onto the compacted timeline."""
+        from src.jump_cutter import build_cut_plan
+        from src.transcriber import WordTimestamp
+
+        # Segment with speech at 0-1s, 2s silence (1-3s), speech at 3-4s
+        words = [
+            WordTimestamp(word="hello", start=0.0, end=1.0),
+            WordTimestamp(word="world", start=3.0, end=4.0),
+        ]
+        p_words = [(w.start, w.end) for w in words]
+        cut_plan = build_cut_plan(p_words, clip_duration_s=4.0, min_duration_s=1.0)
+        self.assertTrue(cut_plan.applied)
+        self.assertAlmostEqual(cut_plan.removed_s, 1.84, places=2)
+
+        # Before cut: 'world' was at 3.0s
+        # After cut: 'world' must be shifted to ~1.16s (3.0 - 1.84)
+        remapped_start = cut_plan.remap(3.0)
+        self.assertAlmostEqual(remapped_start, 3.0 - cut_plan.removed_s, places=2)
+
 
 if __name__ == "__main__":
     unittest.main()

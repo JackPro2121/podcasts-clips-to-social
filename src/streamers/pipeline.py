@@ -23,7 +23,7 @@ from src.downloader import (
 )
 from src.transcriber import (
     get_transcript, transcribe_audio_whisper,
-    TranscriptSegment
+    TranscriptSegment, WordTimestamp
 )
 from src.jump_cutter import build_cut_plan, prepare_compacted_clip
 from src.face_tracker import analyze_faces_in_clip
@@ -150,7 +150,33 @@ def run_streamer_pipeline(
 
         # Transcribe & word-align audio for kinetic captions
         whisper_segments = transcribe_audio_whisper(clip_path)
-        clip_segments = whisper_segments if whisper_segments else segments
+        if whisper_segments:
+            clip_segments = whisper_segments
+        else:
+            # Fallback: slice stream-level segments and shift to clip-relative timeline
+            shift_offset = max(0.0, vm.start_time - 1.0)
+            local_fallback: List[TranscriptSegment] = []
+            for s in (segments or []):
+                if s.end >= shift_offset and s.start <= shift_offset + clip_duration:
+                    shifted_words = [
+                        WordTimestamp(
+                            word=w.word,
+                            start=max(0.0, w.start - shift_offset),
+                            end=max(0.0, w.end - shift_offset),
+                            is_estimated=getattr(w, "is_estimated", False)
+                        )
+                        for w in (getattr(s, "words", []) or [])
+                        if (w.end >= shift_offset and w.start <= shift_offset + clip_duration)
+                    ]
+                    local_fallback.append(
+                        TranscriptSegment(
+                            start=max(0.0, s.start - shift_offset),
+                            end=min(clip_duration, s.end - shift_offset),
+                            text=s.text,
+                            words=shifted_words
+                        )
+                    )
+            clip_segments = local_fallback
 
         # Dead air trimming (jump cuts)
         p_words = []
@@ -167,6 +193,28 @@ def run_streamer_pipeline(
             if prepared:
                 clip_path, _, clip_duration = prepared
                 print(f"[*] Streamer pacing: removed {cut_plan.removed_s:.2f}s of dead air.")
+
+                # Remap transcript word and segment timestamps to match the compacted audio timeline
+                remapped_segments: List[TranscriptSegment] = []
+                for s in clip_segments:
+                    new_words = [
+                        WordTimestamp(
+                            word=w.word,
+                            start=cut_plan.remap(w.start),
+                            end=cut_plan.remap(w.end),
+                            is_estimated=getattr(w, "is_estimated", False),
+                        )
+                        for w in (getattr(s, "words", []) or [])
+                    ]
+                    remapped_segments.append(
+                        TranscriptSegment(
+                            start=cut_plan.remap(s.start),
+                            end=cut_plan.remap(s.end),
+                            text=s.text,
+                            words=new_words,
+                        )
+                    )
+                clip_segments = remapped_segments
 
         # Face tracking & framing
         framing = analyze_faces_in_clip(clip_path, start_time=0.0, end_time=clip_duration)
@@ -192,6 +240,13 @@ def run_streamer_pipeline(
             watermark=STREAMER_WATERMARK
         )
 
+        # Remap sound effect cues if dead air was removed
+        active_sfx = []
+        for s in vm.sfx_cues:
+            remapped_time = cut_plan.remap(s[0]) if cut_plan.applied else s[0]
+            if 0.0 <= remapped_time <= clip_duration:
+                active_sfx.append((remapped_time, s[1]))
+
         # Final 9:16 viral clip rendering with FFmpeg
         out_clip_name = f"clip_{idx}_{vm.title.replace(' ', '_')[:32]}.mp4"
         out_clip_path = STREAMER_CLIPS_DIR / out_clip_name
@@ -204,7 +259,7 @@ def run_streamer_pipeline(
             framing=framing,
             ass_subtitle_path=ass_path,
             burn_subtitles=True,
-            sfx_cues=[(s[0], s[1]) for s in vm.sfx_cues]
+            sfx_cues=active_sfx
         )
 
         if rendered and rendered.exists():
