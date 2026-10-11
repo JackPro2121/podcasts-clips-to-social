@@ -217,7 +217,7 @@ def detect_streamer_viral_moments(
         lines.append(line)
     transcript_text = "\n".join(lines)
 
-    prompt = build_streamer_detection_prompt(transcript_text, creator_name, num_clips)
+    prompt = _build_streamer_detection_prompt(transcript_text, creator_name, num_clips)
 
     # 1. Primary: Gemini 3.8 Flash
     if GEMINI_API_KEY:
