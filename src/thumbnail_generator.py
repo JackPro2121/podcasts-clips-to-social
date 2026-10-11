@@ -3,7 +3,7 @@ import re
 import subprocess
 import uuid
 from pathlib import Path
-from typing import Any, Optional, List
+from typing import Any, Optional, List, Tuple
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance
@@ -117,6 +117,42 @@ def find_best_font(size: int = 72) -> Any:
                 continue
     return ImageFont.load_default()
 
+
+def find_meme_font(size: int = 48) -> Any:
+    """Finds modern sans font for authentic TikTok text stickers (Roboto, Arial, Liberation)."""
+    candidates = [
+        FONTS_DIR / "Roboto-Bold.ttf",
+        Path("C:/Windows/Fonts/arialbd.ttf"),
+        Path("C:/Windows/Fonts/arial.ttf"),
+        Path("/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+        FONTS_DIR / "Montserrat-Black.ttf",
+    ]
+    for font_path in candidates:
+        if font_path.exists():
+            try:
+                return ImageFont.truetype(str(font_path), size)
+            except Exception:
+                continue
+    return ImageFont.load_default()
+
+
+def find_emoji_font(size: int = 42) -> Optional[Any]:
+    """Finds color emoji font for authentic TikTok stickers."""
+    candidates = [
+        Path("C:/Windows/Fonts/seguiemj.ttf"),
+        Path("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"),
+        Path("/usr/share/fonts/google-noto-color-emoji/NotoColorEmoji.ttf"),
+        Path("C:/Windows/Fonts/segoeui.ttf"),
+    ]
+    for font_path in candidates:
+        if font_path.exists():
+            try:
+                return ImageFont.truetype(str(font_path), size)
+            except Exception:
+                continue
+    return None
+
 def wrap_text(text: str, font: Any, max_width: int, draw: ImageDraw.ImageDraw) -> List[str]:
     """Wraps text into lines that fit within max_width."""
     words = text.split()
@@ -225,46 +261,115 @@ def generate_clip_thumbnail(
 
     draw = ImageDraw.Draw(canvas)
 
-    # TikTok Meme Style Thumbnail (Authentic TikTok clip channel style from user screenshot)
+    # TikTok Meme Style Thumbnail (Authentic TikTok in-app text sticker from user screenshot)
     if style == "tiktok_meme":
-        meme_font = find_best_font(42)
-        clean_text = title.strip()
-        wrapped_lines = wrap_text(clean_text, meme_font, OUTPUT_WIDTH - 240, dummy_draw)[:3]
-        line_h = 56
-        box_text_h = len(wrapped_lines) * line_h
+        meme_font = find_meme_font(48)
+        emoji_font = find_emoji_font(42) or meme_font
 
-        pad_x, pad_y = 44, 24
-        max_line_w = max(
-            (dummy_draw.textbbox((0, 0), line, font=meme_font)[2] - dummy_draw.textbbox((0, 0), line, font=meme_font)[0] for line in wrapped_lines),
-            default=200
-        )
-        box_w = min(OUTPUT_WIDTH - 80, max_line_w + pad_x * 2)
-        box_h = box_text_h + pad_y * 2
-        box_x = (OUTPUT_WIDTH - box_w) // 2
-        box_y = 150  # Top safe zone
+        def is_emoji(ch: str) -> bool:
+            cp = ord(ch)
+            return (0x1F000 <= cp <= 0x1FAFF) or (0x2600 <= cp <= 0x27BF) or (0xFE00 <= cp <= 0xFE0F) or (cp == 0x200D)
 
-        # Soft shadow behind white box
-        draw.rounded_rectangle(
-            [(box_x + 3, box_y + 4), (box_x + box_w + 3, box_y + box_h + 4)],
-            radius=20,
-            fill=(0, 0, 0, 70)
-        )
-        # Crisp solid white rounded box
-        draw.rounded_rectangle(
-            [(box_x, box_y), (box_x + box_w, box_y + box_h)],
-            radius=20,
-            fill=(255, 255, 255, 255),
-            outline=(20, 20, 20, 60),
-            width=2
-        )
+        def split_runs(text: str) -> List[Tuple[str, bool]]:
+            runs: List[Tuple[str, bool]] = []
+            cur = ""
+            cur_is_emoji = False
+            for ch in text:
+                ch_is_emoji = is_emoji(ch)
+                if ch_is_emoji != cur_is_emoji:
+                    if cur:
+                        runs.append((cur, cur_is_emoji))
+                    cur = ch
+                    cur_is_emoji = ch_is_emoji
+                else:
+                    cur += ch
+            if cur:
+                runs.append((cur, cur_is_emoji))
+            return runs
 
-        # Bold black meme hook text centered inside box
-        for i, line in enumerate(wrapped_lines):
-            l_bbox = draw.textbbox((0, 0), line, font=meme_font)
-            lw = l_bbox[2] - l_bbox[0]
-            lx = (OUTPUT_WIDTH - lw) // 2
-            ly = box_y + pad_y + (i * line_h)
-            draw.text((lx, ly), line, font=meme_font, fill=(10, 10, 10, 255))
+        def measure_line(text: str) -> Tuple[int, int]:
+            total_w = 0
+            max_h = 0
+            for run_text, run_is_emoji in split_runs(text):
+                f = emoji_font if run_is_emoji else meme_font
+                bbox = dummy_draw.textbbox((0, 0), run_text, font=f)
+                total_w += (bbox[2] - bbox[0])
+                max_h = max(max_h, bbox[3] - bbox[1])
+            return total_w, max(max_h, 48)
+
+        # Smart wrapping (max 3 lines) preserving emojis and intentional breaks
+        input_lines = title.strip().split("\n")
+        lines: List[str] = []
+        max_w = OUTPUT_WIDTH - 200
+
+        for il in input_lines:
+            words = il.split()
+            cur_line: List[str] = []
+            for w in words:
+                test_l = " ".join(cur_line + [w])
+                tw, _ = measure_line(test_l)
+                if tw <= max_w:
+                    cur_line.append(w)
+                else:
+                    if cur_line:
+                        lines.append(" ".join(cur_line))
+                        cur_line = [w]
+                    else:
+                        lines.append(w)
+            if cur_line:
+                lines.append(" ".join(cur_line))
+        lines = lines[:3]
+
+        pad_x = 24
+        pad_y = 12
+        radius = 8
+
+        # Calculate bounding boxes for each individual line
+        line_boxes = []
+        y_cursor = 220
+        for line in lines:
+            lw, lh = measure_line(line)
+            cx = OUTPUT_WIDTH // 2
+            bx1 = cx - (lw // 2) - pad_x
+            bx2 = cx + (lw // 2) + pad_x
+            by1 = y_cursor - pad_y
+            by2 = y_cursor + lh + pad_y
+            line_boxes.append((line, (bx1, by1, bx2, by2), lw, lh, y_cursor))
+            y_cursor += lh + (pad_y * 2) - 4  # seamless overlap matching TikTok app
+
+        # Soft drop shadow behind the white sticker
+        shadow_offset = (0, 3)
+        for _, (bx1, by1, bx2, by2), _, _, _ in line_boxes:
+            draw.rounded_rectangle(
+                [(bx1 + shadow_offset[0], by1 + shadow_offset[1]),
+                 (bx2 + shadow_offset[0], by2 + shadow_offset[1])],
+                radius=radius,
+                fill=(0, 0, 0, 60)
+            )
+
+        # Pure solid white sticker boxes (NO black border stroke!)
+        for _, (bx1, by1, bx2, by2), _, _, _ in line_boxes:
+            draw.rounded_rectangle(
+                [(bx1, by1), (bx2, by2)],
+                radius=radius,
+                fill=(255, 255, 255, 255)
+            )
+
+        # Black text & colored emojis centered inside each line
+        for line, (bx1, by1, bx2, by2), lw, lh, cur_y in line_boxes:
+            cur_x = OUTPUT_WIDTH // 2 - (lw // 2)
+            for run_text, run_is_emoji in split_runs(line):
+                f = emoji_font if run_is_emoji else meme_font
+                bbox = draw.textbbox((0, 0), run_text, font=f)
+                rw = bbox[2] - bbox[0]
+                if run_is_emoji:
+                    try:
+                        draw.text((cur_x, cur_y + 2), run_text, font=f, fill=(0, 0, 0, 255), embedded_color=True)
+                    except Exception:
+                        draw.text((cur_x, cur_y + 2), run_text, font=f, fill=(0, 0, 0, 255))
+                else:
+                    draw.text((cur_x, cur_y), run_text, font=f, fill=(10, 10, 10, 255))
+                cur_x += rw
 
     else:
         # Default Podcast / High-CTR Style (Unchanged)

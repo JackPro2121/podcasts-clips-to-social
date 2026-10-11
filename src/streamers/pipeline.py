@@ -227,7 +227,7 @@ def run_streamer_pipeline(
             clip_start=0.0,
             clip_end=clip_duration,
             output_ass_path=ass_path,
-            theme_key="hormozi",
+            theme_key="tiktok_streamer",
             watermark=STREAMER_WATERMARK,
             top_meme_title=vm.title
         )

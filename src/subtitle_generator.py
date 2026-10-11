@@ -125,7 +125,7 @@ Style: Default,{font_name},{font_size},{primary_col},&H000000FF,{outline_col},{s
 Style: DefaultMid,{font_name},{font_size},{primary_col},&H000000FF,{outline_col},{shadow_col},-1,0,0,0,100,100,1.5,0,1,{outline_w},{shadow_d},5,100,100,{margin_v},1
 Style: DefaultTop,{font_name},{font_size},{primary_col},&H000000FF,{outline_col},{shadow_col},-1,0,0,0,100,100,1.5,0,1,{outline_w},{shadow_d},8,100,100,{margin_v},1
 Style: TopHeader,Montserrat Black,42,&H00FFFFFF,&H000000FF,&H00B86B62,&H00000000,-1,0,0,0,100,100,1.2,0,3,11,0,8,100,100,{HOOK_BADGE_MARGIN_V},1
-Style: TikTokMemeBox,Montserrat ExtraBold,38,&H00000000,&H000000FF,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,1.0,0,3,14,0,8,120,120,150,1
+Style: TikTokMemeBox,Roboto,46,&H00000000,&H000000FF,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0.5,0,3,10,0,8,100,100,220,1
 Style: Watermark,Montserrat Black,24,&H90FFFFFF,&H000000FF,&H90000000,&H00000000,-1,0,0,0,100,100,1.2,0,1,1.5,0.0,7,60,60,90,1
 
 [Events]
@@ -358,7 +358,11 @@ def create_styled_ass_subtitles(
 
     # TikTok Meme Hook Box (Persistent top white box with bold black text)
     if top_meme_title:
-        clean_meme = normalize_caption_text(top_meme_title)
+        raw_title = str(top_meme_title).strip()
+        clean_meme = "".join(
+            ch for ch in unicodedata.normalize("NFC", raw_title)
+            if not unicodedata.category(ch).startswith("C") and ch not in "\r\n\t"
+        )
         words = clean_meme.split()
         lines_wrapped = []
         cur_line = []
@@ -373,7 +377,11 @@ def create_styled_ass_subtitles(
                 cur_len += len(w) + 1
         if cur_line:
             lines_wrapped.append(" ".join(cur_line))
-        wrapped_meme = "\\N".join(escape_ass_text(line) for line in lines_wrapped[:3])
+
+        wrapped_meme = "\\N".join(
+            line.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+            for line in lines_wrapped[:3]
+        )
         lines.insert(0, f"Dialogue: 3,0:00:00.00,{dur_str},TikTokMemeBox,,0,0,0,,{{\\fad(80,0)}}{wrapped_meme}")
 
     full_content = header + "\n".join(lines) + "\n"

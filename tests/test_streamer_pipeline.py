@@ -60,7 +60,7 @@ class TestStreamerPipeline(unittest.TestCase):
         dummy_segments = [TranscriptSegment(start=0.0, end=60.0, text="hello world bro what are you doing", words=[])]
         parsed = parse_streamer_clips_json(raw_json, dummy_segments, num_clips=1)
         self.assertEqual(len(parsed), 1)
-        self.assertEqual(parsed[0].title, "KAI GOES CRAZY ON STREAM")
+        self.assertEqual(parsed[0].title, "🔥 KAI GOES CRAZY ON STREAM!!")
         self.assertEqual(parsed[0].streamer_energy, "rage")
         self.assertEqual(len(parsed[0].sfx_cues), 2)
         self.assertTrue(2 <= len(parsed[0].hashtags) <= 4)

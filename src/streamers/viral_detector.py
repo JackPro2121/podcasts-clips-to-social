@@ -11,6 +11,7 @@ Runs Gemini 3.8 Flash -> Groq -> Ollama -> Streamer heuristic detector.
 
 import json
 import re
+import unicodedata
 from typing import List, Tuple
 from pydantic import BaseModel, Field
 
@@ -62,7 +63,7 @@ Your goal is to extract EXACTLY {num_clips} of the MOST EXPLOSIVE, FUNNY, OR UNH
 2. **Optimal Pacing (20s - 45s Sweet Spot)**: Keep it tight and fast-paced! Never drag past 45 seconds.
 3. **Standalone Cohesive Scene**: The moment must make complete sense on TikTok/Reels without context.
 4. **Clean Complete Boundaries**: Do not cut off in the middle of a scream or punchline.
-5. **TikTok Meme Hook Title**: Under 45 characters. Write like top TikTok clip channels (e.g. "Nah Kai really started crashing out", "Kai's cooked", "No way Kai responded to this", "Bro had Kevin Hart in tears", "Nah Kai you knew what you were doing").
+5. **TikTok Meme Hook Title**: Under 45 characters. Write like top TikTok clip channels and ALWAYS include 1 or 2 viral emojis at the end (e.g. "Nah Kai really started crashing out 💀", "Kai's cooked 😭", "No way Kai responded to this 💀😭", "Bro had Kevin Hart in tears 😂", "Kai Cenat NEVER beating these ALLEGATIONS 💀").
 6. **Social Caption**: 1 short punchy sentence matching authentic TikTok viewer tone (e.g. "Bro was not ready for this at all.").
 7. **HASHTAGS (STRICT REQUIREMENT)**: EXACTLY 2 to 4 hashtags ONLY! Never more than 4, never less than 2.
    Examples: ["#kaicenat", "#streamer", "#funny", "#fyp"]
@@ -71,7 +72,7 @@ Your goal is to extract EXACTLY {num_clips} of the MOST EXPLOSIVE, FUNNY, OR UNH
 {{
   "clips": [
     {{
-      "title": "Nah Kai really started crashing out",
+      "title": "Nah Kai really started crashing out 💀",
       "start_time": 120.5,
       "end_time": 155.0,
       "duration": 34.5,
@@ -116,11 +117,30 @@ def parse_streamer_clips_json(
         start, end = normalized
         dur = end - start
 
-        # Title formatting: Keep natural TikTok casing or uppercase without invalid symbols
-        raw_title = str(c.get("title", "STREAMER VIRAL MOMENT"))
-        clean_title = re.sub(r'[^\w\s\-\'\,\.\?]', '', raw_title).strip()
+        # Title formatting: Keep natural TikTok casing or uppercase with emojis
+        raw_title = str(c.get("title", "STREAMER VIRAL MOMENT 💀")).strip()
+        clean_title = "".join(
+            ch for ch in unicodedata.normalize("NFC", raw_title)
+            if not unicodedata.category(ch).startswith("C") and ch not in "\r\n\t"
+        ).strip()
         if not clean_title:
-            clean_title = "STREAMER VIRAL MOMENT"
+            clean_title = "STREAMER VIRAL MOMENT 💀"
+
+        # If title doesn't contain an emoji, append an authentic viral emoji based on energy
+        energy_emojis = {
+            "rage": "💀",
+            "funny": "😭",
+            "clutch": "🔥",
+            "hype": "🔥",
+            "drama": "💀😭",
+        }
+        has_emoji = any(
+            (0x1F000 <= ord(ch) <= 0x1FAFF) or (0x2600 <= ord(ch) <= 0x27BF)
+            for ch in clean_title
+        )
+        if not has_emoji:
+            energy = str(c.get("streamer_energy", "funny")).lower().strip()
+            clean_title = f"{clean_title} {energy_emojis.get(energy, '💀')}"
 
         caption = strip_emojis(str(c.get("social_caption", "Bro was not ready for this.")))
 
