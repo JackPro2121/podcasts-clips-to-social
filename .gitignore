@@ -89,5 +89,7 @@ audit_inspection/
 venv/
 env/
 
-# Documentation & notes (keep private)
+# Documentation & notes (keep private scratch docs ignored, allow core docs)
 *.md
+!README.md
+!AGENTS.md
