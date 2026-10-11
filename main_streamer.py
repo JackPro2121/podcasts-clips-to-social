@@ -51,8 +51,8 @@ def main() -> None:
         "--framing",
         type=str,
         default="auto",
-        choices=["auto", "single_smooth", "split_screen"],
-        help="Framing mode: auto, single_smooth, split_screen"
+        choices=["auto", "single_smooth", "split_screen", "stacked_webcam", "fullscreen_room"],
+        help="Framing mode: auto, single_smooth, split_screen, stacked_webcam, fullscreen_room"
     )
     parser.add_argument(
         "--post-to-buffer",

@@ -26,7 +26,8 @@ from src.transcriber import (
     TranscriptSegment, WordTimestamp
 )
 from src.jump_cutter import build_cut_plan, prepare_compacted_clip
-from src.face_tracker import analyze_faces_in_clip
+from src.streamers.layout_compositor import build_streamer_framing
+from src.streamers.audio_analyzer import analyze_audio_energy
 from src.subtitle_generator import create_styled_ass_subtitles
 from src.video_editor import render_viral_clip
 from src.thumbnail_generator import generate_clip_thumbnail
@@ -216,8 +217,21 @@ def run_streamer_pipeline(
                     )
                 clip_segments = remapped_segments
 
-        # Face tracking & framing
-        framing = analyze_faces_in_clip(clip_path, start_time=0.0, end_time=clip_duration)
+        # Streamer Face tracking & Layout Compositing
+        # (Streamer Identity Locking + Stationary Webcam Stacked Layout + Smart Off-Screen Fallback)
+        framing = build_streamer_framing(
+            video_path=clip_path,
+            start_time=0.0,
+            end_time=clip_duration,
+            streamer_name=target_creator,
+            force_layout=framing_mode if framing_mode in ("stacked_webcam", "fullscreen_room") else "auto"
+        )
+
+        # Audio Energy & Scream Peak Analysis (detects screaming and reactions for punch zooms)
+        audio_analysis = analyze_audio_energy(clip_path)
+        peak_intervals = audio_analysis.get("peak_intervals", [])
+        if peak_intervals:
+            print(f"[*] Detected {len(peak_intervals)} high-energy reaction/scream peaks in audio.")
 
         # Generate styled ASS kinetic subtitles (Hormozi / Streamer viral style)
         # Includes persistent TikTok White Meme Hook Box on top + lower-third kinetic captions
@@ -260,6 +274,7 @@ def run_streamer_pipeline(
             end_time=clip_duration,
             output_clip_path=out_clip_path,
             framing=framing,
+            peak_intensity_segments=peak_intervals,
             ass_subtitle_path=ass_path,
             burn_subtitles=True,
             sfx_cues=active_sfx
