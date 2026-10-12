@@ -111,10 +111,15 @@ def parse_streamer_clips_json(
     for c in clips_data:
         start = float(c.get("start_time", 0.0))
         end = float(c.get("end_time", start + 30.0))
+        # HARD CAP: Streamer clips for TikTok/Shorts must be strictly under 45s
+        if end - start > 45.0:
+            end = start + 45.0
         normalized = _normalize_clip_window(start, end, segments)
         if normalized is None:
             continue
         start, end = normalized
+        if end - start > 45.0:
+            end = start + 45.0
         dur = end - start
 
         # Title formatting: Keep natural TikTok casing or uppercase with emojis

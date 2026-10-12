@@ -192,6 +192,7 @@ def compact_media(
             "-i", str(source),
             "-filter_complex", graph,
             "-map", "[outv]", "-map", "[outa]",
+            "-threads", "2",
             "-c:v", "libx264", "-crf", str(crf), "-preset", preset,
             "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "192k", "-ar", "48000",

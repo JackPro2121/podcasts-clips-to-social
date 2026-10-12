@@ -132,11 +132,12 @@ def run_streamer_pipeline(
     for idx, vm in enumerate(viral_moments, start=1):
         print(f"\n>>> Processing Streamer Clip #{idx}: '{vm.title}' [{vm.start_time:.1f}s - {vm.end_time:.1f}s]")
 
-        # Download just the 30-45s window
+        # Download just the 30-45s window (strictly capped to 45s max for viral Shorts retention)
+        seg_end = min(vm.end_time, vm.start_time + 45.0)
         clip_info = download_clip_segment(
             video_url=target_url,
             start_time=max(0.0, vm.start_time - 1.0),
-            end_time=vm.end_time + 1.0,
+            end_time=seg_end + 1.0,
             clip_index=idx,
             output_dir=DOWNLOADS_DIR
         )
@@ -153,6 +154,9 @@ def run_streamer_pipeline(
 
         # Transcribe & word-align audio for kinetic captions
         whisper_segments = transcribe_audio_whisper(clip_path)
+        import gc
+        gc.collect()
+
         if whisper_segments:
             clip_segments = whisper_segments
         else:
@@ -190,12 +194,14 @@ def run_streamer_pipeline(
 
         cut_plan = build_cut_plan(p_words, clip_duration)
         if cut_plan.applied:
+            print(f"[*] Streamer pacing: removing {cut_plan.removed_s:.2f}s of dead air...")
             prepared = prepare_compacted_clip(
                 clip_path, p_words, clip_duration, clip_path.parent
             )
             if prepared:
                 clip_path, _, clip_duration = prepared
-                print(f"[*] Streamer pacing: removed {cut_plan.removed_s:.2f}s of dead air.")
+                print(f"[+] Streamer pacing applied: clip duration is now {clip_duration:.2f}s.")
+                gc.collect()
 
                 # Remap transcript word and segment timestamps to match the compacted audio timeline
                 remapped_segments: List[TranscriptSegment] = []
