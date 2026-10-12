@@ -75,19 +75,22 @@ Extracts high-retention TikTok/Shorts clips from 3-to-5 hour live streams of top
   - Enforces strict hashtag bounds: **2 to 4 hashtags** (e.g. `#kaicenat #streamer #funny #shorts`).
 * **SFace Streamer Identity Locking & 3-Tier State Machine**:
   - [`src/streamers/face_tracker.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/src/streamers/face_tracker.py):
-    - **SFace (SphereFace / ArcFace ONNX)** + YuNet: Locks onto the primary streamer's 128-D face embedding. Rejects guests (MrBeast, Kevin Hart, AMP crew) from hijacking the camera.
-    - **Tier 1 (Locked)**: Streamer centered with smooth spring-damper LERP panning.
+    - **SFace (SphereFace / ArcFace ONNX)** + YuNet: Loads pre-computed ground-truth embeddings from `src/models/streamer_profiles/` (`kai_cenat.npy`, `ishowspeed.npy`, `xqc.npy`). Rejects guests (MrBeast, Kevin Hart, AMP crew) from hijacking the camera.
+    - **Tier 1 (Locked)**: Streamer centered with smooth spring-damper LERP panning and safe headroom above the face.
     - **Tier 2 (Occluded / Turning / Running)**: Momentary face loss ($<1.5\text{s}$) holds last known position without jerky movements.
     - **Tier 3 (Off-Screen Exit $>1.5\text{s}$)**: Streamer leaves chair/room $\rightarrow$ Smooth autonomous fallback to **Wide Room View** (`presentation_slide` mode with blurred backdrop). Instant snap-back when the streamer returns!
-* **Auto-Stacked Layout Detection**:
-  - [`src/streamers/layout_compositor.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/src/streamers/layout_compositor.py): Detects stationary corner webcam ROI. Generates auto-stacked 9:16 layout (Top 50%: Facecam Reaction / Bottom 50%: Gameplay/Video).
+* **Stream Layout Intelligence Engine**:
+  - [`src/streamers/layout_compositor.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/src/streamers/layout_compositor.py):
+    - **Mode 1 (`stacked_webcam`)**: Detects stationary corner webcam ROI. Generates auto-stacked 9:16 layout (Top 50%: Facecam Reaction / Bottom 50%: Gameplay/Video).
+    - **Mode 2 (`multi_person_room`)**: Detects 2+ prominent people in room/collab streams (Kai Cenat x MrBeast, Speed x Adin). Routes to **Wide Room Presentation View** (`presentation_slide` mode with cinematic blurred backdrop) so both host and guest remain 100% visible with zero facial obstructions.
+    - **Mode 3 (`single_streamer_room`)**: Single-creator desk/room framing with SFace identity lock.
 * **Audio Scream & Energy Analyzer**:
   - [`src/streamers/audio_analyzer.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/src/streamers/audio_analyzer.py): Detects decibel volume jumps ($>6\text{ dB}$ above median) via FFmpeg raw PCM to trigger dynamic punch-zooms (1.2x zoompan).
 * **Live Chat Velocity Engine**:
   - [`src/streamers/chat_analyzer.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/src/streamers/chat_analyzer.py): Calculates Messages Per Second (MPS) and weights viral emotes (`💀`, `LMAO`, `COOKED`, `W`, `L`).
 * **Aesthetics & In-App TikTok Meme Hook Sticker**:
-  - Persistent multi-line connected white meme container box hugging text with 8px rounded corners, subtle drop shadow, and viral emojis (`💀`, `😭`, `🔥`).
-  - Clean lower-third kinetic subtitles leaving streamer reactions unobstructed.
+  - Persistent multi-line connected white meme container box placed in upper safe-zone (`MarginV = 130`) hugging bold black text with 8px rounded corners, subtle drop shadow, and viral emojis (`💀`, `😭`, `🔥`).
+  - High-energy kinetic subtitles (`tiktok_streamer`: Montserrat Black 58pt, uppercase, 2-word bursts, Electric Yellow pop `#00E6FF`) in the lower safe-zone.
 * **Publishing Isolation**:
   - Uses `STREAMER_BUFFER_ACCESS_TOKEN` and `STREAMER_BUFFER_CHANNEL_IDS`. **Zero crossover** with podcast accounts.
 

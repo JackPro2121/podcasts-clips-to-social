@@ -387,18 +387,18 @@ SUBTITLE_THEMES: Dict[str, Dict[str, Any]] = {
         "uppercase": True
     },
     "tiktok_streamer": {
-        "name": "TikTok Streamer Clean",
-        "font_name": "Roboto",
-        "fallback_font": "Arial",
-        "font_size": 42,
+        "name": "TikTok Streamer Kinetic",
+        "font_name": "Montserrat Black",
+        "fallback_font": "Arial Black",
+        "font_size": 58,
         "primary_color": "&H00FFFFFF",      # Crisp White
-        "highlight_color": "&H00FFFFFF",    # Clean White
-        "outline_color": "&H00000000",      # Thin Black Outline
-        "outline_width": 2.5,
-        "shadow_color": "&H80000000",       # Soft Drop Shadow
-        "shadow_depth": 1.5,
-        "max_words_per_line": 3,
-        "uppercase": False
+        "highlight_color": "&H0000E6FF",    # Electric Yellow Pop (&H00BBGGRR)
+        "outline_color": "&H00000000",      # Deep Crisp Outline
+        "outline_width": 5.5,
+        "shadow_color": "&H90000000",       # Deep Soft Drop Shadow
+        "shadow_depth": 3.0,
+        "max_words_per_line": 2,            # 1-to-2 word rapid kinetic bursts
+        "uppercase": True
     }
 }
 

@@ -115,11 +115,15 @@ def parse_streamer_clips_json(
         if end - start > 45.0:
             end = start + 45.0
         normalized = _normalize_clip_window(start, end, segments)
-        if normalized is None:
-            continue
-        start, end = normalized
-        if end - start > 45.0:
-            end = start + 45.0
+        if normalized is not None:
+            start, end = normalized
+            if end - start > 45.0:
+                end = start + 45.0
+        else:
+            # Resilient fallback for streamer clips (bounds 20s to 45s)
+            transcript_end = max((s.end for s in segments), default=9999.0)
+            start = max(0.0, min(start, max(0.0, transcript_end - 25.0)))
+            end = min(transcript_end, max(start + 20.0, min(end, start + 45.0)))
         dur = end - start
 
         # Title formatting: Keep natural TikTok casing or uppercase with emojis
@@ -263,11 +267,60 @@ def detect_streamer_viral_moments(
 
     # 4. Fallback: Heuristic streamer density
     print("[*] V2 Streamer Detector: Running streamer excitement heuristic fallback...")
-    return _heuristic_streamer_detector(segments, num_clips)
+    return _heuristic_streamer_detector(segments, creator_name=creator_name, num_clips=num_clips)
+
+
+def _generate_dynamic_streamer_title(creator_name: str, sample_text: str, energy: str) -> str:
+    """Generates an authentic high-CTR TikTok hook title with viral emojis based on text context."""
+    clean_creator = creator_name.title() if creator_name and creator_name.lower() not in ("streamer", "streamers") else "Kai"
+    lower = sample_text.lower()
+
+    if any(k in lower for k in ["beast", "mrbeast", "jimmy"]):
+        options = [
+            f"Nah {clean_creator} really thought MrBeast was normal 💀",
+            f"MrBeast had {clean_creator} completely terrified 😭💀",
+            f"{clean_creator} and MrBeast had the wildest stream 💀🔥",
+        ]
+    elif any(k in lower for k in ["firework", "fireworks", "boom", "explosion", "bomb"]):
+        options = [
+            f"Nah {clean_creator} really lit fireworks in his room 💀😭",
+            f"{clean_creator} almost burned his house down 💀🔥",
+            f"Bro had the whole room shaking 😭💀",
+        ]
+    elif any(k in lower for k in ["speed", "ishowspeed"]):
+        options = [
+            f"Speed and {clean_creator} are completely unhinged 💀😭",
+            f"No way Speed did this on {clean_creator}'s stream 💀",
+        ]
+    elif energy == "rage" or any(k in lower for k in ["shut up", "hell no", "swear", "stop", "deadass"]):
+        options = [
+            f"Nah {clean_creator} really started crashing out 💀",
+            f"{clean_creator} was completely fed up with this 💀😭",
+            f"Bro {clean_creator} is actually so mad right now 😭",
+            f"{clean_creator} caught screaming at chat 💀",
+        ]
+    elif energy == "funny" or any(k in lower for k in ["laugh", "bruh", "nah", "cooked", "chat"]):
+        options = [
+            f"Bro {clean_creator} is actually cooked 😭💀",
+            f"Chat had {clean_creator} in tears laughing 😭",
+            f"No way {clean_creator} actually did this 💀😭",
+            f"{clean_creator} could NOT hold his laugh 😭💀",
+        ]
+    else:
+        options = [
+            f"Nah {clean_creator} is NOT real for this 💀😭",
+            f"{clean_creator} caught completely off guard 💀",
+            f"Wait till you see {clean_creator}'s reaction 😭🔥",
+            f"{clean_creator} NEVER beating the allegations 💀",
+            f"Bro was NOT ready for what happened next 💀",
+        ]
+    import random
+    return random.choice(options)
 
 
 def _heuristic_streamer_detector(
     segments: List[TranscriptSegment],
+    creator_name: str = "Streamer",
     num_clips: int = 3
 ) -> List[StreamerClipCandidate]:
     """Fast rule-based detection for exclamation marks, caps, and streamer slang."""
@@ -287,32 +340,39 @@ def _heuristic_streamer_detector(
         score += sum(1 for w in text.split() if w.isupper() and len(w) > 2) * 3
         # Keywords
         lower = text.lower()
-        for kw_list in STREAMER_KEYWORDS.values():
+        energy = "hype"
+        for e_key, kw_list in STREAMER_KEYWORDS.items():
             for kw in kw_list:
                 if kw in lower:
                     score += 5
+                    energy = e_key
 
-        scored_windows.append((score, start, end, text[:60]))
+        scored_windows.append((score, start, end, text[:60], energy))
 
     scored_windows.sort(key=lambda x: x[0], reverse=True)
     results = []
     used_times: List[Tuple[float, float]] = []
 
-    for score, start, end, sample in scored_windows:
+    clean_creator_tag = f"#{creator_name.lower().replace(' ', '')}" if creator_name and creator_name.lower() != "streamer" else "#kaicenat"
+
+    for score, start, end, sample, energy in scored_windows:
         overlap = any(not (end <= u_s or start >= u_e) for u_s, u_e in used_times)
         if overlap:
             continue
         used_times.append((start, end))
+
+        title = _generate_dynamic_streamer_title(creator_name, sample, energy)
+
         results.append(StreamerClipCandidate(
-            title="INSANE STREAM REACTION",
+            title=title,
             start_time=start,
             end_time=end,
             duration=end - start,
             viral_score=min(95, score),
             hook_reason="High density of vocal excitement and reactions",
-            social_caption="Bro really thought he could get away with this. #streamer #funny #shorts",
-            hashtags=["#streamer", "#twitch", "#funny", "#shorts"],
-            streamer_energy="hype",
+            social_caption="Bro was not ready for this. Wait until you see how it ended.",
+            hashtags=[clean_creator_tag, "#streamer", "#funny", "#fyp"],
+            streamer_energy=energy,
             sfx_cues=[(0.1, "whoosh"), (end - start - 1.5, "ding")]
         ))
         if len(results) >= num_clips:

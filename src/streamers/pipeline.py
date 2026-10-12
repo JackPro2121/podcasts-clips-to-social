@@ -232,7 +232,7 @@ def run_streamer_pipeline(
             start_time=0.0,
             end_time=clip_duration,
             streamer_name=target_creator,
-            force_layout=framing_mode if framing_mode in ("stacked_webcam", "fullscreen_room") else "auto"
+            force_layout=framing_mode
         )
 
         # Audio Energy & Scream Peak Analysis (detects screaming and reactions for punch zooms)

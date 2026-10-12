@@ -55,6 +55,17 @@ class StreamerIdentityTracker:
         self.streamer_name = streamer_name
         self.reference_embedding = reference_embedding
 
+        # Auto-load ground-truth face profile if available
+        if self.reference_embedding is None and streamer_name:
+            slug = streamer_name.lower().strip().replace(" ", "_").replace("-", "_")
+            profile_path = MODELS_DIR / "streamer_profiles" / f"{slug}.npy"
+            if profile_path.exists():
+                try:
+                    self.reference_embedding = np.load(str(profile_path))
+                    print(f"[+] Loaded ground-truth face profile for {streamer_name} ({profile_path.name})")
+                except Exception as e:
+                    print(f"[!] Could not load face profile for {streamer_name}: {e}")
+
         # Determine downscaled detection size preserving aspect ratio
         if frame_width >= frame_height:
             self.det_w = det_max_dim
@@ -392,6 +403,11 @@ def _build_shot_from_points(
     avg_cx = int(np.median(cxs))
     avg_cy = int(np.median(cys))
 
+    # Protect headroom: prevent face from being pushed directly beneath top sticker
+    min_headroom_y = active_y + int(target_crop_w * 0.42)
+    max_headroom_y = active_y + active_h - int(target_crop_w * 0.42)
+    avg_cy = max(min_headroom_y, min(avg_cy, max_headroom_y))
+
     crop_x = max(active_x, min(avg_cx - target_crop_w // 2, active_x + active_w - target_crop_w))
 
     timeline: List[Tuple[float, int]] = []
@@ -400,8 +416,6 @@ def _build_shot_from_points(
             rel_offset = round(p.time_s - start_t, 2)
             clamped_pt_cx = max(active_x + target_crop_w // 2, min(p.center_x, active_x + active_w - target_crop_w // 2))
             timeline.append((rel_offset, clamped_pt_cx))
-
-    zoom = 1.15 if start_t < 2.5 else 1.0
 
     return ShotPlan(
         start=start_t,
@@ -412,7 +426,7 @@ def _build_shot_from_points(
         crop_w=target_crop_w,
         crop_h=active_h,
         center_y=avg_cy,
-        zoom_factor=zoom,
+        zoom_factor=1.0,
         face_centers_timeline=timeline,
-        motion="push_in" if zoom > 1.0 else "drift"
+        motion="drift"
     )

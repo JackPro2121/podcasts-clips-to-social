@@ -56,6 +56,8 @@ def detect_stream_layout(
     tracker = StreamerIdentityTracker(w, h, det_max_dim=640)
 
     detected_faces: List[Tuple[int, int, int, int]] = []  # (x, y, w, h)
+    multi_face_frames = 0
+    valid_face_frames = 0
 
     f_idx = 0
     while f_idx < max_frame:
@@ -66,9 +68,12 @@ def detect_stream_layout(
 
         scaled_faces = tracker.detect_and_scale(frame)
         if scaled_faces is not None and len(scaled_faces) > 0:
-            for face in scaled_faces:
-                conf = float(face[14])
-                if conf >= 0.50:
+            valid_faces = [f for f in scaled_faces if float(f[14]) >= 0.45]
+            if valid_faces:
+                valid_face_frames += 1
+                if len(valid_faces) >= 2:
+                    multi_face_frames += 1
+                for face in valid_faces:
                     detected_faces.append((int(face[0]), int(face[1]), int(face[2]), int(face[3])))
 
         f_idx += step
@@ -131,7 +136,20 @@ def detect_stream_layout(
             confidence=0.88
         )
 
-    print(f"[*] Detected 'fullscreen_room' stream layout (rel_face_w: {rel_fw:.2f}, std_cx: {std_cx:.1f}px)")
+    # Check for multi-person room stream (Host + Guest collab, e.g. Kai Cenat x MrBeast, Speed x Adin)
+    multi_face_ratio = (multi_face_frames / max(1, valid_face_frames)) if valid_face_frames > 0 else 0.0
+    if multi_face_ratio >= 0.25:
+        print(
+            f"[+] Detected 'multi_person_room' stream layout: Multiple people in scene "
+            f"({multi_face_frames}/{valid_face_frames} frames with 2+ faces). "
+            f"Routing to Wide Room Presentation View with cinematic blurred backdrop!"
+        )
+        return StreamLayoutInfo(
+            layout_type="multi_person_room",
+            confidence=0.91
+        )
+
+    print(f"[*] Detected 'fullscreen_room' single streamer layout (rel_face_w: {rel_fw:.2f}, std_cx: {std_cx:.1f}px)")
     return StreamLayoutInfo(
         layout_type="fullscreen_room",
         confidence=0.92
@@ -152,7 +170,7 @@ def build_streamer_framing(
         start_time: Relative or absolute start time
         end_time: Relative or absolute end time
         streamer_name: Name of primary streamer
-        force_layout: 'auto', 'stacked_webcam', or 'fullscreen_room'
+        force_layout: 'auto', 'stacked_webcam', 'multi_person_room', 'fullscreen_room', 'single_smooth'
     """
     clip_dur = max(0.1, end_time - start_time)
 
@@ -160,6 +178,10 @@ def build_streamer_framing(
     if force_layout == "stacked_webcam":
         layout_info = detect_stream_layout(video_path, sample_duration=min(6.0, clip_dur))
         layout_info.layout_type = "stacked_webcam"
+    elif force_layout == "fullscreen_room" or force_layout == "multi_person_room":
+        layout_info.layout_type = "multi_person_room"
+    elif force_layout == "single_smooth":
+        layout_info.layout_type = "fullscreen_room"
     elif force_layout == "auto":
         layout_info = detect_stream_layout(video_path, sample_duration=min(6.0, clip_dur))
 
@@ -196,7 +218,40 @@ def build_streamer_framing(
             active_h=h
         )
 
-    # Fullscreen camera layout: use StreamerIdentityTracker with off-screen fallback
+    elif layout_info.layout_type == "multi_person_room":
+        # Wide Room Shot with Blurred Top/Bottom Backdrop (presentation_slide mode)
+        # Keeps both streamer & guest 100% visible with zero head cutoffs and safe sticker margins!
+        cap = cv2.VideoCapture(str(video_path))
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 1920
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 1080
+        cap.release()
+
+        shot = ShotPlan(
+            start=0.0,
+            end=clip_dur,
+            mode="presentation_slide",
+            crop_x=0,
+            crop_y=0,
+            crop_w=w,
+            crop_h=h,
+            center_y=h // 2,
+            zoom_factor=1.0,
+            motion="drift"
+        )
+
+        return FramingDecision(
+            mode="presentation_slide",
+            face_count=2,
+            shots=[shot],
+            video_width=w,
+            video_height=h,
+            active_x=0,
+            active_y=0,
+            active_w=w,
+            active_h=h
+        )
+
+    # Fullscreen single-camera layout: use StreamerIdentityTracker with off-screen fallback
     return analyze_streamer_clip_framing(
         video_path=video_path,
         start_time=start_time,
