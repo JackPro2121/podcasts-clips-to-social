@@ -73,7 +73,7 @@ jobs:
             sudo apt-get install -y -qq ffmpeg libgl1 libglib2.0-0 || true
           fi
           sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout="15" -qq || true
-          sudo apt-get install -y -qq fonts-montserrat || true
+          sudo apt-get install -y -qq fonts-montserrat fonts-noto-color-emoji || true
           ffmpeg -version | head -n 1
 
       - name: Install Python Dependencies

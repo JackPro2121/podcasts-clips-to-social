@@ -264,7 +264,14 @@ def generate_clip_thumbnail(
     # TikTok Meme Style Thumbnail (Authentic TikTok in-app text sticker from user screenshot)
     if style == "tiktok_meme":
         meme_font = find_meme_font(48)
-        emoji_font = find_emoji_font(42) or meme_font
+        emoji_font = find_emoji_font(42)
+
+        # If no color emoji font exists on system, sanitize emojis to prevent '▯' tofu rectangles
+        if emoji_font is None:
+            title = re.sub(r'[\U00010000-\U0010ffff]', '', title)
+            title = re.sub(r'[\u2600-\u27bf\ufe00-\ufe0f]', '', title)
+            title = re.sub(r'\s+', ' ', title).strip()
+            emoji_font = meme_font
 
         def is_emoji(ch: str) -> bool:
             cp = ord(ch)
