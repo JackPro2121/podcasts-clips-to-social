@@ -15,6 +15,7 @@ history is never touched or affected.
 
 import json
 import re
+import subprocess
 import urllib.request
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional
@@ -28,6 +29,7 @@ STREAMER_CHANNELS: Dict[str, Dict[str, Any]] = {
         "name": "Kai Cenat",
         "category": "just_chatting",
         "channel_urls": [
+            "https://www.youtube.com/@KaiCenatLive/streams",
             "https://www.youtube.com/@KaiCenatLive/videos",
             "https://www.youtube.com/@KaiCenat/videos",
         ],
@@ -40,8 +42,9 @@ STREAMER_CHANNELS: Dict[str, Dict[str, Any]] = {
         "name": "IShowSpeed",
         "category": "irl",
         "channel_urls": [
-            "https://www.youtube.com/@IShowSpeed/videos",
             "https://www.youtube.com/@LiveSpeedy/videos",
+            "https://www.youtube.com/@IShowSpeed/streams",
+            "https://www.youtube.com/@IShowSpeed/videos",
         ],
         "rss_feeds": [
             "https://www.youtube.com/feeds/videos.xml?channel_id=UCWsD388ETZql143SFkk9VvA",
@@ -52,6 +55,7 @@ STREAMER_CHANNELS: Dict[str, Dict[str, Any]] = {
         "name": "Jynxzi",
         "category": "gaming",
         "channel_urls": [
+            "https://www.youtube.com/@Jynxzi/streams",
             "https://www.youtube.com/@Jynxzi/videos",
             "https://www.youtube.com/@JynxziClips/videos",
         ],
@@ -64,8 +68,9 @@ STREAMER_CHANNELS: Dict[str, Dict[str, Any]] = {
         "name": "CaseOh",
         "category": "gaming",
         "channel_urls": [
-            "https://www.youtube.com/@CaseOh_/videos",
             "https://www.youtube.com/@CaseOhGames/videos",
+            "https://www.youtube.com/@CaseOhGames/streams",
+            "https://www.youtube.com/@CaseOh_/videos",
         ],
         "rss_feeds": [
             "https://www.youtube.com/feeds/videos.xml?channel_id=UCp8U9a9_S2lQnQ25h9oT_qA",
@@ -77,6 +82,7 @@ STREAMER_CHANNELS: Dict[str, Dict[str, Any]] = {
         "category": "just_chatting",
         "channel_urls": [
             "https://www.youtube.com/@xQcOW/videos",
+            "https://www.youtube.com/@xQcOW/streams",
             "https://www.youtube.com/@xQcClips/videos",
         ],
         "rss_feeds": [
@@ -89,6 +95,7 @@ STREAMER_CHANNELS: Dict[str, Dict[str, Any]] = {
         "category": "just_chatting",
         "channel_urls": [
             "https://www.youtube.com/@AdinLive/videos",
+            "https://www.youtube.com/@AdinLive/streams",
         ],
         "rss_feeds": [
             "https://www.youtube.com/feeds/videos.xml?channel_id=UCgs_U0_x2BwE_J_7vH3oFzA",
@@ -139,6 +146,40 @@ def extract_video_id_from_url(url: str) -> Optional[str]:
         if m:
             return m.group(1)
     return None
+
+
+def fetch_channel_videos_ytdlp(channel_url: str, limit: int = 5) -> List[Dict[str, str]]:
+    """Fetches candidate videos/streams directly from YouTube channel using yt-dlp flat-playlist."""
+    candidates = []
+    try:
+        cmd = [
+            "yt-dlp",
+            "--flat-playlist",
+            "--no-update",
+            "--playlist-end", str(limit),
+            "--dump-json",
+            channel_url
+        ]
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=25)
+        if p.returncode == 0 and p.stdout:
+            for line in p.stdout.strip().split("\n"):
+                if not line.strip():
+                    continue
+                try:
+                    data = json.loads(line)
+                    vid_id = data.get("id")
+                    title = data.get("title", "")
+                    if vid_id:
+                        candidates.append({
+                            "video_id": vid_id,
+                            "url": f"https://www.youtube.com/watch?v={vid_id}",
+                            "title": title
+                        })
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"[-] yt-dlp channel discovery note: {e}")
+    return candidates
 
 
 def fetch_rss_feed_videos(feed_url: str, limit: int = 5) -> List[Dict[str, str]]:
@@ -212,7 +253,7 @@ def discover_streamer_candidates(
     category: Optional[str] = None,
     max_candidates: int = 10
 ) -> List[Dict[str, str]]:
-    """Discovers fresh, unprocessed streamer VODs via Firecrawl and RSS feeds."""
+    """Discovers fresh, unprocessed streamer VODs via direct yt-dlp, Firecrawl and RSS feeds."""
     from src.config import FIRECRAWL_API_KEY
 
     history = set(load_streamer_history())
@@ -228,7 +269,25 @@ def discover_streamer_candidates(
 
     discovered = []
 
-    # Tier 1: Firecrawl Intelligent Search
+    # Tier 1: Real-Time yt-dlp Channel Discovery (Queries /streams & /videos for latest 24h streams)
+    for s in selected_streamers:
+        urls = s.get("channel_urls", [])
+        for u in urls:
+            vids = fetch_channel_videos_ytdlp(u, limit=4)
+            for v in vids:
+                vid_id = v["video_id"]
+                if vid_id not in history:
+                    discovered.append({
+                        "creator": s["name"],
+                        "category": s.get("category", "streamer"),
+                        "video_id": vid_id,
+                        "url": v["url"],
+                        "title": v["title"],
+                    })
+                if len(discovered) >= max_candidates:
+                    return discovered
+
+    # Tier 2: Firecrawl Intelligent Search
     if FIRECRAWL_API_KEY:
         for s in selected_streamers:
             print(f"[*] Firecrawl: Searching fresh stream VODs for {s['name']}...")
@@ -246,7 +305,7 @@ def discover_streamer_candidates(
                 if len(discovered) >= max_candidates:
                     return discovered
 
-    # Tier 2: RSS Feed parsing fallback
+    # Tier 3: RSS Feed parsing fallback
     for s in selected_streamers:
         feeds = s.get("rss_feeds", [])
         for feed in feeds:
