@@ -62,10 +62,15 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Install System Dependencies (FFmpeg)
+      - name: Install System Dependencies (FFmpeg & Fonts)
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg fonts-montserrat libgl1 libglib2.0-0
+          if ! command -v ffmpeg &> /dev/null; then
+            sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout="15" -qq || true
+            sudo apt-get install -y -qq ffmpeg libgl1 libglib2.0-0 || true
+          fi
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout="15" -qq || true
+          sudo apt-get install -y -qq fonts-montserrat || true
+          ffmpeg -version | head -n 1
 
       - name: Install Python Dependencies
         run: |
@@ -74,6 +79,7 @@ jobs:
 
       - name: Run V2 Streamer Clipper
         env:
+          PYTHONUNBUFFERED: '1'
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
           GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
@@ -96,7 +102,19 @@ jobs:
           [ "${{ github.event.inputs.post_to_buffer }}" = "true" ] && args+=(--post-to-buffer)
           [ -n "${{ github.event.inputs.delay_days }}" ] && args+=(--delay-days "${{ github.event.inputs.delay_days }}")
 
-          python main_streamer.py "${args[@]}"
+          python -u main_streamer.py "${args[@]}"
+
+      - name: Persist Streamer Video History
+        if: always()
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/streamer_history.json || true
+          if ! git diff --staged --quiet; then
+            git commit -m "chore(history): update processed streamer VODs [skip ci]"
+            git pull --rebase origin main || true
+            git push origin main || echo "History push skipped"
+          fi
 
       - name: Upload Streamer Clips as Artifacts
         if: always()

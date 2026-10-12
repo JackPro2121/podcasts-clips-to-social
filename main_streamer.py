@@ -16,11 +16,11 @@ Usage:
 import sys
 import argparse
 
-# Ensure UTF-8 console output
+# Ensure UTF-8 console output and immediate flushing
 if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 if hasattr(sys.stderr, "reconfigure"):
-    sys.stderr.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8", line_buffering=True)
 
 from src.streamers.pipeline import run_streamer_pipeline
 
