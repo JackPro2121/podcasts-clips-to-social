@@ -93,3 +93,4 @@ env/
 *.md
 !README.md
 !AGENTS.md
+!GITHUB_ACCESS.md

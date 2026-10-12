@@ -649,14 +649,24 @@ def build_video_filtergraph(
     # conditionally or a crop that slightly shrinks the window.
     # For professional result, we apply a subtle zoom overlay or we use the 
     # zoompan filter at the end of the base.
-    if peak_intensity_segments and not IS_CI:
-        # We'll use a subtle zoompan: z=if(condition, 1.2, 1.0)
-        # Note: zoompan is very picky about resolution. We apply it to the scaled base.
-        # This is a simplified version that achieves the 1.2x effect.
-        segments_logic = " || ".join([f"between(it,{s[0]},{s[1]})" for s in peak_intensity_segments])
-        # z=zoom factor, x and y are centers. We keep center since base is already cropped.
-        zoom_f = f"[base_in]zoompan=z='if({segments_logic},1.2,1.0)':d=1:s={OUTPUT_WIDTH}x{OUTPUT_HEIGHT},fps={FPS}[zoomed]"
-        filters[-1] = filters[-1].replace("[base]", "[base_in]") 
+    if peak_intensity_segments:
+        # D16 fix: zoompan `it` is a FRAME counter (0-indexed), but
+        # peak_intensity_segments contain timestamps in SECONDS.
+        # Multiply by FPS to convert seconds → frame indices.
+        # D17 fix: Remove `not IS_CI` guard. CI also needs punch-zoom; cap
+        # segment count via STREAMER_PUNCH_ZOOM_MAX_SEGMENTS to keep the
+        # filtergraph string from growing unbounded on long scream runs.
+        _MAX_ZOOM_SEGS = int(os.environ.get("STREAMER_PUNCH_ZOOM_MAX_SEGMENTS", "3"))
+        active_segs = peak_intensity_segments[:_MAX_ZOOM_SEGS]
+        segments_logic = " || ".join(
+            [f"between(it,{int(s[0]*FPS)},{int(s[1]*FPS)})" for s in active_segs]
+        )
+        # zoom factor 1.2 — keeps viewer anchored while signalling energy spike
+        zoom_f = (
+            f"[base_in]zoompan=z='if({segments_logic},1.2,1.0)':"
+            f"d=1:s={OUTPUT_WIDTH}x{OUTPUT_HEIGHT},fps={FPS}[zoomed]"
+        )
+        filters[-1] = filters[-1].replace("[base]", "[base_in]")
         filters[-1] = filters[-1] + f";{zoom_f}"
         base_label = "[zoomed]"
     else:

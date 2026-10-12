@@ -189,17 +189,21 @@ class Verdict:
         return "\n".join(lines)
 
 
-def _duration_finding(duration_s: float) -> Optional[Finding]:
+def _duration_finding(
+    duration_s: float,
+    min_duration_s: float = CONTRACT_MIN_DURATION_S,
+    max_duration_s: float = CONTRACT_MAX_DURATION_S,
+) -> Optional[Finding]:
     if duration_s <= 0.0:
         return None
-    if CONTRACT_MIN_DURATION_S <= duration_s <= CONTRACT_MAX_DURATION_S:
+    if min_duration_s <= duration_s <= max_duration_s:
         return None
     return Finding(
         code=CODE_DURATION,
         severity="error",
         message=(
             f"duration {duration_s:.2f}s is outside the "
-            f"{CONTRACT_MIN_DURATION_S:.0f}-{CONTRACT_MAX_DURATION_S:.0f}s contract"
+            f"{min_duration_s:.0f}-{max_duration_s:.0f}s contract"
         ),
         spec_clause="AGENTS.md 2.C",
         metrics={"duration_s": round(duration_s, 3)},
@@ -216,6 +220,8 @@ def verify(
     source_expected_start: Optional[float] = None,
     expected_width: Optional[int] = None,
     expected_height: Optional[int] = None,
+    min_duration_s: Optional[float] = None,
+    max_duration_s: Optional[float] = None,
 ) -> Verdict:
     """Run every check against a rendered clip and return a single verdict.
 
@@ -645,7 +651,11 @@ def verify(
             )
 
     # --- duration contract --------------------------------------------------
-    duration_finding = _duration_finding(verdict.duration_s)
+    min_dur = CONTRACT_MIN_DURATION_S if min_duration_s is None else min_duration_s
+    max_dur = CONTRACT_MAX_DURATION_S if max_duration_s is None else max_duration_s
+    duration_finding = _duration_finding(
+        verdict.duration_s, min_duration_s=min_dur, max_duration_s=max_dur
+    )
     if duration_finding is not None:
         verdict.add(duration_finding)
 

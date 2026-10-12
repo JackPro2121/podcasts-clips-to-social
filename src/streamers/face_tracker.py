@@ -20,13 +20,17 @@ from dataclasses import dataclass, field
 
 from src.face_tracker import FaceBox, ShotPlan, FramingDecision, detect_letterbox_margins
 from src.creative_spec import MOTION_POLICY
+from src.streamers.spec import (
+    STREAMER_IDENTITY_SIMILARITY_FLOOR,
+    STREAMER_TIER2_HOLD_S,
+)
 
 MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
 YUNET_PATH = MODELS_DIR / "face_detection_yunet.onnx"
 SFACE_PATH = MODELS_DIR / "face_recognition_sface_2021dec.onnx"
 
-# Cosine similarity threshold for SFace face recognition
-SIMILARITY_THRESHOLD = 0.38
+# Cosine similarity threshold for SFace face recognition from V2 spec
+SIMILARITY_THRESHOLD = STREAMER_IDENTITY_SIMILARITY_FLOOR
 
 
 @dataclass
@@ -219,13 +223,19 @@ def analyze_streamer_clip_framing(
                     fw, fh = float(face[2]), float(face[3])
                     feat = tracker.extract_face_embedding(frame, face)
 
-                    # Accumulate anchor candidates from early frames if reference not yet set
+                    # Accumulate anchor candidates from early frames if reference not yet set (D20 fix)
                     if tracker.reference_embedding is None and feat is not None:
-                        anchor_candidates.append((fw * fh, feat))
+                        face_cx = float(face[0] + face[2] / 2)
+                        dist_to_center = abs(face_cx - (active_x + active_w / 2))
+                        norm_dist = dist_to_center / max(1.0, active_w)
+                        weight = conf * (fw * fh) / (1.0 + norm_dist)
+                        anchor_candidates.append((weight, feat))
                         if len(anchor_candidates) >= 5:
                             anchor_candidates.sort(key=lambda c: c[0], reverse=True)
-                            tracker.reference_embedding = anchor_candidates[0][1]
-                            print(f"[+] Locked Streamer Identity Anchor for {streamer_name}")
+                            top_feats = [c[1] for c in anchor_candidates[:3]]
+                            avg_feat = np.mean(np.concatenate(top_feats, axis=0), axis=0, keepdims=True)
+                            tracker.reference_embedding = avg_feat.astype(np.float32)
+                            print(f"[+] Locked Streamer Identity Anchor (averaged top 3) for {streamer_name}")
 
                     score = tracker.match_similarity(feat) if (feat is not None and tracker.reference_embedding is not None) else conf
 
@@ -261,8 +271,8 @@ def analyze_streamer_clip_framing(
             else:
                 time_since_seen = rel_t - last_seen_time if last_seen_time >= 0 else 999.0
 
-                if time_since_seen <= 1.5:
-                    # TIER 2: OCCLUDED / RUNNING (Momentarily lost < 1.5s) -> Hold last known anchor
+                if time_since_seen <= STREAMER_TIER2_HOLD_S:
+                    # TIER 2: OCCLUDED / RUNNING (Momentarily lost <= STREAMER_TIER2_HOLD_S) -> Hold last known anchor
                     raw_tracks.append(StreamerTrackPoint(
                         time_s=rel_t,
                         center_x=last_known_cx,
@@ -274,7 +284,7 @@ def analyze_streamer_clip_framing(
                         state="HOLD"
                     ))
                 else:
-                    # TIER 3: OFF_SCREEN (> 1.5s) -> Streamer left chair/room!
+                    # TIER 3: OFF_SCREEN (> STREAMER_TIER2_HOLD_S) -> Streamer left chair/room!
                     raw_tracks.append(StreamerTrackPoint(
                         time_s=rel_t,
                         center_x=active_x + active_w // 2,

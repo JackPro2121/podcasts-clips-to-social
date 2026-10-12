@@ -98,6 +98,8 @@ jobs:
           STREAMER_WATERMARK: ${{ secrets.STREAMER_WATERMARK || '@streamersclips' }}
           MAX_CLIP_DURATION: '45'
           SHORT_FORM_MAX_DURATION: '50'
+          STREAMER_MIN_CLIP_DURATION: '30'
+          STREAMER_MAX_CLIP_DURATION: '45'
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
@@ -110,17 +112,25 @@ jobs:
 
           python -u main_streamer.py "${args[@]}"
 
-      - name: Persist Streamer Video History
+      - name: Persist Streamer Video History & Cursor
         if: always()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/streamer_history.json || true
+          git add data/streamer_history.json data/streamer_cursor.json || true
           if ! git diff --staged --quiet; then
-            git commit -m "chore(history): update processed streamer VODs [skip ci]"
+            git commit -m "chore(history): update processed streamer VODs and round-robin cursor [skip ci]"
             git pull --rebase origin main || true
             git push origin main || echo "History push skipped"
           fi
+
+      - name: Upload Streamer Gate Verdicts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: streamer-gate-verdicts
+          path: data/runs/
+          retention-days: 14
 
       - name: Upload Streamer Clips as Artifacts
         if: always()

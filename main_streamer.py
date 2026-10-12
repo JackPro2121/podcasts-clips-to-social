@@ -45,7 +45,7 @@ def main() -> None:
         "--num-clips",
         type=int,
         default=3,
-        help="Number of viral clips to extract (default: 3)"
+        help="Number of viral clips to extract (1 to 5, default: 3)"
     )
     parser.add_argument(
         "--framing",
@@ -66,8 +66,19 @@ def main() -> None:
         default=0,
         help="Days to delay scheduled posting on Buffer (e.g. 3 or 4 for account warm-up, 0 for immediate queue)"
     )
+    parser.add_argument(
+        "--run-id",
+        type=str,
+        default=None,
+        help="Explicit run ID for logs and verdict directory (default: auto-generated)"
+    )
 
     args = parser.parse_args()
+
+    # Validate num_clips strictly (1 to 5)
+    if not (1 <= args.num_clips <= 5):
+        print(f"[-] Invalid --num-clips {args.num_clips}: must be between 1 and 5.")
+        sys.exit(2)
 
     clips = run_streamer_pipeline(
         video_url=args.video_url.strip() or None,
@@ -75,7 +86,8 @@ def main() -> None:
         num_clips=args.num_clips,
         post_to_buffer=args.post_to_buffer,
         framing_mode=args.framing,
-        delay_days=args.delay_days
+        delay_days=args.delay_days,
+        run_id=args.run_id,
     )
 
     if clips:

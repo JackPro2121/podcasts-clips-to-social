@@ -9,6 +9,7 @@ Analyzes Twitch and YouTube live chat replays to find 100% guaranteed viral mome
 
 import json
 import re
+import statistics
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
@@ -106,7 +107,13 @@ def detect_chat_spikes(
         for m in w_msgs:
             t = m["text"]
             for emote, weight in VIRAL_EMOTE_WEIGHTS.items():
-                if emote in t:
+                matched = False
+                if re.match(r"^[A-Za-z0-9_]+$", emote):
+                    matched = bool(re.search(rf"\b{re.escape(emote)}\b", t, re.IGNORECASE))
+                else:
+                    matched = emote in t
+
+                if matched:
                     emote_score += weight
                     seen_emotes[emote] = seen_emotes.get(emote, 0) + 1
 
@@ -117,7 +124,8 @@ def detect_chat_spikes(
     if not mps_list:
         return []
 
-    median_mps = max(0.5, float(sum(mps_list) / len(mps_list)))
+    # True median MPS across sliding windows
+    median_mps = max(0.5, float(statistics.median(mps_list)))
     threshold_mps = median_mps * min_mps_factor
 
     for start_t, end_t, mps, emote_score, top_emotes in raw_window_data:
