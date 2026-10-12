@@ -167,6 +167,12 @@ def fetch_channel_videos_ytdlp(channel_url: str, limit: int = 5) -> List[Dict[st
                     continue
                 try:
                     data = json.loads(line)
+                    # Skip upcoming scheduled streams or premieres that have not aired yet
+                    live_status = data.get("live_status", "")
+                    if live_status == "is_upcoming":
+                        continue
+                    if data.get("duration") is None and live_status != "was_live":
+                        continue
                     vid_id = data.get("id")
                     title = data.get("title", "")
                     if vid_id:

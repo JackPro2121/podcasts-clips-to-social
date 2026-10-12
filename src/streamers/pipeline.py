@@ -76,28 +76,44 @@ def run_streamer_pipeline(
     target_title = ""
     target_creator = creator_name or "Streamer"
 
+    transcript_data = None
     if not target_url:
         print(f"[*] Auto-discovering latest streams (Filter: {creator_name or 'All Top US Streamers'})...")
-        candidates = discover_streamer_candidates(creator=creator_name, max_candidates=5)
+        candidates = discover_streamer_candidates(creator=creator_name, max_candidates=10)
         if not candidates:
-            print("[-] No fresh streamer streams found in RSS discovery feeds.")
+            print("[-] No fresh streamer streams found in discovery feeds.")
             return []
-        chosen = candidates[0]
-        target_url = chosen["url"]
-        target_title = chosen["title"]
-        target_creator = chosen.get("creator", "Streamer")
-        print(f"[+] Selected stream: '{target_title}' by {target_creator} ({target_url})")
+
+        # Iterate over discovered candidates to find the first playable stream with a timed transcript
+        for cand in candidates:
+            cand_url = cand["url"]
+            cand_title = cand["title"]
+            cand_creator = cand.get("creator", "Streamer")
+            cand_id = cand["video_id"]
+            print(f"[*] Checking candidate stream: '{cand_title}' by {cand_creator} ({cand_id})...")
+            t_data = fetch_transcript_only(cand_url, allow_apify_fallback=True)
+            if t_data and t_data.get("transcript"):
+                target_url = cand_url
+                target_title = cand_title
+                target_creator = cand_creator
+                video_id = cand_id
+                transcript_data = t_data
+                print(f"[+] Found active transcript ({len(t_data['transcript'])} entries) for '{target_title}'! Proceeding to clipping.")
+                break
+            else:
+                print(f"[-] Candidate '{cand_title}' has no timed transcript yet. Trying next streamer candidate...")
+
+        if not target_url or not transcript_data:
+            print("[-] No candidate stream had an accessible transcript across all discovered streams.")
+            return []
     else:
         print(f"[*] Using provided stream URL: {target_url}")
-
-    video_id = extract_video_id_from_url(target_url) or "stream_video"
-
-    # 2. Fetch transcript without downloading video
-    print("\n--- [1/5] FETCHING TRANSCRIPT (ZERO VIDEO DOWNLOAD) ---")
-    transcript_data = fetch_transcript_only(target_url, allow_apify_fallback=True)
-    if not transcript_data or not transcript_data.get("transcript"):
-        print("[-] Could not retrieve transcript for stream. Attempting fallback...")
-        return []
+        video_id = extract_video_id_from_url(target_url) or "stream_video"
+        print("\n--- [1/5] FETCHING TRANSCRIPT (ZERO VIDEO DOWNLOAD) ---")
+        transcript_data = fetch_transcript_only(target_url, allow_apify_fallback=True)
+        if not transcript_data or not transcript_data.get("transcript"):
+            print("[-] Could not retrieve transcript for provided stream URL.")
+            return []
 
     segments: List[TranscriptSegment] = get_transcript(
         video_path=Path("__transcript_only__"),
