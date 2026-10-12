@@ -56,6 +56,7 @@ def run_streamer_pipeline(
     num_clips: int = 3,
     post_to_buffer: bool = False,
     framing_mode: str = "auto",
+    delay_days: Optional[int] = None,
 ) -> List[Path]:
     """Runs the V2 Streamer Clipping Pipeline.
 
@@ -126,6 +127,7 @@ def run_streamer_pipeline(
     # 4. Download and process only the targeted segments
     print("\n--- [3/5] TARGETED SEGMENT EXTRACTION & RENDERING ---")
     rendered_clips: List[Path] = []
+    rendered_items = []
 
     for idx, vm in enumerate(viral_moments, start=1):
         print(f"\n>>> Processing Streamer Clip #{idx}: '{vm.title}' [{vm.start_time:.1f}s - {vm.end_time:.1f}s]")
@@ -282,18 +284,32 @@ def run_streamer_pipeline(
 
         if rendered and rendered.exists():
             rendered_clips.append(rendered)
+            rendered_items.append({
+                "clip_path": rendered,
+                "thumb_path": thumb_path,
+                "candidate": vm,
+            })
             print(f"[+] Rendered Streamer Clip #{idx} ({rendered.stat().st_size / 1024 / 1024:.2f} MB): {rendered.name}")
 
     # 5. Buffer Publishing / Isolation Check
     print("\n--- [4/5] BUFFER SOCIAL PUBLISHING ISOLATION ---")
-    if post_to_buffer and STREAMER_BUFFER_ACCESS_TOKEN and STREAMER_BUFFER_CHANNEL_IDS:
-        print("[*] Streamer Buffer API detected. Queuing clips...")
-        # Future: connect to dedicated Streamer Buffer Client once user provides API
-        print("[!] Dedicated Streamer Buffer client will dispatch once credentials are confirmed.")
+    if post_to_buffer:
+        if STREAMER_BUFFER_ACCESS_TOKEN:
+            print("[*] Dedicated Streamer Buffer API detected. Queuing clips to connected channels...")
+            from src.streamers.buffer_publisher import StreamerBufferPublisher
+            publisher = StreamerBufferPublisher()
+            for item in rendered_items:
+                publisher.schedule_clip(
+                    clip_path=item["clip_path"],
+                    candidate=item["candidate"],
+                    thumb_path=item["thumb_path"],
+                    delay_days=delay_days,
+                )
+        else:
+            print("[-] STREAMER_BUFFER_ACCESS_TOKEN not configured. Skipping Buffer dispatch.")
     else:
         print("[*] BUFFER ISOLATION ACTIVE:")
         print("    -> Existing Podcast Buffer credentials were NOT touched.")
-        print("    -> Streamer Buffer API is pending user configuration.")
         print("    -> Clips safely saved locally in clips/streamers/ and ready for manual review.")
 
     # 6. Record history

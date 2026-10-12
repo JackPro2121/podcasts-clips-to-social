@@ -60,6 +60,12 @@ def main() -> None:
         default=False,
         help="Post to Streamer Buffer account (strictly isolated, requires STREAMER_BUFFER_ACCESS_TOKEN)"
     )
+    parser.add_argument(
+        "--delay-days",
+        type=int,
+        default=0,
+        help="Days to delay scheduled posting on Buffer (e.g. 3 or 4 for account warm-up, 0 for immediate queue)"
+    )
 
     args = parser.parse_args()
 
@@ -68,7 +74,8 @@ def main() -> None:
         creator_name=args.streamer.strip() or None,
         num_clips=args.num_clips,
         post_to_buffer=args.post_to_buffer,
-        framing_mode=args.framing
+        framing_mode=args.framing,
+        delay_days=args.delay_days
     )
 
     if clips:

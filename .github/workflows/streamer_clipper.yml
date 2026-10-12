@@ -37,6 +37,11 @@ on:
         required: false
         default: false
         type: boolean
+      delay_days:
+        description: 'Days to delay posting on Buffer (e.g. 3 or 4 for account warm-up, 0 for immediate queue)'
+        required: false
+        default: '0'
+        type: string
 
 permissions:
   contents: write
@@ -87,6 +92,7 @@ jobs:
           [ "${{ github.event.inputs.streamer }}" != "all" ] && args+=(--streamer "${{ github.event.inputs.streamer }}")
           args+=(--num-clips "${{ github.event.inputs.num_clips || 3 }}")
           [ "${{ github.event.inputs.post_to_buffer }}" = "true" ] && args+=(--post-to-buffer)
+          [ -n "${{ github.event.inputs.delay_days }}" ] && args+=(--delay-days "${{ github.event.inputs.delay_days }}")
 
           python main_streamer.py "${args[@]}"
 
