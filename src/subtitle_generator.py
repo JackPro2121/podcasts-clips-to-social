@@ -359,10 +359,14 @@ def create_styled_ass_subtitles(
     # TikTok Meme Hook Box (Persistent top white box with bold black text)
     if top_meme_title:
         raw_title = str(top_meme_title).strip()
+        # Strip astral emojis and symbol codepoints that cause '▯' tofu glyphs in ASS font rendering
+        clean_meme = re.sub(r'[\U00010000-\U0010ffff]', '', raw_title)
+        clean_meme = re.sub(r'[\u2600-\u27bf\ufe00-\ufe0f]', '', clean_meme)
         clean_meme = "".join(
-            ch for ch in unicodedata.normalize("NFC", raw_title)
+            ch for ch in unicodedata.normalize("NFC", clean_meme)
             if not unicodedata.category(ch).startswith("C") and ch not in "\r\n\t"
         )
+        clean_meme = re.sub(r'\s+', ' ', clean_meme).strip()
         words = clean_meme.split()
         lines_wrapped = []
         cur_line = []

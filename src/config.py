@@ -284,12 +284,12 @@ TRANSNET_WINDOW = max(16, int(os.getenv("TRANSNET_WINDOW", "100")))
 IS_CI = os.getenv("GITHUB_ACTIONS", "false").lower() == "true"
 
 if IS_CI:
-    # Optimized for GitHub Actions: Lower CPU/RAM/Disk usage to prevent OOM/Crash
+    # Optimized for GitHub Actions: Crisp studio quality while maintaining runner memory safety
     OUTPUT_WIDTH = 1080
     OUTPUT_HEIGHT = 1920
     FPS = 30
-    VIDEO_CRF = 23  # Standard quality (saves massive disk space vs 16)
-    AUDIO_BITRATE = "128k"
+    VIDEO_CRF = 19  # High visual fidelity (sharp upscaling, no compression artifacts)
+    AUDIO_BITRATE = "192k"
 else:
     OUTPUT_WIDTH = 1080
     OUTPUT_HEIGHT = 1920

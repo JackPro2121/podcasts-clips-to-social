@@ -82,7 +82,7 @@ Extracts high-retention TikTok/Shorts clips from 3-to-5 hour live streams of top
 * **Stream Layout Intelligence Engine**:
   - [`src/streamers/layout_compositor.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/src/streamers/layout_compositor.py):
     - **Mode 1 (`stacked_webcam`)**: Detects stationary corner webcam ROI. Generates auto-stacked 9:16 layout (Top 50%: Facecam Reaction / Bottom 50%: Gameplay/Video).
-    - **Mode 2 (`multi_person_room`)**: Detects 2+ prominent people in room/collab streams (Kai Cenat x MrBeast, Speed x Adin). Routes to **Wide Room Presentation View** (`presentation_slide` mode with cinematic blurred backdrop) so both host and guest remain 100% visible with zero facial obstructions.
+    - **Mode 2 (`multi_person_room`)**: Detects 2+ prominent people in room/collab streams (Kai Cenat x MrBeast, Speed x Adin). Uses SFace ArcFace identity recognition to place Host/Streamer on the Top pane (1080x960) and Guest on the Bottom pane (1080x960) with zero blurry bars, zero letterboxing, and 100% full-screen vertical immersion!
     - **Mode 3 (`single_streamer_room`)**: Single-creator desk/room framing with SFace identity lock.
 * **Audio Scream & Energy Analyzer**:
   - [`src/streamers/audio_analyzer.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/src/streamers/audio_analyzer.py): Detects decibel volume jumps ($>6\text{ dB}$ above median) via FFmpeg raw PCM to trigger dynamic punch-zooms (1.2x zoompan).

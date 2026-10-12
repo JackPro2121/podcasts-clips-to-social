@@ -29,18 +29,21 @@ from src.streamers.face_tracker import (
 
 @dataclass
 class StreamLayoutInfo:
-    layout_type: str  # 'stacked_webcam' or 'fullscreen_room'
+    layout_type: str  # 'stacked_webcam', 'multi_person_room', or 'fullscreen_room'
     webcam_box: Optional[Tuple[int, int, int, int]] = None  # (x, y, w, h)
     content_box: Optional[Tuple[int, int, int, int]] = None  # (x, y, w, h)
+    speaker1_box: Optional[Tuple[int, int, int, int]] = None  # (x, y, w, h) Top Pane (Host / Streamer)
+    speaker2_box: Optional[Tuple[int, int, int, int]] = None  # (x, y, w, h) Bottom Pane (Guest)
     confidence: float = 0.0
 
 
 def detect_stream_layout(
     video_path: Path,
     sample_duration: float = 8.0,
-    num_samples: int = 16
+    num_samples: int = 16,
+    streamer_name: str = "Kai Cenat"
 ) -> StreamLayoutInfo:
-    """Samples video frames to classify layout into 'stacked_webcam' or 'fullscreen_room'."""
+    """Samples video frames to classify layout into 'stacked_webcam', 'multi_person_room', or 'fullscreen_room'."""
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         return StreamLayoutInfo(layout_type="fullscreen_room", confidence=0.5)
@@ -53,9 +56,10 @@ def detect_stream_layout(
     max_frame = min(total_frames, int(sample_duration * video_fps))
     step = max(1, max_frame // num_samples)
 
-    tracker = StreamerIdentityTracker(w, h, det_max_dim=640)
+    tracker = StreamerIdentityTracker(w, h, det_max_dim=640, streamer_name=streamer_name)
 
     detected_faces: List[Tuple[int, int, int, int]] = []  # (x, y, w, h)
+    face_sim_pairs: List[Tuple[Tuple[int, int, int, int], float]] = []
     multi_face_frames = 0
     valid_face_frames = 0
 
@@ -74,7 +78,11 @@ def detect_stream_layout(
                 if len(valid_faces) >= 2:
                     multi_face_frames += 1
                 for face in valid_faces:
-                    detected_faces.append((int(face[0]), int(face[1]), int(face[2]), int(face[3])))
+                    fbox = (int(face[0]), int(face[1]), int(face[2]), int(face[3]))
+                    detected_faces.append(fbox)
+                    feat = tracker.extract_face_embedding(frame, face)
+                    sim = tracker.match_similarity(feat) if feat is not None else 0.0
+                    face_sim_pairs.append((fbox, sim))
 
         f_idx += step
 
@@ -138,16 +146,70 @@ def detect_stream_layout(
 
     # Check for multi-person room stream (Host + Guest collab, e.g. Kai Cenat x MrBeast, Speed x Adin)
     multi_face_ratio = (multi_face_frames / max(1, valid_face_frames)) if valid_face_frames > 0 else 0.0
-    if multi_face_ratio >= 0.25:
-        print(
-            f"[+] Detected 'multi_person_room' stream layout: Multiple people in scene "
-            f"({multi_face_frames}/{valid_face_frames} frames with 2+ faces). "
-            f"Routing to Wide Room Presentation View with cinematic blurred backdrop!"
-        )
-        return StreamLayoutInfo(
-            layout_type="multi_person_room",
-            confidence=0.91
-        )
+    min_cx, max_cx = min(cxs), max(cxs)
+    is_horizontally_split = (max_cx - min_cx) >= (0.18 * w)
+
+    if (multi_face_ratio >= 0.20 or is_horizontally_split) and len(detected_faces) >= 3:
+        # Partition faces into two spatial clusters via 2-means
+        c1, c2 = min_cx, max_cx
+        g1, g2 = [], []
+        for _ in range(6):
+            g1 = [f for f in detected_faces if abs((f[0] + f[2] // 2) - c1) <= abs((f[0] + f[2] // 2) - c2)]
+            g2 = [f for f in detected_faces if abs((f[0] + f[2] // 2) - c1) > abs((f[0] + f[2] // 2) - c2)]
+            if g1:
+                c1 = int(np.median([f[0] + f[2] // 2 for f in g1]))
+            if g2:
+                c2 = int(np.median([f[0] + f[2] // 2 for f in g2]))
+
+        if g1 and g2 and abs(c1 - c2) >= int(0.15 * w):
+            g1_cx = int(np.median([f[0] + f[2] // 2 for f in g1]))
+            g1_cy = int(np.median([f[1] + f[3] // 2 for f in g1]))
+            g2_cx = int(np.median([f[0] + f[2] // 2 for f in g2]))
+            g2_cy = int(np.median([f[1] + f[3] // 2 for f in g2]))
+
+            # Identity match: Host / Streamer on Top pane, Guest on Bottom pane
+            g1_sims = [sim for box, sim in face_sim_pairs if abs((box[0] + box[2] // 2) - c1) < abs((box[0] + box[2] // 2) - c2)]
+            g2_sims = [sim for box, sim in face_sim_pairs if abs((box[0] + box[2] // 2) - c2) < abs((box[0] + box[2] // 2) - c1)]
+            g1_sim = float(np.mean(g1_sims)) if g1_sims else 0.0
+            g2_sim = float(np.mean(g2_sims)) if g2_sims else 0.0
+
+            if g2_sim > g1_sim + 0.05:
+                # Group 2 is primary streamer (Top), Group 1 is Guest (Bottom)
+                p1_cx, p1_cy = g2_cx, g2_cy
+                p2_cx, p2_cy = g1_cx, g1_cy
+            else:
+                # Group 1 is primary streamer (Top), Group 2 is Guest (Bottom)
+                p1_cx, p1_cy = g1_cx, g1_cy
+                p2_cx, p2_cy = g2_cx, g2_cy
+
+            # Compute 9:8 pane dimensions to fill 1080x960 panes with ZERO blurry bars
+            pane_h = h
+            pane_w = int(pane_h * 9.0 / 8.0)
+            if pane_w > w:
+                pane_w = w - (w % 2)
+                pane_h = int(pane_w * 8.0 / 9.0)
+            pane_w -= pane_w % 2
+            pane_h -= pane_h % 2
+
+            s1_x = max(0, min(p1_cx - pane_w // 2, w - pane_w))
+            s1_y = max(0, min(int(p1_cy - pane_h * 0.35), h - pane_h))
+            speaker1_box = (s1_x, s1_y, pane_w, pane_h)
+
+            s2_x = max(0, min(p2_cx - pane_w // 2, w - pane_w))
+            s2_y = max(0, min(int(p2_cy - pane_h * 0.35), h - pane_h))
+            speaker2_box = (s2_x, s2_y, pane_w, pane_h)
+
+            print(
+                f"[+] Detected 'multi_person_room' collab: Split-Screen Stacked layout!\n"
+                f"    Top Pane (Streamer): ({s1_x}, {s1_y}, {pane_w}x{pane_h})\n"
+                f"    Bottom Pane (Guest): ({s2_x}, {s2_y}, {pane_w}x{pane_h})"
+            )
+            return StreamLayoutInfo(
+                layout_type="multi_person_room",
+                speaker1_box=speaker1_box,
+                speaker2_box=speaker2_box,
+                confidence=0.93
+            )
 
     print(f"[*] Detected 'fullscreen_room' single streamer layout (rel_face_w: {rel_fw:.2f}, std_cx: {std_cx:.1f}px)")
     return StreamLayoutInfo(
@@ -170,20 +232,21 @@ def build_streamer_framing(
         start_time: Relative or absolute start time
         end_time: Relative or absolute end time
         streamer_name: Name of primary streamer
-        force_layout: 'auto', 'stacked_webcam', 'multi_person_room', 'fullscreen_room', 'single_smooth'
+        force_layout: 'auto', 'stacked_webcam', 'multi_person_room', 'split_screen', 'fullscreen_room', 'single_smooth'
     """
     clip_dur = max(0.1, end_time - start_time)
 
     layout_info = StreamLayoutInfo(layout_type="fullscreen_room")
     if force_layout == "stacked_webcam":
-        layout_info = detect_stream_layout(video_path, sample_duration=min(6.0, clip_dur))
+        layout_info = detect_stream_layout(video_path, sample_duration=min(6.0, clip_dur), streamer_name=streamer_name)
         layout_info.layout_type = "stacked_webcam"
-    elif force_layout == "fullscreen_room" or force_layout == "multi_person_room":
+    elif force_layout in ("multi_person_room", "split_screen"):
+        layout_info = detect_stream_layout(video_path, sample_duration=min(6.0, clip_dur), streamer_name=streamer_name)
         layout_info.layout_type = "multi_person_room"
-    elif force_layout == "single_smooth":
+    elif force_layout in ("fullscreen_room", "single_smooth"):
         layout_info.layout_type = "fullscreen_room"
     elif force_layout == "auto":
-        layout_info = detect_stream_layout(video_path, sample_duration=min(6.0, clip_dur))
+        layout_info = detect_stream_layout(video_path, sample_duration=min(6.0, clip_dur), streamer_name=streamer_name)
 
     if layout_info.layout_type == "stacked_webcam" and layout_info.webcam_box and layout_info.content_box:
         # Split-screen Auto-Stacked 9:16 layout
@@ -219,30 +282,42 @@ def build_streamer_framing(
         )
 
     elif layout_info.layout_type == "multi_person_room":
-        # Wide Room Shot with Blurred Top/Bottom Backdrop (presentation_slide mode)
-        # Keeps both streamer & guest 100% visible with zero head cutoffs and safe sticker margins!
+        # Dual Split-Screen (Top: Host / Bottom: Guest)
+        # Fills 100% of 9:16 mobile canvas with ZERO blurry padding and large clear reactions!
         cap = cv2.VideoCapture(str(video_path))
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 1920
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 1080
         cap.release()
 
+        pane_h = h
+        pane_w = int(pane_h * 9.0 / 8.0)
+        if pane_w > w:
+            pane_w = w - (w % 2)
+            pane_h = int(pane_w * 8.0 / 9.0)
+        pane_w -= pane_w % 2
+        pane_h -= pane_h % 2
+
+        s1_box = layout_info.speaker1_box or (0, 0, pane_w, pane_h)
+        s2_box = layout_info.speaker2_box or (max(0, w - pane_w), 0, pane_w, pane_h)
+
         shot = ShotPlan(
             start=0.0,
             end=clip_dur,
-            mode="presentation_slide",
+            mode="split_screen",
+            speaker1_box=s1_box,
+            speaker2_box=s2_box,
             crop_x=0,
             crop_y=0,
             crop_w=w,
-            crop_h=h,
-            center_y=h // 2,
-            zoom_factor=1.0,
-            motion="drift"
+            crop_h=h
         )
 
         return FramingDecision(
-            mode="presentation_slide",
+            mode="split_screen",
             face_count=2,
             shots=[shot],
+            speaker1_box=s1_box,
+            speaker2_box=s2_box,
             video_width=w,
             video_height=h,
             active_x=0,
@@ -258,3 +333,4 @@ def build_streamer_framing(
         end_time=end_time,
         streamer_name=streamer_name
     )
+
