@@ -20,7 +20,6 @@ from typing import List, Tuple, Optional
 from src.transcriber import TranscriptSegment
 from src.streamers.spec import (
     STREAMER_PUNCH_ZOOM_MAX_SEGMENTS,
-    STREAMER_PUNCH_ZOOM_FACTOR,
 )
 
 

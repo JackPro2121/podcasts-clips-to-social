@@ -22,20 +22,17 @@ Bug fixes (V2):
     D15 — 'multi_person_room' / 'split_screen' alias handled cleanly in one place.
 """
 
-import math
 import numpy as np
 import cv2
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional
 from dataclasses import dataclass
 
-from src.face_tracker import FaceBox, ShotPlan, FramingDecision, detect_letterbox_margins
+from src.face_tracker import ShotPlan, FramingDecision
 from src.streamers.face_tracker import (
-    analyze_streamer_clip_framing, StreamerIdentityTracker, MODELS_DIR
+    analyze_streamer_clip_framing, StreamerIdentityTracker
 )
 from src.streamers.spec import (
-    STREAMER_IDENTITY_MIN_DWELL_S,
-    STREAMER_SPLIT_MAX_PANE_W,
     STREAMER_SPLIT_PANE_ASPECT_W,
     STREAMER_SPLIT_PANE_ASPECT_H,
 )
@@ -191,9 +188,6 @@ def _count_persistent_identity_tracks(
     # 2-means clustering on center-x positions.
     c1 = float(min(cxs_all))
     c2 = float(max(cxs_all))
-
-    g1_frames: List[int] = []  # frame indices (approximated by list index) per cluster
-    g2_frames: List[int] = []
 
     for _ in range(_KMEANS_ITERS):
         g1_faces = [f for f in detected_faces

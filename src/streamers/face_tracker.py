@@ -11,15 +11,13 @@ Specialized for high-energy US Streamers (Kai Cenat, IShowSpeed, etc.):
 - High-Performance: 640px downscaled detection with sequential frame reading (~7 fps on CPU).
 """
 
-import math
 import numpy as np
 import cv2
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict
-from dataclasses import dataclass, field
+from typing import List, Tuple, Optional
+from dataclasses import dataclass
 
-from src.face_tracker import FaceBox, ShotPlan, FramingDecision, detect_letterbox_margins
-from src.creative_spec import MOTION_POLICY
+from src.face_tracker import ShotPlan, FramingDecision, detect_letterbox_margins
 from src.streamers.spec import (
     STREAMER_IDENTITY_SIMILARITY_FLOOR,
     STREAMER_TIER2_HOLD_S,

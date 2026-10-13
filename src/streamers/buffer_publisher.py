@@ -122,7 +122,7 @@ class StreamerBufferPublisher:
             return []
 
         # 1. Upload video to GitHub Release for direct public hosting
-        print(f"[*] Uploading streamer clip to GitHub release for Buffer CDN access...")
+        print("[*] Uploading streamer clip to GitHub release for Buffer CDN access...")
         video_url = upload_clip_to_github_release(clip_path)
         if not video_url:
             print(f"[-] Could not get public video URL for {clip_path.name}. Cannot post to Buffer.")
@@ -130,9 +130,11 @@ class StreamerBufferPublisher:
 
         print(f"[+] Public video URL: {video_url}")
 
-        thumbnail_url = None
+        _thumbnail_url = None
         if thumb_path and thumb_path.exists():
-            thumbnail_url = upload_clip_to_github_release(thumb_path)
+            _thumbnail_url = upload_clip_to_github_release(thumb_path)
+            if _thumbnail_url:
+                print(f"[+] Public thumbnail URL: {_thumbnail_url}")
 
         # 2. Resolve channels
         connected = self.get_channels()

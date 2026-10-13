@@ -33,7 +33,6 @@ from src.config import (
     CLIPS_DIR,
     DOWNLOADS_DIR,
     SUBTITLES_DIR,
-    CHANNEL_WATERMARK,
 )
 from src.downloader import (
     fetch_transcript_only,
@@ -191,7 +190,7 @@ def _print_delivery_summary(results: List[_ClipResult], *, run_id: str) -> None:
         elif r.gate and not r.gate.passed:
             status = f"✗ GATE({', '.join(r.gate.blocking_codes)})"
         elif r.error:
-            status = f"✗ ERROR"
+            status = "✗ ERROR"
         else:
             status = "✗ FAIL"
         pub = "→ PUBLISHED" if r.published_ok else ""
@@ -366,7 +365,7 @@ def run_streamer_pipeline(
                 output_dir=DOWNLOADS_DIR,
             )
             if not clip_info or "video_path" not in clip_info:
-                result.error = f"download_clip_segment returned no video_path"
+                result.error = "download_clip_segment returned no video_path"
                 print(f"[-] {result.error}; skipping clip #{idx}.")
                 continue
 

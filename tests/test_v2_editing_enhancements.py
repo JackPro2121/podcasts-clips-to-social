@@ -11,9 +11,7 @@ import unittest
 from src.transcriber import TranscriptSegment, WordTimestamp
 from src.streamers.censor import (
     censor_word_text,
-    censor_text_line,
     censor_transcript_segments,
-    PROFANITY_MAP,
 )
 from src.streamers.editing_enhancer import (
     build_streamer_retention_plan,

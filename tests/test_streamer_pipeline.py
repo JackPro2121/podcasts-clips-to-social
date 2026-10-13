@@ -126,7 +126,7 @@ class TestStreamerPipeline(unittest.TestCase):
 
     def test_multi_person_split_screen_framing(self):
         """Multi-person room framing must produce split_screen mode with 2 speakers and ZERO blurry presentation_slide."""
-        from src.streamers.layout_compositor import build_streamer_framing, StreamLayoutInfo
+        from src.streamers.layout_compositor import build_streamer_framing
         import numpy as np
         import cv2
 
@@ -184,7 +184,7 @@ class TestStreamerPipeline(unittest.TestCase):
             ass_content = ass_out.read_text(encoding="utf-8")
             self.assertIn("Style: TikTokMemeBox", ass_content)
             # Find the dialogue line for TikTokMemeBox
-            meme_lines = [l for l in ass_content.splitlines() if "TikTokMemeBox" in l and l.startswith("Dialogue:")]
+            meme_lines = [line for line in ass_content.splitlines() if "TikTokMemeBox" in line and line.startswith("Dialogue:")]
             self.assertTrue(len(meme_lines) >= 1)
             # Emojis must be completely stripped from the ASS dialogue text
             self.assertNotIn("💀", meme_lines[0])

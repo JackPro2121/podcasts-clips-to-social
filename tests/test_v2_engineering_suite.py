@@ -10,7 +10,6 @@ Verifies:
 """
 
 import json
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,11 +23,9 @@ from src.streamers.spec import (
     STREAMER_TIER2_HOLD_S,
     STREAMER_SPLIT_MAX_PANE_W,
 )
-from src.streamers.gate import GateResult, verify_clip
+from src.streamers.gate import verify_clip
 from src.streamers.discovery import (
-    StreamerHistory,
     load_streamer_history,
-    record_streamer_history,
     record_failed_attempt,
     _load_cursor,
     _save_cursor,
@@ -36,7 +33,6 @@ from src.streamers.discovery import (
 from src.streamers.layout_compositor import (
     _compute_disjoint_split_panes,
     _even,
-    _count_persistent_identity_tracks,
 )
 from src.streamers.chat_analyzer import (
     detect_chat_spikes,

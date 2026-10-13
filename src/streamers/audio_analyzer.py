@@ -10,7 +10,7 @@ High-performance audio waveform analyzer for detecting:
 import subprocess
 import numpy as np
 from pathlib import Path
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple, Dict
 from dataclasses import dataclass
 
 

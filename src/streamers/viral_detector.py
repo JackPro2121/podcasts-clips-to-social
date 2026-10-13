@@ -132,7 +132,6 @@ def _prescan_high_energy_zones(
     if not segments:
         return []
 
-    transcript_start = segments[0].start
     transcript_end = segments[-1].end
 
     # Build sliding windows at every segment boundary
@@ -535,7 +534,7 @@ def _generate_dynamic_streamer_title(creator_name: str, sample_text: str, energy
         options = [
             f"Nah {clean_creator} really lit fireworks in his room 💀😭",
             f"{clean_creator} almost burned his house down 💀🔥",
-            f"Bro had the whole room shaking 😭💀",
+            "Bro had the whole room shaking 😭💀",
         ]
     elif any(k in lower for k in ["speed", "ishowspeed"]):
         options = [
@@ -562,7 +561,7 @@ def _generate_dynamic_streamer_title(creator_name: str, sample_text: str, energy
             f"{clean_creator} caught completely off guard 💀",
             f"Wait till you see {clean_creator}'s reaction 😭🔥",
             f"{clean_creator} NEVER beating the allegations 💀",
-            f"Bro was NOT ready for what happened next 💀",
+            "Bro was NOT ready for what happened next 💀",
         ]
 
     # Deterministic index derived from stable inputs (fixes non-deterministic test failures)
