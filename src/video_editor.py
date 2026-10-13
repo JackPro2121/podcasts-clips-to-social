@@ -658,7 +658,7 @@ def build_video_filtergraph(
         # filtergraph string from growing unbounded on long scream runs.
         _MAX_ZOOM_SEGS = int(os.environ.get("STREAMER_PUNCH_ZOOM_MAX_SEGMENTS", "3"))
         active_segs = peak_intensity_segments[:_MAX_ZOOM_SEGS]
-        segments_logic = " || ".join(
+        segments_logic = " + ".join(
             [f"between(it,{int(s[0]*FPS)},{int(s[1]*FPS)})" for s in active_segs]
         )
         # zoom factor 1.2 — keeps viewer anchored while signalling energy spike
