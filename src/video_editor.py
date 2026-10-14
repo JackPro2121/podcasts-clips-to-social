@@ -612,7 +612,7 @@ def build_video_filtergraph(
             cx = framing.smoothed_center_x or (active_x + active_w // 2)
             static_crop_x = max(active_x, min(cx - crop_w // 2, active_x + active_w - crop_w))
         trim_prefix = f"trim=start={time_offset:.2f},setpts=PTS-STARTPTS," if time_offset > 0.0 else ""
-        v_filter = f"[0:v]{trim_prefix}crop={crop_w}:{active_h}:{static_crop_x}:{active_y},scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,{studio_grade},fps={FPS}[base]"
+        v_filter = f"[0:v]{trim_prefix}crop={crop_w}:{active_h}:{static_crop_x}:{active_y},scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos+accurate_rnd,{studio_grade},fps={FPS}[base]"
 
     elif framing.mode == "split_screen" and framing.speaker1_box and framing.speaker2_box:
         s1_x, s1_y, s1_w, s1_h = _clamp_crop_box(
