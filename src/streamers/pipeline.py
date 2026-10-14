@@ -522,6 +522,19 @@ def run_streamer_pipeline(
                     "framing_mode": framing_mode,
                     "watermark": STREAMER_WATERMARK,
                     "peak_intervals": peak_intervals,
+                    "shots": [
+                        {
+                            "start": getattr(shot, "start", None),
+                            "end": getattr(shot, "end", None),
+                            "mode": getattr(shot, "mode", None),
+                            "crop_x": getattr(shot, "crop_x", None),
+                            "crop_y": getattr(shot, "crop_y", None),
+                            "crop_w": getattr(shot, "crop_w", None),
+                            "crop_h": getattr(shot, "crop_h", None),
+                            "interpolate": False,
+                        }
+                        for shot in (getattr(framing, "shots", None) or [])
+                    ],
                 }
                 edl_path.write_text(_json.dumps(edl_payload, indent=2, default=str), encoding="utf-8")
             except Exception as exc:
