@@ -430,7 +430,7 @@ def verify_clip(
         raw_verdict.add(
             verdict_mod.Finding(
                 code="v2_caption_face_collision",
-                severity="warning",
+                severity="error",
                 message="V2 caption sticker overlaps a sampled face box",
                 spec_clause="streamer caption safe-zone",
                 metrics=caption_collision,
@@ -438,6 +438,18 @@ def verify_clip(
         )
 
     face_stability = _face_stability_check(path)
+    if face_stability.get("available") and face_stability.get("max_horizontal_jump_px", 0) > 150.0:
+        raw_verdict.add(
+            verdict_mod.Finding(
+                code="v2_excessive_face_jump",
+                severity="error",
+                message=(
+                    f"V2 face jump {face_stability['max_horizontal_jump_px']:.1f}px exceeds 150px"
+                ),
+                spec_clause="streamer face-tracking stability",
+                metrics=face_stability,
+            )
+        )
     if face_stability.get("available") and face_stability.get("face_presence_ratio", 0.0) < 0.5:
         raw_verdict.add(
             verdict_mod.Finding(
