@@ -129,10 +129,15 @@ def _face_stability_check(path) -> dict:
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 1080)
         detector = cv2.FaceDetectorYN.create(model_path, "", (w, h), 0.5, 0.3, 5000)
         sample_count = min(12, total_frames)
-        indices = [0] if sample_count <= 1 else sorted(set(
-            int(i * (total_frames - 1) / (sample_count - 1))
-            for i in range(sample_count)
-        ))
+        start_idx = max(0, int(total_frames * 0.15))
+        end_idx = max(start_idx + 1, int(total_frames * 0.85))
+        indices = []
+        span = max(1, end_idx - start_idx)
+        for i in range(sample_count):
+            idx = start_idx + int(i * (span - 1) / max(sample_count - 1, 1))
+            if start_idx <= idx < total_frames:
+                indices.append(idx)
+        indices = sorted(set(indices)) if indices else [max(0, total_frames // 2)]
 
         prior_cx = None
         max_jump = 0.0
@@ -142,6 +147,8 @@ def _face_stability_check(path) -> dict:
             cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
             ok, frame = cap.read()
             if not ok or frame is None or frame.size == 0:
+                continue
+            if float(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).mean()) < 12.0:
                 continue
             valid += 1
             _, res = detector.detect(frame)

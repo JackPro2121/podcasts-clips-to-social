@@ -125,7 +125,7 @@ Style: Default,{font_name},{font_size},{primary_col},&H000000FF,{outline_col},{s
 Style: DefaultMid,{font_name},{font_size},{primary_col},&H000000FF,{outline_col},{shadow_col},-1,0,0,0,100,100,1.5,0,1,{outline_w},{shadow_d},5,100,100,{margin_v},1
 Style: DefaultTop,{font_name},{font_size},{primary_col},&H000000FF,{outline_col},{shadow_col},-1,0,0,0,100,100,1.5,0,1,{outline_w},{shadow_d},8,100,100,{margin_v},1
 Style: TopHeader,Montserrat Black,42,&H00FFFFFF,&H000000FF,&H00B86B62,&H00000000,-1,0,0,0,100,100,1.2,0,3,11,0,8,100,100,{HOOK_BADGE_MARGIN_V},1
-Style: TikTokMemeBox,Montserrat Black,44,&H00000000,&H000000FF,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0.5,0,3,10,0,8,100,100,130,1
+Style: TikTokMemeBox,Montserrat Black,44,&H00000000,&H000000FF,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0.5,0,3,10,0,8,100,100,170,1
 Style: Watermark,Montserrat Black,24,&H90FFFFFF,&H000000FF,&H90000000,&H00000000,-1,0,0,0,100,100,1.2,0,1,1.5,0.0,7,60,60,90,1
 
 [Events]
