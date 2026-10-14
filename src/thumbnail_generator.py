@@ -333,7 +333,7 @@ def generate_clip_thumbnail(
 
         # Calculate bounding boxes for each individual line
         line_boxes = []
-        y_cursor = 220
+        y_cursor = 280
         for line in lines:
             lw, lh = measure_line(line)
             cx = OUTPUT_WIDTH // 2

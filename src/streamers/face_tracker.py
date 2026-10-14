@@ -215,10 +215,12 @@ def analyze_streamer_clip_framing(
             if scaled_faces is not None and len(scaled_faces) > 0:
                 for face in scaled_faces:
                     conf = float(face[14])
-                    if conf < 0.40:
+                    if conf < 0.60:
                         continue
 
                     fw, fh = float(face[2]), float(face[3])
+                    if (fw * fh) < 4096.0:
+                        continue
                     feat = tracker.extract_face_embedding(frame, face)
 
                     # Accumulate anchor candidates from early frames if reference not yet set (D20 fix)

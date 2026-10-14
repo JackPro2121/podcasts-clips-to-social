@@ -503,6 +503,37 @@ def run_streamer_pipeline(
 
             size_mb = rendered.stat().st_size / 1024 / 1024
             print(f"[+] Rendered clip #{idx} ({size_mb:.2f} MB): {rendered.name}")
+            try:
+                import json as _json
+                edl_path = out_clip_path.with_suffix(".edl.json")
+                edl_payload = {
+                    "schema_version": 1,
+                    "pipeline": "v2_streamer",
+                    "run_id": run_id,
+                    "clip_index": idx,
+                    "title": vm.title,
+                    "source_url": target_url,
+                    "video_id": video_id,
+                    "creator": target_creator,
+                    "duration_s": round(clip_duration, 3),
+                    "video_path": str(rendered),
+                    "thumbnail_path": str(thumb_path) if thumb_path else None,
+                    "ass_path": str(ass_path) if ass_path else None,
+                    "framing_mode": framing_mode,
+                    "watermark": STREAMER_WATERMARK,
+                    "peak_intervals": peak_intervals,
+                }
+                edl_path.write_text(_json.dumps(edl_payload, indent=2, default=str), encoding="utf-8")
+            except Exception as exc:
+                print(f"[!] Could not write EDL sidecar for clip #{idx}: {exc}")
+
+            if ass_path is not None and ass_path.exists():
+                try:
+                    import shutil
+                    persisted_ass = STREAMER_CLIPS_DIR / (out_clip_path.stem + ".ass")
+                    shutil.copyfile(ass_path, persisted_ass)
+                except Exception as exc:
+                    print(f"[!] Could not persist ASS for clip #{idx}: {exc}")
 
             # -------------------------------------------------------
             # 3j. QUALITY GATE — nothing passes without verification
@@ -517,6 +548,23 @@ def run_streamer_pipeline(
             result.gate = gate_result
             result.rendered = rendered
             result.thumb_path = thumb_path
+            if gate_result.passed and os.getenv("V2_DISABLE_PREVIEW", "").lower() not in ("1", "true", "yes"):
+                try:
+                    import subprocess
+                    preview_path = out_clip_path.with_name(out_clip_path.stem + "_preview.mp4")
+                    cmd = [
+                        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                        "-i", str(rendered), "-vf", "scale=540:960",
+                        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30",
+                        "-c:a", "copy", "-movflags", "+faststart", str(preview_path),
+                    ]
+                    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                    if proc.returncode == 0 and preview_path.exists():
+                        print(f"  [+] preview: {preview_path.name}")
+                    else:
+                        print(f"  [!] preview generation failed: {proc.stderr[-200:]}")
+                except Exception as exc:
+                    print(f"  [!] preview generation exception: {exc}")
 
             if not gate_result.passed:
                 print(
@@ -531,6 +579,67 @@ def run_streamer_pipeline(
             print(f"[-] Clip #{idx} raised unexpected exception — continuing to next clip.")
             traceback.print_exc()
             continue
+
+    # ------------------------------------------------------------------
+    # 3.5 Run manifest (machine-readable production audit)
+    # ------------------------------------------------------------------
+    try:
+        import json as _json
+        run_manifest = {
+            "run_id": run_id,
+            "source_url": target_url,
+            "video_id": video_id,
+            "creator": target_creator,
+            "clips": [
+                {
+                    "clip_index": r.clip_index,
+                    "title": r.candidate.title,
+                    "rendered": str(r.rendered) if r.rendered else None,
+                    "thumbnail": str(r.thumb_path) if r.thumb_path else None,
+                    "passed": bool(r.gate.passed) if r.gate else False,
+                    "blocking_codes": list(r.gate.blocking_codes) if r.gate else [],
+                    "verdict_path": str(r.gate.verdict_path) if r.gate and r.gate.verdict_path else None,
+                    "error": r.error,
+                }
+                for r in clip_results
+            ],
+        }
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        (runs_dir / "run_manifest.json").write_text(_json.dumps(run_manifest, indent=2, default=str), encoding="utf-8")
+    except Exception as exc:
+        print(f"[!] Could not write run manifest: {exc}")
+
+    # ------------------------------------------------------------------
+    # 3.6 Production report (merged QC summary)
+    # ------------------------------------------------------------------
+    try:
+        import json as _json
+        passed = [r for r in clip_results if r.succeeded]
+        blocked = [r for r in clip_results if r.gate and not r.gate.passed]
+        report = {
+            "run_id": run_id,
+            "total_clips": len(clip_results),
+            "passed": len(passed),
+            "blocked": len(blocked),
+            "errors": len([r for r in clip_results if r.error]),
+            "published_target": "streamer_buffer_only",
+            "clips": [
+                {
+                    "clip_index": r.clip_index,
+                    "title": r.candidate.title,
+                    "duration_s": r.gate.duration_s if r.gate else 0.0,
+                    "passed": bool(r.gate.passed) if r.gate else False,
+                    "warnings": list(r.gate.warnings) if r.gate else [],
+                    "blocking_codes": list(r.gate.blocking_codes) if r.gate else [],
+                    "visual": (r.gate.__dict__.get("path") is not None and True),
+                }
+                for r in clip_results
+            ],
+        }
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        (runs_dir / "production_report.json").write_text(_json.dumps(report, indent=2, default=str), encoding="utf-8")
+    except Exception as exc:
+        print(f"[!] Could not write production report: {exc}")
 
     # ------------------------------------------------------------------
     # 4. Buffer publishing (gate-passed clips only)

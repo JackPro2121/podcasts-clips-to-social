@@ -14,6 +14,7 @@ access, so every rule is unit-tested with constructed word lists.
 
 from __future__ import annotations
 
+import json
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -166,6 +167,47 @@ def build_concat_filtergraph(plan: CutPlan, source_offset_s: float = 0.0) -> str
     return ";".join(video_parts + audio_parts + [concat])
 
 
+
+def _probe_duration(path):
+    """Return media duration in seconds using ffprobe, or None on failure."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return float(result.stdout.strip())
+    except (OSError, TypeError, ValueError, subprocess.SubprocessError):
+        pass
+    return None
+
+
+def _has_audio_stream(path):
+    """Return True if the media file contains at least one audio stream."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-select_streams", "a",
+                "-show_entries", "stream=codec_type",
+                "-of", "json", str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout or "{}")
+            return bool(data.get("streams"))
+    except (OSError, ValueError, json.JSONDecodeError, subprocess.SubprocessError):
+        pass
+    return False
+
+
 def compact_media(
     source_path: Union[str, Path],
     plan: CutPlan,
@@ -204,11 +246,22 @@ def compact_media(
         text=True,
         timeout=900,
     )
-    return (
+    ok = (
         result.returncode == 0
         and destination.exists()
         and destination.stat().st_size > 0
+        and _has_audio_stream(destination)
     )
+    if ok:
+        actual = _probe_duration(destination)
+        plan_duration = float(plan.duration_s)
+        if actual is None or abs(actual - plan_duration) > 0.25:
+            try:
+                destination.unlink()
+            except OSError:
+                pass
+            return False
+    return ok
 
 
 def prepare_compacted_clip(
@@ -238,4 +291,10 @@ def prepare_compacted_clip(
     if not compact_media(source_path, plan, destination, source_offset_s=source_offset_s):
         return None
     remapped = [(plan.remap(start), plan.remap(end)) for start, end in words]
+    if not _has_audio_stream(destination):
+        try:
+            destination.unlink()
+        except OSError:
+            pass
+        return None
     return destination, remapped, plan.duration_s

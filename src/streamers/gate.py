@@ -79,6 +79,256 @@ class GateResult:
         )
 
 
+
+def _face_stability_check(path) -> dict:
+    """Sample frames and measure face/track instability in the rendered clip."""
+    model_path = str(__import__("pathlib").Path(__file__).resolve().parents[2] / "src" / "models" / "face_detection_yunet.onnx")
+    try:
+        import cv2
+        import numpy as np
+    except Exception:
+        return {
+            "available": False,
+            "face_presence_ratio": 0.0,
+            "max_horizontal_jump_px": 0.0,
+            "sampled_frames": 0,
+            "warning": "face_stability_unavailable",
+        }
+
+    if not __import__("pathlib").Path(model_path).exists():
+        return {
+            "available": False,
+            "face_presence_ratio": 0.0,
+            "max_horizontal_jump_px": 0.0,
+            "sampled_frames": 0,
+            "warning": "face_stability_unavailable",
+        }
+
+    cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        return {
+            "available": False,
+            "face_presence_ratio": 0.0,
+            "max_horizontal_jump_px": 0.0,
+            "sampled_frames": 0,
+            "warning": "face_stability_unavailable",
+        }
+
+    try:
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        if total_frames <= 0:
+            return {
+                "available": False,
+                "face_presence_ratio": 0.0,
+                "max_horizontal_jump_px": 0.0,
+                "sampled_frames": 0,
+                "warning": "face_stability_unavailable",
+            }
+
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 1920)
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 1080)
+        detector = cv2.FaceDetectorYN.create(model_path, "", (w, h), 0.5, 0.3, 5000)
+        sample_count = min(12, total_frames)
+        indices = [0] if sample_count <= 1 else sorted(set(
+            int(i * (total_frames - 1) / (sample_count - 1))
+            for i in range(sample_count)
+        ))
+
+        prior_cx = None
+        max_jump = 0.0
+        seen = 0
+        valid = 0
+        for idx in indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            ok, frame = cap.read()
+            if not ok or frame is None or frame.size == 0:
+                continue
+            valid += 1
+            _, res = detector.detect(frame)
+            if res is None or len(res) == 0:
+                continue
+            # Choose largest face.
+            largest = max(res, key=lambda r: float(r[2]) * float(r[3]))
+            cx = float(largest[0]) + float(largest[2]) / 2.0
+            seen += 1
+            if prior_cx is not None:
+                jump = abs(cx - prior_cx)
+                if jump > max_jump:
+                    max_jump = jump
+            prior_cx = cx
+
+        presence = (seen / valid) if valid else 0.0
+        return {
+            "available": True,
+            "face_presence_ratio": round(presence, 3),
+            "max_horizontal_jump_px": round(max_jump, 2),
+            "sampled_frames": valid,
+            "warning": None,
+        }
+    finally:
+        cap.release()
+
+
+
+def _caption_collision_check(path, model_path=None) -> dict:
+    """Sample one frame and flag caption-like white stickers over large faces."""
+    if model_path is None:
+        model_path = str(__import__("pathlib").Path(__file__).resolve().parents[2] / "src" / "models" / "face_detection_yunet.onnx")
+    try:
+        import cv2
+        import numpy as np
+        from pathlib import Path as _Path
+    except Exception:
+        return {"available": False, "collision": False, "warning": "caption_check_unavailable"}
+
+    if not _Path(model_path).exists():
+        return {"available": False, "collision": False, "warning": "caption_check_unavailable"}
+
+    cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        return {"available": False, "collision": False, "warning": "caption_check_unavailable"}
+    try:
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        if total <= 0:
+            return {"available": False, "collision": False, "warning": "caption_check_unavailable"}
+        cap.set(cv2.CAP_PROP_POS_FRAMES, total // 2)
+        ok, frame = cap.read()
+        if not ok or frame is None or frame.size == 0:
+            return {"available": False, "collision": False, "warning": "caption_check_unavailable"}
+
+        h, w = frame.shape[:2]
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        detector = cv2.FaceDetectorYN.create(model_path, "", (w, h), 0.5, 0.3, 5000)
+        _, faces = detector.detect(frame)
+
+        # White sticker candidates above heading/meme-box regions in the upper half.
+        white_mask = (gray > 240)
+        white_rows = white_mask.sum(axis=1)
+        top_band_rows = [i for i in range(h // 2) if white_rows[i] > w * 0.05]
+        if not top_band_rows:
+            return {"available": True, "collision": False, "collision_ratio": 0.0}
+
+        y0, y1 = min(top_band_rows), max(top_band_rows)
+        white_cols = white_mask[y0:y1+1, :].sum(axis=0)
+        x0 = int(np.argmax(white_cols > w * 0.01))
+        x1 = w - int(np.argmax(white_cols[::-1] > w * 0.01))
+
+        collision = False
+        overlap_area = 0.0
+        if faces is not None and len(faces) > 0:
+            largest = max(faces, key=lambda r: float(r[2]) * float(r[3]))
+            fx, fy, fw, fh = [float(v) for v in largest[:4]]
+            ix0 = max(fx, x0); iy0 = max(fy, y0)
+            ix1 = min(fx + fw, x1); iy1 = min(fy + fh, y1)
+            if ix1 > ix0 and iy1 > iy0:
+                collision = True
+                overlap_area = (ix1 - ix0) * (iy1 - iy0)
+
+        return {
+            "available": True,
+            "collision": collision,
+            "collision_overlap_px": round(float(overlap_area), 2),
+            "white_band": [int(y0), int(y1), int(x0), int(x1)],
+        }
+    finally:
+        cap.release()
+
+
+def _visual_black_margin_check(path) -> dict:
+    """Sample rendered frames and reject shots with excessive black margins.
+
+    V2 framing must be full-screen 9:16. Partial black borders can appear during
+    Tier 3 off-screen fallback or a failed stacked/multi-person composition.
+    """
+    try:
+        import cv2
+        import numpy as np
+    except Exception:
+        return {
+            "available": False,
+            "passed": True,
+            "worst_margin_pct": 0.0,
+            "worst_side": "none",
+            "sampled_frames": 0,
+            "warning": "visual_check_unavailable",
+        }
+
+    cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        return {
+            "available": False,
+            "passed": True,
+            "worst_margin_pct": 0.0,
+            "worst_side": "none",
+            "sampled_frames": 0,
+            "warning": "visual_check_unavailable",
+        }
+
+    try:
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        if total_frames <= 0:
+            return {
+                "available": False,
+                "passed": True,
+                "worst_margin_pct": 0.0,
+                "worst_side": "none",
+                "sampled_frames": 0,
+                "warning": "visual_check_unavailable",
+            }
+
+        margin_px = 40
+        sample_count = min(12, total_frames)
+        indices = [0] if sample_count <= 1 else sorted(set(
+            int(i * (total_frames - 1) / (sample_count - 1))
+            for i in range(sample_count)
+        ))
+
+        worst_pct = 0.0
+        worst_side = "none"
+        valid = 0
+
+        for idx in indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            ok, frame = cap.read()
+            if not ok or frame is None or frame.size == 0:
+                continue
+            valid += 1
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            h, w = gray.shape[:2]
+            margin = min(margin_px, max(8, h // 30), max(8, w // 30))
+
+            top = float((gray[:margin, :] < 16).mean())
+            bottom = float((gray[h - margin:, :] < 16).mean())
+            left = float((gray[:, :margin] < 16).mean())
+            right = float((gray[:, w - margin:] < 16).mean())
+
+            for side, value in (("top", top), ("bottom", bottom), ("left", left), ("right", right)):
+                if value > worst_pct:
+                    worst_pct = value
+                    worst_side = side
+
+        if valid == 0:
+            return {
+                "available": False,
+                "passed": True,
+                "worst_margin_pct": 0.0,
+                "worst_side": "none",
+                "sampled_frames": 0,
+                "warning": "visual_check_unavailable",
+            }
+
+        worst_pct *= 100.0
+        return {
+            "available": True,
+            "passed": worst_pct < 10.0,
+            "worst_margin_pct": round(worst_pct, 2),
+            "worst_side": worst_side,
+            "sampled_frames": valid,
+        }
+    finally:
+        cap.release()
+
+
 def verify_clip(
     path: Path,
     *,
@@ -108,6 +358,13 @@ def verify_clip(
         .verdict_path points to the emitted verdict.json (always written).
     """
     result = GateResult(path=str(path))
+    visual_check = {
+        'available': False,
+        'passed': True,
+        'worst_margin_pct': 0.0,
+        'worst_side': 'none',
+        'sampled_frames': 0,
+    }
 
     if not path.exists():
         result.error = f"Rendered clip not found: {path}"
@@ -161,11 +418,60 @@ def verify_clip(
             )
         )
 
+    caption_collision = _caption_collision_check(path)
+    if caption_collision.get("available") and caption_collision.get("collision"):
+        raw_verdict.add(
+            verdict_mod.Finding(
+                code="v2_caption_face_collision",
+                severity="warning",
+                message="V2 caption sticker overlaps a sampled face box",
+                spec_clause="streamer caption safe-zone",
+                metrics=caption_collision,
+            )
+        )
+
+    face_stability = _face_stability_check(path)
+    if face_stability.get("available") and face_stability.get("face_presence_ratio", 0.0) < 0.5:
+        raw_verdict.add(
+            verdict_mod.Finding(
+                code="v2_low_face_presence",
+                severity="warning",
+                message=(
+                    f"V2 face stability found face in only "
+                    f"{face_stability['face_presence_ratio'] * 100:.0f}% of sampled frames"
+                ),
+                spec_clause="streamer face-lock quality",
+                metrics=face_stability,
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # 2b. Visual black-margin audit
+    # ------------------------------------------------------------------
+    visual_check = _visual_black_margin_check(path)
+    if visual_check.get('available') and not visual_check.get('passed'):
+        raw_verdict.add(
+            verdict_mod.Finding(
+                code='v2_black_frame_margin',
+                severity='error',
+                message=(
+                    f'V2 visual check found {visual_check["worst_margin_pct"]:.1f}% '
+                    f'black margin ({visual_check["worst_side"]})'
+                ),
+                spec_clause='streamer 9:16 full-frame composition',
+                metrics=visual_check,
+            )
+        )
+    elif not visual_check.get('available'):
+        raw_verdict.warnings.append('v2_visual_check_unavailable')
+
     # ------------------------------------------------------------------
     # 3. Collect findings
     # ------------------------------------------------------------------
     blocking = [f.code for f in raw_verdict.findings if f.blocks]
     warnings = [f.code for f in raw_verdict.findings if f.severity == "warning"]
+    if 'v2_visual_check_unavailable' in getattr(raw_verdict, 'warnings', []):
+        warnings.append('v2_visual_check_unavailable')
 
     result.blocking_codes = blocking
     result.warnings = warnings
@@ -190,7 +496,7 @@ def verify_clip(
             "blocking_codes": blocking,
             "warnings": warnings,
             "findings": [f.as_dict() for f in raw_verdict.findings],
-            "metrics": raw_verdict.metrics,
+            "metrics": {**getattr(raw_verdict, "metrics", {}), "visual": visual_check, "face_stability": face_stability, "caption_collision": caption_collision},
         }
         verdict_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         result.verdict_path = verdict_file
