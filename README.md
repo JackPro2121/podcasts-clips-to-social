@@ -10,7 +10,7 @@ This repository is the **V1 Podcast pipeline**. The high-energy **V2 Streamer pi
 
 ---
 
-## 🚀 Two Repositories, One Engine
+## 🚀 Two Repositories, One Upstream Engine
 
 | | This repo | Streamer repo |
 | :--- | :--- | :--- |
@@ -21,11 +21,11 @@ This repository is the **V1 Podcast pipeline**. The high-energy **V2 Streamer pi
 | Code | `core/` + `v1/` | `core/` + `streamers/` |
 | Publishing token | `BUFFER_ACCESS_TOKEN` | `STREAMER_BUFFER_ACCESS_TOKEN` |
 
-Both repositories mount the **same engine** as a git submodule at `core/`
-([`JackPro2121/clips-core`](https://github.com/JackPro2121/clips-core)) — one copy of the
-engine, so an engine fix lands once. Nothing else is shared: separate entrypoints,
-separate workflows, separate Buffer credentials. A change in one pipeline is never a
-change in the other.
+This repo mounts the shared engine ([`JackPro2121/clips-core`](https://github.com/JackPro2121/clips-core))
+as a git submodule at `core/`. The streamer repo builds on the same upstream but keeps its **own
+vendored copy** of it, so it ships independently — an engine fix is landed upstream once and then
+pulled into both. Nothing else is shared: separate entrypoints, separate workflows, separate Buffer
+credentials. A change in one pipeline is never a change in the other.
 
 ---
 
@@ -76,7 +76,7 @@ The streamer-only secrets (`STREAMER_BUFFER_ACCESS_TOKEN`, `STREAMER_BUFFER_CHAN
 ```bash
 git clone https://github.com/JackPro2121/podcasts-clips-to-social.git
 cd podcasts-clips-to-social
-git submodule update --init --recursive   # pulls the shared core/ engine
+git submodule update --init --recursive   # pulls the V1 core/ engine (submodule)
 pip install -r requirements.txt
 ```
 
@@ -95,7 +95,6 @@ The streamer pipeline is no longer in this repository:
 ```bash
 git clone https://github.com/JackPro2121/streamer-clips-to-social.git
 cd streamer-clips-to-social
-git submodule update --init --recursive
 pip install -r requirements.txt
 python main_streamer.py --streamer kai_cenat --num-clips 3
 ```

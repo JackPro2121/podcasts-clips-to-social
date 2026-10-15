@@ -9,11 +9,12 @@
 > **[`JackPro2121/streamer-clips-to-social`](https://github.com/JackPro2121/streamer-clips-to-social)**
 > (private mirror: `ranajawadai/streamer-clips-to-social`).
 >
-> **RULE OF ISOLATION**: the two pipelines share exactly one artifact — the
-> `clips-core` engine submodule mounted at `core/`. Everything else is separate:
-> separate entrypoints, separate workflows, separate Buffer credentials. A change
-> made here is **not** a change to V2, and vice versa. Never let work on one
-> pipeline regress the other.
+> **RULE OF ISOLATION**: this repo mounts the `clips-core` engine as a git
+> submodule at `core/`; the streamer repo carries its **own vendored copy** of the
+> same upstream (see its `SYNC.md`). Apart from that shared origin, everything is
+> separate: separate entrypoints, separate workflows, separate Buffer credentials.
+> A change made here is **not** a change to V2, and vice versa. Never let work on
+> one pipeline regress the other.
 
 ---
 
@@ -21,12 +22,12 @@
 
 ```
                           ┌─────────────────────────────────────────┐
-                          │      TWO REPOSITORIES, ONE ENGINE       │
+                          │      TWO REPOS, ONE UPSTREAM ENGINE     │
                           └────────────────────┬────────────────────┘
                                                │
                              ┌─────────────────┴──────────────────┐
-                             │   clips-core (git submodule)       │
-                             │   mounted at core/ in both repos   │
+                             │   clips-core (upstream engine repo) │
+                             │   submodule in V1, vendored in V2   │
                              └─────────────────┬──────────────────┘
                   ┌────────────────────────────┴────────────────────────────┐
                   ▼                                                         ▼
@@ -74,8 +75,10 @@ Automated clipping of 1-to-3 hour podcasts focused on Personal Finance, Wealth C
 
 `core/` is **not** tracked in this repository. It is a **git submodule** pointing
 at [`JackPro2121/clips-core`](https://github.com/JackPro2121/clips-core), the
-pipeline-agnostic engine shared by the podcast (V1) and streamer (V2) pipelines.
-There is exactly one copy of the engine, so an engine fix lands once.
+pipeline-agnostic engine both pipelines build on. This repo consumes it as a
+submodule; the V2 streamer repo instead carries its **own vendored copy** of the
+same upstream, so an engine fix must be landed upstream once and then pulled into
+both.
 
 ```bash
 # after cloning this repo, or after someone bumps the submodule
@@ -91,11 +94,14 @@ git add core && git commit -m "chore: bump clips-core to <sha>"
 * Large model weights (`SFace`, `S3FD/SyncNet`, `TransNetV2`) are gitignored in
   `clips-core` and fetched by `core/tools/fetch_models.py`. Only the 232 KB YuNet
   detector ships in git here; the V2 streamer identity profiles ship in the
-  streamer repo's clone of the engine.
+  streamer repo's vendored copy of the engine.
 * Paths resolve at runtime and can be overridden with `CLIPS_CORE_ROOT`,
   `CLIPS_CORE_MODELS_DIR`, and `CLIPS_CORE_ASSETS_DIR`.
-* **Engine changes are shared.** Because V2 mounts the same submodule, an engine
-  edit must be verified against both pipelines before the pointer is bumped.
+* **Engine changes must reach both pipelines.** V2 no longer mounts this
+  submodule — it keeps its own vendored copy — so an engine fix landed here has to
+  be applied upstream in `clips-core` and then synced into
+  [`streamer-clips-to-social`](https://github.com/JackPro2121/streamer-clips-to-social)
+  (its `SYNC.md` documents the drift check).
 
 ---
 
@@ -192,7 +198,6 @@ Moved out of this repository. Clone and run it from there:
 ```bash
 git clone https://github.com/JackPro2121/streamer-clips-to-social.git
 cd streamer-clips-to-social
-git submodule update --init --recursive
 pip install -r requirements.txt
 
 python main_streamer.py                                  # auto-discover a fresh stream
@@ -207,9 +212,9 @@ python main_streamer.py --video-url "https://www.youtube.com/watch?v=VIDEO_ID" -
 1. **Pipeline isolation**: all V1 work lives in `v1/` (+ shared `core/`); all V2 work lives in the
    [streamer repo](https://github.com/JackPro2121/streamer-clips-to-social) under `streamers/`. Never
    add streamer-specific code to this repository.
-2. **Shared engine discipline**: `core/` is `clips-core`. An engine change affects **both** pipelines —
-   verify V1 here *and* V2 there before bumping the submodule pointer, and never let the pointers drift
-   silently.
+2. **Shared engine discipline**: `core/` here is `clips-core` (a submodule); V2 keeps its own vendored
+   copy of the same upstream. An engine change therefore affects **both** pipelines — land it in
+   `clips-core`, then bump the submodule pointer here *and* sync V2 (see V2's `SYNC.md`).
 3. **Buffer isolation**: V1 publishing reads `BUFFER_ACCESS_TOKEN` / `BUFFER_CHANNEL_IDS` only. Streamer
    publishing reads `STREAMER_BUFFER_ACCESS_TOKEN` / `STREAMER_BUFFER_CHANNEL_IDS` only. **Zero crossover.**
 4. **Anti-Detection & Safe Zones**:
