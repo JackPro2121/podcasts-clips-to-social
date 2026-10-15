@@ -27,7 +27,7 @@ import traceback
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.config import (
     CLIPS_DIR,
@@ -55,6 +55,7 @@ from src.streamers.censor import censor_transcript_segments
 from src.streamers.discovery import (
     discover_streamer_candidates,
     record_streamer_history,
+    record_failed_attempt,
     extract_video_id_from_url,
 )
 from src.streamers.editing_enhancer import build_streamer_retention_plan
@@ -135,6 +136,46 @@ def _remap_segments_to_compacted_timeline(
             )
         )
     return remapped
+
+
+def _remap_sfx_cues(
+    cues: List[Tuple[float, str]],
+    segment_start: float,
+    cut_plan: Any,
+    clip_duration: float,
+) -> List[Tuple[float, str]]:
+    """Shift moment-relative SFX cues into the downloaded-file timeline.
+
+    The viral detector emits ``sfx_cues`` relative to the moment start (t=0 at
+    the hook), but the renderer works in the downloaded-file timeline, which
+    begins ``segment_start`` seconds *before* the moment to provide hook
+    pre-roll. Each cue is therefore shifted forward by ``segment_start``, passed
+    through the dead-air cut plan (when one was applied), and finally dropped if
+    it lands outside the rendered duration.
+    """
+    offset = float(segment_start or 0.0)
+    remapped_cues: List[Tuple[float, str]] = []
+    for cue_t, kind in cues:
+        file_time = float(cue_t) + offset
+        remapped = cut_plan.remap(file_time) if cut_plan.applied else file_time
+        if 0.0 <= remapped <= clip_duration:
+            remapped_cues.append((remapped, kind))
+    return remapped_cues
+
+
+def _record_video_failure(video_id: str, reason: str) -> None:
+    """Record a failed processing attempt so the D10 retry budget can engage.
+
+    Without this, a VOD that consistently fails (region-blocked, corrupt, or
+    transcript-less) would be retried on every discovery run forever. Bookkeeping
+    is best-effort: a history-write failure must never abort the run.
+    """
+    if not video_id or video_id == "stream_video":
+        return
+    try:
+        record_failed_attempt(video_id, reason)
+    except Exception as exc:  # pylint: disable=broad-except
+        print(f"[!] Could not record failed attempt for {video_id}: {exc}")
 
 
 def _build_local_fallback_segments(
@@ -272,6 +313,7 @@ def run_streamer_pipeline(
                 t_data = fetch_transcript_only(cand_url, allow_apify_fallback=True)
             except Exception as exc:
                 print(f"[-] Transcript fetch failed for {cand_id}: {exc}")
+                _record_video_failure(cand_id, f"transcript fetch raised: {exc}")
                 continue
 
             if t_data and t_data.get("transcript"):
@@ -287,6 +329,7 @@ def run_streamer_pipeline(
                 break
             else:
                 print(f"[-] No timed transcript for '{cand_title}'. Trying next...")
+                _record_video_failure(cand_id, "no timed transcript available")
 
         if not target_url or not transcript_data:
             print("[-] No candidate stream had an accessible transcript.")
@@ -299,9 +342,11 @@ def run_streamer_pipeline(
             transcript_data = fetch_transcript_only(target_url, allow_apify_fallback=True)
         except Exception as exc:
             print(f"[-] Transcript fetch raised: {exc}")
+            _record_video_failure(video_id, f"transcript fetch raised: {exc}")
             return []
         if not transcript_data or not transcript_data.get("transcript"):
             print("[-] Could not retrieve transcript for provided URL.")
+            _record_video_failure(video_id, "no transcript retrieved for provided URL")
             return []
 
     try:
@@ -312,10 +357,12 @@ def run_streamer_pipeline(
         )
     except Exception as exc:
         print(f"[-] Transcript parse raised: {exc}")
+        _record_video_failure(video_id, f"transcript parse raised: {exc}")
         return []
 
     if not segments:
         print("[-] Could not parse transcript segments.")
+        _record_video_failure(video_id, "transcript parsed to zero segments")
         return []
 
     print(f"[+] Retrieved {len(segments)} transcript segments. Analysing viral moments...")
@@ -331,10 +378,12 @@ def run_streamer_pipeline(
     except Exception as exc:
         print(f"[-] Viral detection raised: {exc}")
         traceback.print_exc()
+        _record_video_failure(video_id, f"viral detection raised: {exc}")
         return []
 
     if not viral_moments:
         print("[-] No viral moments detected in stream.")
+        _record_video_failure(video_id, "no viral moments detected")
         return []
 
     print(f"[+] Detected {len(viral_moments)} viral moments:")
@@ -363,6 +412,7 @@ def run_streamer_pipeline(
                 end_time=seg_end + 1.0,
                 clip_index=idx,
                 output_dir=DOWNLOADS_DIR,
+                moment_start=vm.start_time,
             )
             if not clip_info or "video_path" not in clip_info:
                 result.error = "download_clip_segment returned no video_path"
@@ -465,11 +515,14 @@ def run_streamer_pipeline(
                 thumb_path = None
 
             # 3i. SFX cue remapping
-            active_sfx = []
-            for s in vm.sfx_cues:
-                remapped_time = cut_plan.remap(s[0]) if cut_plan.applied else s[0]
-                if 0.0 <= remapped_time <= clip_duration:
-                    active_sfx.append((remapped_time, s[1]))
+            # sfx_cues are moment-relative; shift them into the downloaded-file
+            # timeline (hook pre-roll) before applying the dead-air cut plan.
+            active_sfx = _remap_sfx_cues(
+                vm.sfx_cues,
+                float(clip_info.get("segment_start", 0.0) or 0.0),
+                cut_plan,
+                clip_duration,
+            )
 
             # 3j. High-retention editing plan (0.35s velocity hook zoom + pattern interrupts + synced whoosh)
             enhanced_peaks, active_sfx = build_streamer_retention_plan(
@@ -707,10 +760,18 @@ def run_streamer_pipeline(
     # ------------------------------------------------------------------
     print("\n--- [5/5] RECORDING HISTORY ---")
     if target_url:
-        try:
-            record_streamer_history(video_id, title=target_title, creator=target_creator)
-        except Exception as exc:
-            print(f"[!] History write raised: {exc}")
+        succeeded = [r for r in clip_results if r.succeeded]
+        if succeeded:
+            try:
+                record_streamer_history(video_id, title=target_title, creator=target_creator)
+            except Exception as exc:
+                print(f"[!] History write raised: {exc}")
+        else:
+            # No publishable clip this run: count it against the retry budget
+            # (D10) instead of marking the VOD permanently processed, so a
+            # transient failure can be retried up to the attempt ceiling.
+            reason = next((r.error for r in clip_results if r.error), "produced no publishable clip")
+            _record_video_failure(video_id, reason)
 
     # ------------------------------------------------------------------
     # 6. Delivery summary

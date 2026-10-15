@@ -455,10 +455,38 @@ def build_streamer_framing(
     layout_info = StreamLayoutInfo(layout_type="fullscreen_room")
     if force_layout == "stacked_webcam":
         layout_info = detect_stream_layout(video_path, sample_duration=min(6.0, clip_dur), streamer_name=streamer_name)
-        layout_info.layout_type = "stacked_webcam"
+        # Only honour the override when detection actually found a webcam overlay.
+        # Forcing 'stacked_webcam' without boxes silently degraded to fullscreen
+        # identity framing while still claiming the stacked layout type.
+        if layout_info.webcam_box and layout_info.content_box:
+            layout_info.layout_type = "stacked_webcam"
+        else:
+            print(
+                "[!] --framing stacked_webcam requested but no webcam overlay was "
+                f"detected; using detected '{layout_info.layout_type}' layout instead."
+            )
     elif force_layout in _SPLIT_ALIASES:
         layout_info = detect_stream_layout(video_path, sample_duration=min(6.0, clip_dur), streamer_name=streamer_name)
-        layout_info.layout_type = "multi_person_room"
+        if (
+            layout_info.layout_type == "stacked_webcam"
+            and layout_info.webcam_box
+            and layout_info.content_box
+        ):
+            # Detection found a webcam-over-gameplay stream, which already renders as a
+            # split (webcam pane over content pane). A forced split must NOT discard
+            # those detected boxes and substitute synthetic half-frame panes.
+            print(
+                "[*] --framing split_screen requested on a detected webcam stream; "
+                "keeping the detected 'stacked_webcam' split layout."
+            )
+        else:
+            if layout_info.speaker2_box is None:
+                print(
+                    "[!] --framing split_screen requested but only one speaker was "
+                    "detected; generating synthetic half-frame panes because the "
+                    "layout was explicitly forced."
+                )
+            layout_info.layout_type = "multi_person_room"
     elif force_layout in ("fullscreen_room", "single_smooth"):
         layout_info.layout_type = "fullscreen_room"
     elif force_layout == "auto":
