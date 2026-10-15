@@ -7,7 +7,7 @@
     "ground truth rather than against itself.",
     "",
     "The MP4s are NOT tracked in git (~250 MB). Fetch them with:",
-    "  python tools/fetch_fixtures.py",
+    "  python core/tools/fetch_fixtures.py",
     "Every file is verified by SHA-256 on fetch. A hash mismatch is a hard error:",
     "a silently different fixture would make every visual regression test lie.",
     "",

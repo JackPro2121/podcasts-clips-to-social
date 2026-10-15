@@ -6,15 +6,16 @@ name: Model Smoke (ML tier)
 #
 # Users said: quality first, download whatever verified models are needed on
 # GitHub Actions. This workflow is the honest answer to "does it actually run
-# on the runner", with every checkpoint SHA-256 pinned in tools/fetch_models.py.
+# on the runner", with every checkpoint SHA-256 pinned in core/tools/fetch_models.py.
 
 on:
   workflow_dispatch:
   push:
     paths:
       - 'requirements-ml.txt'
-      - 'tools/fetch_models.py'
-      - 'tools/model_smoke.py'
+      # fetch_models.py and model_smoke.py now live in the clips-core submodule,
+      # so the only path this repo can observe changing is the pointer itself.
+      - 'core'
       - '.github/workflows/model_smoke.yml'
 
 permissions:
@@ -55,10 +56,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: core/models
-          key: ml-models-${{ hashFiles('tools/fetch_models.py') }}
+          key: ml-models-${{ hashFiles('core/tools/fetch_models.py') }}
 
       - name: Fetch official checkpoints
-        run: python tools/fetch_models.py --fetch all
+        run: python core/tools/fetch_models.py --fetch all
 
       - name: Fetch a golden master
         run: |
@@ -67,4 +68,4 @@ jobs:
           ls -l "$RUNNER_TEMP/smoke.mp4"
 
       - name: Run model smoke
-        run: python tools/model_smoke.py --video "$RUNNER_TEMP/smoke.mp4" --max-seconds 15
+        run: python core/tools/model_smoke.py --video "$RUNNER_TEMP/smoke.mp4" --max-seconds 15

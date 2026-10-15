@@ -5,7 +5,7 @@ name: Export TransNetV2 ONNX
 # render job can run shot detection through onnxruntime without torch.
 #
 # The artifact is uploaded to the immutable 'golden-masters-v1' release by hand
-# and SHA-256 pinned in tools/fetch_models.py. Re-run only if the model or
+# and SHA-256 pinned in core/tools/fetch_models.py. Re-run only if the model or
 # preprocessing changes.
 
 on:
@@ -57,7 +57,7 @@ jobs:
 
       - name: Export with parity checks
         run: |
-          python tools/export_transnetv2_onnx.py \
+          python core/tools/export_transnetv2_onnx.py \
             --video "$RUNNER_TEMP/parity.mp4" \
             --max-seconds ${{ github.event.inputs.max_seconds }} \
             --output transnetv2.onnx \

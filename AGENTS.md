@@ -89,7 +89,7 @@ git add core && git commit -m "chore: bump clips-core to <sha>"
 * GitHub Actions checkouts **must** set `submodules: true` (every workflow here
   already does).
 * Large model weights (`SFace`, `S3FD/SyncNet`, `TransNetV2`) are gitignored in
-  `clips-core` and fetched by `tools/fetch_models.py`. Only the 232 KB YuNet
+  `clips-core` and fetched by `core/tools/fetch_models.py`. Only the 232 KB YuNet
   detector ships in git here; the V2 streamer identity profiles ship in the
   streamer repo's clone of the engine.
 * Paths resolve at runtime and can be overridden with `CLIPS_CORE_ROOT`,
@@ -121,6 +121,7 @@ PODCASTS-CLIPS-TO-SOCIAL/                 # V1 Podcast pipeline (this repo)
 │   ├── viral_detector.py            # Shared Gemini viral-moment helpers
 │   ├── ... (endpoint, preflight, scene_classifier, shot_detection, active_speaker,
 │   │        caption_emphasis, text_detection)
+│   ├── tools/                       # Shared dev/CI tools (fetch, smoke, calibration)
 │   ├── verification/                # Pixel/geometry/loudness verification package
 │   └── models/
 │       ├── face_detection_yunet.onnx         # 232KB tracked face detector
@@ -132,7 +133,8 @@ PODCASTS-CLIPS-TO-SOCIAL/                 # V1 Podcast pipeline (this repo)
 │            run_state, editorial_qa, universal_editor, ...)
 ├── data/
 │   └── history.json                 # [V1] Processed episode registry
-├── tools/                           # Model fetch, smoke tests, diagnostics
+├── tools/
+│   └── trace_caption_placement.py   # [V1] Caption tracer (shared tools live in core/tools/)
 ├── tests/                           # V1 + shared-engine test suite
 ├── clips/                           # Rendered V1 output
 ├── main.py                          # [V1] CLI Entrypoint (shim -> v1.main)

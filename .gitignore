@@ -54,7 +54,7 @@ scratch/
 # Model weights are ignored by default, with one deliberate exception below.
 core/models/*.onnx
 # Deep-verification checkpoints (SyncNet / S3FD), fetched from their official
-# sources by tools/fetch_models.py with pinned SHA-256.
+# sources by core/tools/fetch_models.py with pinned SHA-256.
 core/models/*.pth
 core/models/*.model
 

@@ -201,13 +201,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: core/models
-          key: models-${{ hashFiles('tools/fetch_models.py') }}
+          key: models-${{ hashFiles('core/tools/fetch_models.py') }}
 
       - name: Fetch the shot-detection model
         # TransNetV2 ONNX, exported with parity proof and SHA-256 pinned in
-        # tools/fetch_models.py. Without it shot detection falls back to
+        # core/tools/fetch_models.py. Without it shot detection falls back to
         # PySceneDetect, which misses hard cuts on low-motion talking heads.
-        run: python tools/fetch_models.py --fetch transnetv2.onnx
+        run: python core/tools/fetch_models.py --fetch transnetv2.onnx
 
       - name: Run AI Podcast Clipper & Publisher
         env:

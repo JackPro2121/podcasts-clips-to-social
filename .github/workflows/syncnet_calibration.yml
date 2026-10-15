@@ -57,10 +57,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: core/models
-          key: ml-models-${{ hashFiles('tools/fetch_models.py') }}
+          key: ml-models-${{ hashFiles('core/tools/fetch_models.py') }}
 
       - name: Fetch official checkpoints
-        run: python tools/fetch_models.py --fetch all
+        run: python core/tools/fetch_models.py --fetch all
 
       - name: Cache golden-master corpus
         uses: actions/cache@v4
@@ -69,12 +69,12 @@ jobs:
           key: fixtures-${{ hashFiles('tests/fixtures/manifest.json') }}
 
       - name: Fetch the golden-master corpus
-        run: python tools/fetch_fixtures.py --allow-missing
+        run: python core/tools/fetch_fixtures.py --allow-missing
 
       - name: Calibrate SyncNet
         run: |
           set -euo pipefail
-          python tools/syncnet_calibrate.py \
+          python core/tools/syncnet_calibrate.py \
             --ids ${{ github.event.inputs.ids }} \
             --max-seconds ${{ github.event.inputs.max_seconds }} \
             --output syncnet_calibration.json | tee calibration.txt

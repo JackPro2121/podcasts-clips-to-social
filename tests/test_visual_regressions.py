@@ -16,7 +16,7 @@ Two layers:
   person saw; the test states what the verifier computes. When those disagree the
   verifier is wrong, not the human.
 
-Fixture clips are skipped when absent. Run ``python tools/fetch_fixtures.py``.
+Fixture clips are skipped when absent. Run ``python core/tools/fetch_fixtures.py``.
 """
 
 from __future__ import annotations

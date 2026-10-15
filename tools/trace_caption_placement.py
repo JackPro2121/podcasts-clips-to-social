@@ -37,7 +37,7 @@ from core.verification import fixtures, probe  # noqa: E402
 def trace(master_id: str) -> int:
     master = fixtures.by_id(master_id)
     if master is None:
-        print(f"fixture '{master_id}' not found; run tools/fetch_fixtures.py")
+        print(f"fixture '{master_id}' not found; run core/tools/fetch_fixtures.py")
         return 1
 
     duration = probe.duration_seconds(master.path)

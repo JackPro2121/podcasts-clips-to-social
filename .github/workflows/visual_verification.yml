@@ -37,8 +37,10 @@ on:
       - 'core/verification/**'
       - 'tests/test_visual_regressions.py'
       - 'tests/fixtures/manifest.json'
-      - 'tools/fetch_fixtures.py'
-      - 'tools/install_deps.sh'
+      # fetch_fixtures.py and install_deps.sh now live in the clips-core
+      # submodule, so the only path this repo can observe changing is the
+      # submodule pointer.
+      - 'core'
       - 'requirements.txt'
       - 'requirements-dev.txt'
       - '.github/workflows/visual_verification.yml'
@@ -76,7 +78,7 @@ jobs:
         # Single deterministic path, shared with local development. Also
         # collapses the three OpenCV distributions that otherwise fight over one
         # cv2/ directory, which made the effective build depend on install order.
-        run: bash tools/install_deps.sh --dev
+        run: bash core/tools/install_deps.sh --dev
 
       - name: Confirm the toolchain
         run: |
@@ -100,7 +102,7 @@ jobs:
         # on the fetch path downloads whatever is missing, verifies whatever is
         # present, and tolerates fixtures the release cleaner has removed.
         continue-on-error: true
-        run: python tools/fetch_fixtures.py --allow-missing
+        run: python core/tools/fetch_fixtures.py --allow-missing
 
       - name: Report which verifier capabilities are live
         # Explicit, so a capability that silently stopped working is visible in
