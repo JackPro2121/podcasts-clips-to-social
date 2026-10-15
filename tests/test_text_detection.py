@@ -16,7 +16,7 @@ from unittest import mock
 import cv2
 import numpy as np
 
-from v1 import text_detection as td
+from core import text_detection as td
 from v1.composition_planner import (
     DEFAULT_SAFE_ZONE,
     NormalizedRect,
@@ -24,7 +24,7 @@ from v1.composition_planner import (
     _bottom_text_collision,
 )
 from core.config import OCR_CONFIDENCE_MIN, OCR_MAX_REGIONS_PER_FRAME
-from v1.text_detection import (
+from core.text_detection import (
     EdgeTextDetector,
     OcrTextDetector,
     TextBox,

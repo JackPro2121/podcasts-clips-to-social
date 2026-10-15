@@ -13,7 +13,7 @@ import cv2
 import numpy as np
 
 from core.scene_classifier import detect_clip_shots, detect_slide_heuristics
-from v1.text_detection import TextBox, merge_text_boxes
+from core.text_detection import TextBox, merge_text_boxes
 
 
 @dataclass
@@ -159,11 +159,11 @@ def probe_source_media(video_path: Path) -> SourceMediaInfo:
 def _estimate_text_regions(frame: np.ndarray) -> List[TextRegion]:
     """Detect text regions via the configured tier and convert to index form.
 
-    Detection and per-frame merging live in `v1.text_detection`. The boxes are
+    Detection and per-frame merging live in `core.text_detection`. The boxes are
     merged across the whole shot below, because a per-frame detector jitters and
     an unmerged list would produce a hundred near-identical protected rects.
     """
-    from v1.text_detection import detect_text_regions
+    from core.text_detection import detect_text_regions
 
     regions: List[TextRegion] = []
     for box in detect_text_regions(frame):

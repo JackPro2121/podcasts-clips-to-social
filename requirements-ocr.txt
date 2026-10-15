@@ -31,6 +31,6 @@
 # the OCR tier and make a broken setup loud instead of silent.
 #
 # Verify the tier actually engaged before trusting any output:
-#   python -c "from v1.text_detection import get_text_detector as g; print(g(force='ocr').name)"
+#   python -c "from core.text_detection import get_text_detector as g; print(g(force='ocr').name)"
 #
 rapidocr-onnxruntime>=1.3.8,<2.0.0

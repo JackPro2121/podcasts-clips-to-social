@@ -70,7 +70,7 @@ Requirements:
 * **Needs OCR.** Without RapidOCR the answer is "not measurable". It is not
   guessed from symmetry or face-shape priors, because a guessed answer here is
   worse than none.
-* **Reuses** :mod:`v1.text_detection` rather than calling RapidOCR directly.
+* **Reuses** :mod:`core.text_detection` rather than calling RapidOCR directly.
   That module already contains the fix for HANDOFF section 4 bug 12, where the
   OCR response was parsed as ``(box, text, confidence)`` but ``entry[1]`` -- the
   recognised *text* -- was read as the confidence. ``float("MOST PEOPLE")``
@@ -241,7 +241,7 @@ def analyse(
         return MirrorReport(ok=False, reason="numpy is not installed")
 
     try:
-        from v1.text_detection import detect_text_regions, get_text_detector
+        from core.text_detection import detect_text_regions, get_text_detector
     except Exception as error:  # pragma: no cover - import guard
         return MirrorReport(ok=False, reason=f"text detection unavailable: {error}")
 

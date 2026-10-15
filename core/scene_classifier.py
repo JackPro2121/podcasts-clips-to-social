@@ -6,7 +6,9 @@ from pathlib import Path
 from typing import Tuple, Dict, Any, List, Optional
 import requests
 
-MODEL_DIR = Path(__file__).resolve().parent / "models"
+from core.config import MODELS_DIR
+
+MODEL_DIR = MODELS_DIR
 YOLO_MODEL_PATH = MODEL_DIR / "yolov8n.onnx"
 YOLO_URL = "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolov8n.onnx"
 

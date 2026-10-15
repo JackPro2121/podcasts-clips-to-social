@@ -46,6 +46,12 @@ from v2.streamers.spec import (
     STREAMER_OUTPUT_WIDTH,
 )
 
+from core.config import MODELS_DIR as _MODELS_DIR
+
+# YuNet weights live in the shared engine's models dir (env-overridable).
+YUNET_MODEL_PATH = _MODELS_DIR / "face_detection_yunet.onnx"
+
+
 # Lazy import: do not fail at module load if ffmpeg is absent in test env
 def _import_verdict():
     from core.verification import verdict as _v
@@ -82,7 +88,7 @@ class GateResult:
 
 def _face_stability_check(path) -> dict:
     """Sample frames and measure face/track instability in the rendered clip."""
-    model_path = str(__import__("pathlib").Path(__file__).resolve().parents[2] / "core" / "models" / "face_detection_yunet.onnx")
+    model_path = str(YUNET_MODEL_PATH)
     try:
         import cv2
         import numpy as np
@@ -180,7 +186,7 @@ def _face_stability_check(path) -> dict:
 def _caption_collision_check(path, model_path=None) -> dict:
     """Sample one frame and flag caption-like white stickers over large faces."""
     if model_path is None:
-        model_path = str(__import__("pathlib").Path(__file__).resolve().parents[2] / "core" / "models" / "face_detection_yunet.onnx")
+        model_path = str(YUNET_MODEL_PATH)
     try:
         import cv2
         import numpy as np

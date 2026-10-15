@@ -117,7 +117,7 @@ PODCASTS-CLIPS-TO-SOCIAL/
 │   ├── github_uploader.py           # Release uploader for direct asset URLs
 │   ├── viral_detector.py            # Shared Gemini viral-moment helpers
 │   ├── ... (endpoint, preflight, scene_classifier, shot_detection, active_speaker,
-│   │        caption_emphasis)
+│   │        caption_emphasis, text_detection)
 │   ├── verification/                # Pixel/geometry/loudness verification package
 │   └── models/
 │       ├── face_detection_yunet.onnx         # 232KB tracked face detector
@@ -127,7 +127,7 @@ PODCASTS-CLIPS-TO-SOCIAL/
 │   ├── main.py                      # V1 orchestrator
 │   ├── buffer_client.py             # [V1] Podcast Buffer publisher
 │   └── ... (edit_director, director_v2, broll_manager, hook_engine, repair,
-│            run_state, editorial_qa, universal_editor, text_detection, ...)
+│            run_state, editorial_qa, universal_editor, ...)
 ├── v2/                              # [V2 EXCLUSIVE] Streamer pipeline
 │   ├── main_streamer.py             # V2 CLI entrypoint
 │   └── streamers/                   # [V2 EXCLUSIVE ENGINE]

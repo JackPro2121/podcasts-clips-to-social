@@ -86,7 +86,7 @@ jobs:
           print(f"cv2 {cv2.__version__}  numpy {numpy.__version__}")
           PY
           echo "--- text detector tier ---"
-          python -c "from v1.text_detection import get_text_detector as g; print(g().name)"
+          python -c "from core.text_detection import get_text_detector as g; print(g().name)"
 
       - name: Fetch the golden-master corpus
         # The real published artifacts, by public URL, SHA-256 verified.
@@ -107,7 +107,7 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           from core.verification import mirror
-          from v1.text_detection import get_text_detector
+          from core.text_detection import get_text_detector
           name = str(get_text_detector().name)
           print(f"[verifier] text detection tier: {name}")
           if "ocr" in name.lower():

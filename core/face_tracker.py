@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import List, Tuple, Optional
 from dataclasses import dataclass, field
 from core.scene_classifier import classify_frame_scene, detect_clip_shots
-from core.config import ENABLE_PUNCH_ZOOM
+from core.config import ENABLE_PUNCH_ZOOM, MODELS_DIR
 from core.creative_spec import (
     SPEAKER_MIN_DWELL_S,
     SPEAKER_HYSTERESIS,
@@ -16,7 +16,7 @@ from core.creative_spec import (
     MIN_SPEECH_LIP_MOTION,
 )
 
-MODEL_DIR = Path(__file__).resolve().parent / "models"
+MODEL_DIR = MODELS_DIR
 YUNET_MODEL_PATH = MODEL_DIR / "face_detection_yunet.onnx"
 YUNET_URL = "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
 

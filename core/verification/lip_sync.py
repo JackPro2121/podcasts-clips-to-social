@@ -81,7 +81,9 @@ def models_dir() -> Path:
     override = os.getenv("LIP_SYNC_MODELS_DIR")
     if override:
         return Path(override)
-    return REPO_ROOT / "core" / "models"
+    from core.config import MODELS_DIR
+
+    return MODELS_DIR
 
 
 _pipeline_cache: Optional[Any] = None

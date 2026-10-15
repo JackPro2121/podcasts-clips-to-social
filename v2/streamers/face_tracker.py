@@ -17,13 +17,14 @@ from pathlib import Path
 from typing import List, Tuple, Optional
 from dataclasses import dataclass
 
+from core.config import MODELS_DIR as _MODELS_DIR
 from core.face_tracker import ShotPlan, FramingDecision, detect_letterbox_margins
 from v2.streamers.spec import (
     STREAMER_IDENTITY_SIMILARITY_FLOOR,
     STREAMER_TIER2_HOLD_S,
 )
 
-MODELS_DIR = Path(__file__).resolve().parents[2] / "core" / "models"
+MODELS_DIR = _MODELS_DIR
 YUNET_PATH = MODELS_DIR / "face_detection_yunet.onnx"
 SFACE_PATH = MODELS_DIR / "face_recognition_sface_2021dec.onnx"
 

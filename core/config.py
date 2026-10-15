@@ -6,17 +6,51 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+def _resolve_project_root() -> Path:
+    """Locate the consumer project root that owns ``assets/`` and output dirs.
+
+    ``clips-core`` runs both inside this repo (``core/`` beside ``assets/``) and
+    as an installed package under ``site-packages``, where ``__file__`` no
+    longer points at a repo root. Order: explicit override, the dev/monorepo
+    layout, then the current working directory.
+    """
+    override = os.getenv("CLIPS_CORE_ROOT")
+    if override:
+        return Path(override).expanduser().resolve()
+    candidate = Path(__file__).resolve().parent.parent
+    if (candidate / "assets").is_dir() or (candidate / "pyproject.toml").is_file():
+        return candidate
+    return Path.cwd()
+
+
+def _resolve_models_dir() -> Path:
+    """Directory holding the ONNX / ``.pth`` weights.
+
+    Weights are large (200 MB+) and never shipped in the package, so the path is
+    resolved at runtime. Order: explicit override, the package-relative
+    ``models/`` when present (monorepo layout), then ``<root>/models``.
+    """
+    override = os.getenv("CLIPS_CORE_MODELS_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
+    package_models = Path(__file__).resolve().parent / "models"
+    if package_models.is_dir():
+        return package_models
+    return BASE_DIR / "models"
+
+
+BASE_DIR = _resolve_project_root()
 DOWNLOADS_DIR = BASE_DIR / "downloads"
 CLIPS_DIR = BASE_DIR / "clips"
 SUBTITLES_DIR = BASE_DIR / "subtitles"
 DATA_DIR = BASE_DIR / "data"
-ASSETS_DIR = BASE_DIR / "assets"
+ASSETS_DIR = Path(os.getenv("CLIPS_CORE_ASSETS_DIR") or (BASE_DIR / "assets"))
 AUDIO_ASSETS_DIR = ASSETS_DIR / "audio"
 SFX_ASSETS_DIR = ASSETS_DIR / "sfx"
 FONTS_DIR = ASSETS_DIR / "fonts"
 BROLL_DIR = ASSETS_DIR / "broll"
 HISTORY_FILE = DATA_DIR / "history.json"
+MODELS_DIR = _resolve_models_dir()
 
 # Ensure directories exist
 DOWNLOADS_DIR.mkdir(exist_ok=True, parents=True)
@@ -242,7 +276,7 @@ DIRECTOR_V2_TILES = max(4, int(os.getenv("DIRECTOR_V2_TILES", "12")))
 #
 # There is deliberately no "mser" option. A zero-dependency MSER tier was built
 # and measured first, and rejected: it silently misses glyphs (see the module
-# docstring in v1/text_detection.py for the numbers).
+# docstring in core/text_detection.py for the numbers).
 TEXT_DETECTOR = os.getenv("TEXT_DETECTOR", "auto").strip().lower()
 
 # RapidOCR reports confidence per glyph. Below this, a detection is treated as
@@ -268,7 +302,7 @@ SHOT_DETECTOR = os.getenv("SHOT_DETECTOR", "auto").strip().lower()
 # TransNetV2 ONNX export, and this project does not invent URLs. Export from the
 # soCzech/TransNetV2 reference implementation and drop the file here.
 TRANSNET_MODEL_PATH = os.getenv(
-    "TRANSNET_MODEL_PATH", str(Path(__file__).resolve().parent / "models" / "transnetv2.onnx")
+    "TRANSNET_MODEL_PATH", str(MODELS_DIR / "transnetv2.onnx")
 )
 
 # Minimum per-frame transition probability to accept a cut. TransNetV2 is
