@@ -23,7 +23,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.video_editor import (
+from core.video_editor import (
     STREAM_DURATION_TOLERANCE_S,
     _harmonise_stream_durations,
     _probe_stream_durations,

@@ -52,7 +52,7 @@ jobs:
       - name: Cache pretrained checkpoints
         uses: actions/cache@v4
         with:
-          path: src/models
+          path: core/models
           key: ml-models-${{ hashFiles('tools/fetch_models.py') }}
 
       - name: Fetch official checkpoints

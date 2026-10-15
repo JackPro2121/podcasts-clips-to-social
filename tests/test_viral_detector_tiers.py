@@ -13,8 +13,8 @@ import unittest
 from contextlib import ExitStack
 from unittest import mock
 
-from src.transcriber import TranscriptSegment, WordTimestamp
-from src.viral_detector import detect_viral_moments
+from core.transcriber import TranscriptSegment, WordTimestamp
+from core.viral_detector import detect_viral_moments
 
 
 def _segments():
@@ -35,7 +35,7 @@ def _segments():
 
 
 def _detect(responses, keys=None, parsed_ok=True):
-    from src import viral_detector as vd
+    from core import viral_detector as vd
 
     keys = keys or {
         "OLLAMA_API_KEY": "ollama-key",
@@ -159,7 +159,7 @@ class TestFallbackCaption(unittest.TestCase):
         ]
 
     def test_caption_is_transcript_derived_and_not_generic(self) -> None:
-        from src.viral_detector import fallback_rule_based_detector
+        from core.viral_detector import fallback_rule_based_detector
 
         candidates = fallback_rule_based_detector(self._caption_segments(), num_clips=1)
         self.assertTrue(candidates, "the 40s window must produce a candidate")
@@ -190,7 +190,7 @@ class TestGeminiAttemptBudget(unittest.TestCase):
         ]
 
     def test_transient_failures_stop_at_the_request_ceiling(self):
-        from src import viral_detector as vd
+        from core import viral_detector as vd
 
         fake_client = mock.MagicMock()
         fake_client.models.generate_content.side_effect = RuntimeError("503 UNAVAILABLE")
@@ -206,7 +206,7 @@ class TestGeminiAttemptBudget(unittest.TestCase):
         )
 
     def test_wall_clock_cap_stops_even_fast_failures(self):
-        from src import viral_detector as vd
+        from core import viral_detector as vd
 
         clock = {"now": 0.0}
 
@@ -228,7 +228,7 @@ class TestGeminiAttemptBudget(unittest.TestCase):
         self.assertLess(fake_client.models.generate_content.call_count, 4)
 
     def test_success_before_the_budget_is_returned_unchanged(self):
-        from src import viral_detector as vd
+        from core import viral_detector as vd
 
         fake_client = mock.MagicMock()
         fake_client.models.generate_content.return_value.text = "x" * 40

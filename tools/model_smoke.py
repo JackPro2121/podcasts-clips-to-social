@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_MODELS_DIR = REPO_ROOT / "src" / "models"
+DEFAULT_MODELS_DIR = REPO_ROOT / "core" / "models"
 
 
 def _trim(video: Path, seconds: float) -> Path:

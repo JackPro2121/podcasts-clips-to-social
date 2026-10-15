@@ -31,9 +31,9 @@ from typing import Any, Dict, List, Optional
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from src.verification import fixtures  # noqa: E402
+from core.verification import fixtures  # noqa: E402
 
-DEFAULT_MODELS_DIR = REPO_ROOT / "src" / "models"
+DEFAULT_MODELS_DIR = REPO_ROOT / "core" / "models"
 
 
 def _trim(video: Path, seconds: float) -> Path:

@@ -16,15 +16,15 @@ from unittest import mock
 import cv2
 import numpy as np
 
-from src import text_detection as td
-from src.composition_planner import (
+from v1 import text_detection as td
+from v1.composition_planner import (
     DEFAULT_SAFE_ZONE,
     NormalizedRect,
     ShotComposition,
     _bottom_text_collision,
 )
-from src.config import OCR_CONFIDENCE_MIN, OCR_MAX_REGIONS_PER_FRAME
-from src.text_detection import (
+from core.config import OCR_CONFIDENCE_MIN, OCR_MAX_REGIONS_PER_FRAME
+from v1.text_detection import (
     EdgeTextDetector,
     OcrTextDetector,
     TextBox,
@@ -363,11 +363,11 @@ class TestSourceIndexRegionMerging(unittest.TestCase):
     """The anti-flooding guarantee at the place it actually matters."""
 
     def _region(self, x, y, w=0.4, h=0.06, confidence=0.5, source="edge"):
-        from src.source_index import TextRegion
+        from v1.source_index import TextRegion
         return TextRegion(x=x, y=y, width=w, height=h, confidence=confidence, source=source)
 
     def test_jittering_regions_collapse_to_one(self):
-        from src.source_index import _merge_shot_text_regions
+        from v1.source_index import _merge_shot_text_regions
         regions = [
             self._region(0.100 + (i % 4) * 0.002, 0.500 + (i % 3) * 0.002)
             for i in range(30)
@@ -375,21 +375,21 @@ class TestSourceIndexRegionMerging(unittest.TestCase):
         self.assertEqual(len(_merge_shot_text_regions(regions)), 1)
 
     def test_separate_blocks_stay_separate(self):
-        from src.source_index import _merge_shot_text_regions
+        from v1.source_index import _merge_shot_text_regions
         regions = [self._region(0.05, 0.10), self._region(0.05, 0.80)]
         self.assertEqual(len(_merge_shot_text_regions(regions)), 2)
 
     def test_empty_input(self):
-        from src.source_index import _merge_shot_text_regions
+        from v1.source_index import _merge_shot_text_regions
         self.assertEqual(_merge_shot_text_regions([]), [])
 
     def test_source_label_survives(self):
-        from src.source_index import _merge_shot_text_regions
+        from v1.source_index import _merge_shot_text_regions
         merged = _merge_shot_text_regions([self._region(0.1, 0.5, source="ocr")])
         self.assertEqual(merged[0].source, "ocr")
 
     def test_estimate_uses_the_configured_detector(self):
-        from src.source_index import _estimate_text_regions
+        from v1.source_index import _estimate_text_regions
         fake = mock.Mock()
         fake.name = "ocr"
         fake.detect.return_value = [_box(0.2, 0.4, 0.3, 0.05, source="ocr")]
@@ -407,7 +407,7 @@ class TestCollisionCheckNowFires(unittest.TestCase):
     """
 
     def _plan(self, regions, caption_y=0.62):
-        from src.composition_planner import CompositionPlan, ShotComposition
+        from v1.composition_planner import CompositionPlan, ShotComposition
         return CompositionPlan(
             plan_id="p", width=1080, height=1920, safe_zone=DEFAULT_SAFE_ZONE,
             shots=[ShotComposition(
@@ -420,7 +420,7 @@ class TestCollisionCheckNowFires(unittest.TestCase):
         )
 
     def _edit_plan(self):
-        from src.edit_director import EditPlan, HookCandidate
+        from v1.edit_director import EditPlan, HookCandidate
         return EditPlan(
             plan_id="p", start=0.0, end=10.0,
             hook=HookCandidate("story", "a hook", 0.0, 3.0, 0.8),
@@ -428,7 +428,7 @@ class TestCollisionCheckNowFires(unittest.TestCase):
         )
 
     def _codes(self, plan):
-        from src.editorial_qa import _plan_issues
+        from v1.editorial_qa import _plan_issues
         return [
             issue.code
             for issue in _plan_issues(self._edit_plan(), plan)
@@ -465,7 +465,7 @@ class TestCollisionCheckNowFires(unittest.TestCase):
         self.assertEqual(self._codes(self._plan(regions)), [])
 
     def test_message_reports_the_count(self):
-        from src.editorial_qa import _plan_issues
+        from v1.editorial_qa import _plan_issues
         regions = [
             NormalizedRect(0.08, 0.60, 0.5, 0.10),
             NormalizedRect(0.30, 0.66, 0.4, 0.10),
@@ -487,10 +487,10 @@ class TestProtectedRegionsReachTheCheck(unittest.TestCase):
     """End to end: a detected region must become a rect the check can fail on."""
 
     def test_detected_region_flows_into_a_collision(self):
-        from src.composition_planner import CompositionPlan, _rect_from_region
-        from src.editorial_qa import _plan_issues
-        from src.edit_director import EditPlan, HookCandidate
-        from src.source_index import TextRegion, _merge_shot_text_regions
+        from v1.composition_planner import CompositionPlan, _rect_from_region
+        from v1.editorial_qa import _plan_issues
+        from v1.edit_director import EditPlan, HookCandidate
+        from v1.source_index import TextRegion, _merge_shot_text_regions
 
         frame = _slide_frame()
         detected = [TextRegion(**box.to_dict()) for box in detect_text_regions(frame, force="edge")]
@@ -568,7 +568,7 @@ class TestBuildSourceIndexMergesRegions(unittest.TestCase):
         return video
 
     def test_index_regions_are_bounded_not_one_per_frame(self):
-        from src.source_index import build_source_index
+        from v1.source_index import build_source_index
         video = self._video()
         index = build_source_index(video, sample_fps=2.0, max_samples=40, detect_faces=False)
         total = sum(len(shot.text_regions) for shot in index.shots)
@@ -581,7 +581,7 @@ class TestBuildSourceIndexMergesRegions(unittest.TestCase):
         )
 
     def test_index_regions_are_normalised_and_labelled(self):
-        from src.source_index import build_source_index
+        from v1.source_index import build_source_index
         video = self._video()
         index = build_source_index(video, sample_fps=2.0, max_samples=40, detect_faces=False)
         regions = [region for shot in index.shots for region in shot.text_regions]
@@ -594,7 +594,7 @@ class TestBuildSourceIndexMergesRegions(unittest.TestCase):
             self.assertTrue(region.source)
 
     def test_repeated_runs_are_stable(self):
-        from src.source_index import build_source_index
+        from v1.source_index import build_source_index
         video = self._video()
         counts = []
         for _ in range(2):

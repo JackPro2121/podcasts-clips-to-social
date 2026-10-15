@@ -1,7 +1,7 @@
 """Tests for picture-in-picture host detection on slide-with-camera shots."""
 import unittest
 
-from src.face_tracker import (
+from core.face_tracker import (
     PIP_MAX_HOST_AREA_RATIO,
     PIP_MIN_PERSISTENCE,
     FaceBox,

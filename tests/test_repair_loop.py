@@ -1,14 +1,14 @@
 """Tests for the bounded render-repair loop."""
 import unittest
 
-from src.composition_planner import (
+from v1.composition_planner import (
     DEFAULT_SAFE_ZONE,
     CompositionPlan,
     NormalizedRect,
     ShotComposition,
     build_caption_placements,
 )
-from src.repair import (
+from v1.repair import (
     MAX_MOTION_GAIN,
     UNREPAIRABLE_CODES,
     MAX_REPAIR_ATTEMPTS,
@@ -18,7 +18,7 @@ from src.repair import (
     plan_repair,
     render_with_repair,
 )
-from src.video_editor import _motion_guarantee_filter
+from core.video_editor import _motion_guarantee_filter
 
 
 class TestPlanRepair(unittest.TestCase):

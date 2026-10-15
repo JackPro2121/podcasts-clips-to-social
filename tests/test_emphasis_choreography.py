@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.emphasis_choreography import plan_choreography
+from v1.emphasis_choreography import plan_choreography
 
 
 WORDS = ["I", "lost", "$40,000", "because", "nobody", "told", "me", "the", "truth."]

@@ -1,0 +1,391 @@
+import requests
+import time
+from typing import List, Dict, Any, Optional
+from core.config import BUFFER_ACCESS_TOKEN, BUFFER_CHANNEL_IDS
+
+BUFFER_GRAPHQL_ENDPOINT = "https://api.buffer.com"
+
+class BufferClient:
+    def __init__(self, access_token: Optional[str] = None):
+        self.token = access_token or BUFFER_ACCESS_TOKEN
+        self.last_error: Optional[str] = None
+        if not self.token:
+            print("[-] Warning: BUFFER_ACCESS_TOKEN not configured.")
+
+    @property
+    def headers(self) -> Dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.token}",
+            "Content-Type": "application/json"
+        }
+
+    def get_channels(self) -> List[Dict[str, Any]]:
+        """Queries connected social channels from Buffer GraphQL using organization-based schema."""
+        self.last_error = None
+        org_query = """
+        query GetOrgs {
+          account {
+            organizations {
+              id
+              name
+            }
+          }
+        }
+        """
+        try:
+            res = requests.post(
+                BUFFER_GRAPHQL_ENDPOINT,
+                headers=self.headers,
+                json={"query": org_query},
+                timeout=15
+            )
+            if res.status_code != 200:
+                self.last_error = f"Buffer organizations query failed: {res.status_code}"
+                print(f"[-] {self.last_error}")
+                return []
+
+            orgs = res.json().get("data", {}).get("account", {}).get("organizations", [])
+            channels = []
+            for org in orgs:
+                org_id = org.get("id")
+                if not org_id:
+                    continue
+                ch_query = """query GetChannels($organizationId: OrganizationId!) {
+                  channels(input: { organizationId: $organizationId }) {
+                    id
+                    name
+                    service
+                  }
+                }"""
+                ch_res = requests.post(
+                    BUFFER_GRAPHQL_ENDPOINT,
+                    headers=self.headers,
+                    json={"query": ch_query, "variables": {"organizationId": org_id}},
+                    timeout=15
+                )
+                if ch_res.status_code == 200:
+                    ch_items = ch_res.json().get("data", {}).get("channels", [])
+                    for ch in ch_items:
+                        ch["organizationName"] = org.get("name")
+                        # The posts query needs the owning organization id.
+                        ch["organizationId"] = org_id
+                        channels.append(ch)
+                else:
+                    self.last_error = f"Buffer channels query failed for organization {org_id}: {ch_res.status_code}"
+                    print(f"[-] {self.last_error}")
+            return channels
+        except Exception as e:
+            self.last_error = f"Error fetching Buffer channels: {e}"
+            print(f"[-] {self.last_error}")
+            return []
+
+    def get_active_video_urls(self) -> Dict[str, str]:
+        """
+        Fetches all posts from all connected channels and returns a mapping 
+        of video_url -> status for posts that are not yet 'sent'.
+        """
+        if not self.token:
+            self.last_error = "BUFFER_ACCESS_TOKEN is missing"
+            return {}
+
+        connected = self.get_channels()
+        if self.last_error:
+            return {}
+        active_urls = {}
+
+        # Buffer's current schema requires the owning organization on the posts
+        # input and exposes the video URL as VideoAsset.source. The previous
+        # query (channelId + assets.video.url) fails GraphQL validation, and
+        # because the failure is silent the cleaner used to read "0 active
+        # posts" while posts were scheduled - risking deletion of releases the
+        # queue still references (run 37466588808). Verified live 2026-10-06:
+        # this query returns each channel's scheduled/sent posts.
+        for ch in connected:
+            channel_id = ch["id"]
+            organization_id = ch.get("organizationId")
+            if not organization_id:
+                self.last_error = f"Channel {channel_id} has no organization id"
+                print(f"[-] {self.last_error}")
+                return {}
+            query = """
+            query ListPosts($organizationId: OrganizationId!, $channelIds: [ChannelId!]) {
+              posts(input: {organizationId: $organizationId, filter: {channelIds: $channelIds}}) {
+                edges {
+                  node {
+                    status
+                    assets {
+                      ... on VideoAsset {
+                        source
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            """
+            try:
+                res = requests.post(
+                    BUFFER_GRAPHQL_ENDPOINT,
+                    headers=self.headers,
+                    json={
+                        "query": query,
+                        "variables": {
+                            "organizationId": organization_id,
+                            "channelIds": [channel_id],
+                        },
+                    },
+                    timeout=20
+                )
+                body = res.json() if res.status_code == 200 else {}
+                if res.status_code != 200 or body.get("errors"):
+                    detail = body.get("errors") or res.text[:200]
+                    self.last_error = f"Buffer posts query failed for channel {channel_id}: {detail}"
+                    print(f"[-] {self.last_error}")
+                    continue
+                for edge in body.get("data", {}).get("posts", {}).get("edges", []):
+                    node = edge.get("node", {})
+                    status = node.get("status")
+                    # Only care about posts that aren't sent yet.
+                    if status == "sent":
+                        continue
+                    for asset in node.get("assets", []):
+                        source = asset.get("source")
+                        if source:
+                            active_urls[source] = status
+            except Exception as e:
+                self.last_error = f"Error fetching posts for channel {channel_id}: {e}"
+                print(f"[-] {self.last_error}")
+
+        return active_urls
+
+    def get_pinterest_boards(self, channel_id: str) -> List[Dict[str, Any]]:
+        """Queries boards for a specific Pinterest channel."""
+        q = """query GetPinterestBoards($channelId: ID!) {
+          channel(input: { id: $channelId }) {
+            metadata {
+              ... on PinterestMetadata {
+                boards {
+                  id
+                  name
+                  serviceId
+                }
+              }
+            }
+          }
+        }"""
+        try:
+            res = requests.post(
+                BUFFER_GRAPHQL_ENDPOINT,
+                headers=self.headers,
+                json={"query": q, "variables": {"channelId": channel_id}},
+                timeout=10,
+            )
+            if res.status_code == 200:
+                data = res.json().get("data", {}).get("channel", {}).get("metadata", {})
+                return data.get("boards", [])
+        except Exception as e:
+            print(f"[-] Warning: Failed to fetch Pinterest boards: {e}")
+        return []
+
+    def schedule_video_post(
+        self,
+        video_url: str,
+        text: str,
+        title: Optional[str] = None,
+        channel_ids: Optional[List[str]] = None,
+        due_at: Optional[str] = None,
+        source_url: Optional[str] = None,
+        thumbnail_url: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Schedules video clip on specified or all connected Buffer channels.
+        Uses the createPost mutation with assets [{ video: { url: ... } }],
+        needsApproval: False, and proper platform metadata (e.g. YouTube).
+        """
+        if not self.token:
+            print("[-] Cannot post to Buffer: BUFFER_ACCESS_TOKEN is missing.")
+            return []
+
+        connected = self.get_channels()
+        channel_service_map = {ch["id"]: ch.get("service", "youtube") for ch in connected}
+
+        target_channels = channel_ids or BUFFER_CHANNEL_IDS
+        if not target_channels:
+            print("[*] No channel IDs specified. Discovering connected channels from Buffer account...")
+            if not connected:
+                print("[-] No channels found in Buffer account. Connect your TikTok/Instagram/Shorts on Buffer.")
+                return []
+            target_channels = [ch["id"] for ch in connected]
+            print(f"[+] Found {len(target_channels)} connected channel(s): {[ch['service'] for ch in connected]}")
+
+        mutation = """
+        mutation CreateVideoPost($input: CreatePostInput!) {
+          createPost(input: $input) {
+            ... on PostActionSuccess {
+              post {
+                id
+                status
+                dueAt
+              }
+            }
+            ... on MutationError {
+              message
+            }
+          }
+        }
+        """
+
+        results = []
+        for channel_id in target_channels:
+            service = channel_service_map.get(channel_id, "youtube")
+
+            metadata = None
+            clean_title = (title or text.split("\n")[0]).strip()
+            channel_text = text
+
+            if service == "youtube":
+                yt_title = clean_title
+                if "#shorts" not in yt_title.lower():
+                    yt_title = f"{yt_title} #shorts"
+                if len(yt_title) > 95:
+                    yt_title = yt_title[:90] + "... #shorts"
+
+                metadata = {
+                    "youtube": {
+                        "title": yt_title,
+                        "categoryId": "22",
+                        "madeForKids": False,
+                        "privacy": "public"
+                    }
+                }
+                if "#shorts" not in channel_text.lower():
+                    channel_text = f"{channel_text}\n\n#Shorts #Podcast"
+
+            elif service == "instagram":
+                metadata = {
+                    "instagram": {
+                        "type": "reel",
+                        "shouldShareToFeed": True
+                    }
+                }
+                if "#reels" not in channel_text.lower():
+                    channel_text = f"{channel_text}\n\n#reels #viral #podcastclips #mindset #motivation"
+
+            elif service == "tiktok":
+                metadata = {
+                    "tiktok": {
+                        "title": clean_title[:90],
+                        "isAiGenerated": False
+                    }
+                }
+                if "#fyp" not in channel_text.lower() and "#tiktok" not in channel_text.lower():
+                    channel_text = f"{channel_text}\n\n#fyp #podcast #podcastclips #viral #mindset #trending"
+
+            elif service == "pinterest":
+                boards = self.get_pinterest_boards(channel_id)
+                if not boards:
+                    ch_name = next((ch["name"] for ch in connected if ch["id"] == channel_id), channel_id)
+                    print(f"[-] Pinterest channel '{ch_name}' has no boards configured yet. Please create a board on Pinterest (e.g., 'Podcast Clips') to enable automated pinning. Skipping Pinterest.")
+                    results.append({"channel_id": channel_id, "skipped": True, "reason": "pinterest_board_missing"})
+                    continue
+                board_service_id = boards[0].get("serviceId") or boards[0].get("id")
+                metadata = {
+                    "pinterest": {
+                        "title": clean_title[:95],
+                        "boardServiceId": board_service_id,
+                        "thumbnailOffset": 1500
+                    }
+                }
+                if source_url:
+                    channel_text = f"{channel_text}\n\n👉 Watch the full episode: {source_url}"
+
+            post_input: Dict[str, Any] = {
+                "channelId": channel_id,
+                "text": channel_text,
+                "schedulingType": "automatic",
+                "mode": "customScheduled" if due_at else "addToQueue",
+                "needsApproval": False,
+                "assets": [
+                    {
+                        "video": {
+                            "url": video_url
+                        }
+                    }
+                ]
+            }
+
+            if due_at:
+                post_input["dueAt"] = due_at
+
+            if metadata:
+                post_input["metadata"] = metadata
+
+            payload: Dict[str, Any] = {
+                "query": mutation,
+                "variables": {
+                    "input": post_input
+                }
+            }
+
+            # Retry logic for CDN propagation delay
+            max_retries = 3
+            retry_delays = [10, 30, 60]
+            attempt = 0
+            
+            while attempt <= max_retries:
+                try:
+                    if attempt > 0:
+                        print(f"[*] Retrying Buffer dispatch for {channel_id} (Attempt {attempt}/{max_retries}) after {retry_delays[attempt-1]}s...")
+                        time.sleep(retry_delays[attempt-1])
+                    
+                    print(f"[*] Dispatching video to Buffer channel: {channel_id} ({service})...")
+                    res = requests.post(
+                        BUFFER_GRAPHQL_ENDPOINT,
+                        headers=self.headers,
+                        json=payload,
+                        timeout=20
+                    )
+                    res_data = res.json()
+                    
+                    post_data = res_data.get("data", {}).get("createPost", {})
+                    if "post" in post_data:
+                        post_info = post_data["post"]
+                        print(f"[+] Successfully queued post on Buffer channel {channel_id}! Post ID: {post_info.get('id')} (Status: {post_info.get('status')})")
+                        results.append({"channel_id": channel_id, "status_code": res.status_code, "response": res_data})
+                        break
+                    else:
+                        # Try to extract the error message from several possible locations
+                        error_msg = post_data.get("message") or res_data.get("errors", [{}])[0].get("message") or res.text
+                        
+                        # Broaden match for CDN propagation delay
+                        propagation_keywords = ["video could not be read", "unable to read video", "invalid video url", "video not accessible"]
+                        is_propagation_issue = any(kw in error_msg.lower() for kw in propagation_keywords)
+                        
+                        if is_propagation_issue and attempt < max_retries:
+                            print(f"[-] Buffer cannot read URL yet: {error_msg}. Retrying...")
+                            attempt += 1
+                            continue
+                        # The free plan caps scheduled posts per channel (10).
+                        # A full channel is an external limit, not a publish
+                        # failure: mark it so the caller can host the clip and
+                        # move on without failing the run (run 37466588808).
+                        if "scheduled post" in error_msg.lower() and "limit" in error_msg.lower():
+                            print(
+                                f"[!] Buffer channel {channel_id} is at its scheduled-post "
+                                f"limit; skipping it this run."
+                            )
+                            results.append({"channel_id": channel_id, "limited": True})
+                        else:
+                            print(f"[-] Buffer rejected post on {channel_id}: {error_msg}")
+                            results.append({"channel_id": channel_id, "status_code": res.status_code, "response": res_data})
+                        break
+                except Exception as e:
+                    print(f"[-] Request error posting to Buffer channel {channel_id}: {e}")
+                    if attempt < max_retries:
+                        attempt += 1
+                        continue
+                    results.append({"channel_id": channel_id, "error": str(e)})
+                    break
+
+        return results
+

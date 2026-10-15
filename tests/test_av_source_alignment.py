@@ -19,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-from src.verification import av_sync
+from core.verification import av_sync
 
 HAS_FFMPEG = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
 SOURCE_SECONDS = 8.0
@@ -41,8 +41,8 @@ def _build_source(path: Path) -> bool:
 
 
 def _render_clip(source: Path, output: Path) -> None:
-    from src.face_tracker import FramingDecision
-    from src.video_editor import render_viral_clip
+    from core.face_tracker import FramingDecision
+    from core.video_editor import render_viral_clip
 
     render_viral_clip(
         source_video_path=source,

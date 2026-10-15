@@ -3,9 +3,9 @@ import os
 import unittest
 from unittest import mock
 
-from src import config as config_module
-from src.edit_director import duration_warnings
-from src.viral_detector import query_gemini_models
+from core import config as config_module
+from v1.edit_director import duration_warnings
+from core.viral_detector import query_gemini_models
 
 
 class TestGeminiModelLadder(unittest.TestCase):
@@ -73,11 +73,11 @@ class TestGeminiModelLadder(unittest.TestCase):
         fake_types.HttpOptions = mock.Mock()
         fake_types.GenerateContentConfig = mock.Mock()
 
-        with mock.patch("src.viral_detector.HAS_NEW_GENAI", True), \
-             mock.patch("src.viral_detector.genai", fake_genai), \
-             mock.patch("src.viral_detector.genai_types", fake_types), \
-             mock.patch("src.viral_detector.GEMINI_MODEL_LADDER", ["global-model"]), \
-             mock.patch("src.viral_detector.time.sleep", lambda *_: None):
+        with mock.patch("core.viral_detector.HAS_NEW_GENAI", True), \
+             mock.patch("core.viral_detector.genai", fake_genai), \
+             mock.patch("core.viral_detector.genai_types", fake_types), \
+             mock.patch("core.viral_detector.GEMINI_MODEL_LADDER", ["global-model"]), \
+             mock.patch("core.viral_detector.time.sleep", lambda *_: None):
             result = query_gemini_models("prompt", "key", model_ladder=["only-model"])
 
         self.assertIsNotNone(result)
@@ -116,11 +116,11 @@ class TestGeminiModelLadder(unittest.TestCase):
         fake_types.HttpOptions = mock.Mock()
         fake_types.GenerateContentConfig = mock.Mock()
 
-        with mock.patch("src.viral_detector.HAS_NEW_GENAI", True), \
-             mock.patch("src.viral_detector.genai", fake_genai), \
-             mock.patch("src.viral_detector.genai_types", fake_types), \
-             mock.patch("src.viral_detector.GEMINI_MODEL_LADDER", ["first-model", "second-model"]), \
-             mock.patch("src.viral_detector.time.sleep", lambda *_: None):
+        with mock.patch("core.viral_detector.HAS_NEW_GENAI", True), \
+             mock.patch("core.viral_detector.genai", fake_genai), \
+             mock.patch("core.viral_detector.genai_types", fake_types), \
+             mock.patch("core.viral_detector.GEMINI_MODEL_LADDER", ["first-model", "second-model"]), \
+             mock.patch("core.viral_detector.time.sleep", lambda *_: None):
             result = query_gemini_models("prompt", "key")
 
         self.assertIsNotNone(result)
@@ -150,12 +150,12 @@ class TestGeminiModelLadder(unittest.TestCase):
         fake_types.HttpOptions = mock.Mock()
         fake_types.GenerateContentConfig = mock.Mock()
 
-        with mock.patch("src.viral_detector.HAS_NEW_GENAI", True), \
-             mock.patch("src.viral_detector.genai", fake_genai), \
-             mock.patch("src.viral_detector.genai_types", fake_types), \
-             mock.patch("src.viral_detector.GEMINI_MODEL_LADDER", ["busy-model", "ok-model"]), \
-             mock.patch("src.viral_detector.GEMINI_API_KEYS", []), \
-             mock.patch("src.viral_detector.time.sleep", lambda *_: None):
+        with mock.patch("core.viral_detector.HAS_NEW_GENAI", True), \
+             mock.patch("core.viral_detector.genai", fake_genai), \
+             mock.patch("core.viral_detector.genai_types", fake_types), \
+             mock.patch("core.viral_detector.GEMINI_MODEL_LADDER", ["busy-model", "ok-model"]), \
+             mock.patch("core.viral_detector.GEMINI_API_KEYS", []), \
+             mock.patch("core.viral_detector.time.sleep", lambda *_: None):
             result = query_gemini_models("prompt", "key")
 
         self.assertIsNotNone(result)
@@ -178,16 +178,16 @@ class TestGeminiModelLadder(unittest.TestCase):
         fake_types.HttpOptions = mock.Mock()
         fake_types.GenerateContentConfig = mock.Mock()
 
-        with mock.patch("src.viral_detector.HAS_NEW_GENAI", True), \
-             mock.patch("src.viral_detector.genai", fake_genai), \
-             mock.patch("src.viral_detector.genai_types", fake_types), \
-             mock.patch("src.viral_detector.GEMINI_MODEL_LADDER", ["a", "b"]), \
-             mock.patch("src.viral_detector.GEMINI_API_KEYS", []), \
-             mock.patch("src.viral_detector.time.sleep", lambda *_: None):
+        with mock.patch("core.viral_detector.HAS_NEW_GENAI", True), \
+             mock.patch("core.viral_detector.genai", fake_genai), \
+             mock.patch("core.viral_detector.genai_types", fake_types), \
+             mock.patch("core.viral_detector.GEMINI_MODEL_LADDER", ["a", "b"]), \
+             mock.patch("core.viral_detector.GEMINI_API_KEYS", []), \
+             mock.patch("core.viral_detector.time.sleep", lambda *_: None):
             self.assertIsNone(query_gemini_models("prompt", "bad-key"))
 
     def test_gemini_key_collection_orders_and_dedupes(self):
-        from src.config import collect_gemini_api_keys
+        from core.config import collect_gemini_api_keys
 
         keys = collect_gemini_api_keys(
             {
@@ -227,12 +227,12 @@ class TestGeminiModelLadder(unittest.TestCase):
         fake_types.HttpOptions = mock.Mock()
         fake_types.GenerateContentConfig = mock.Mock()
 
-        with mock.patch("src.viral_detector.HAS_NEW_GENAI", True), \
-             mock.patch("src.viral_detector.genai", fake_genai), \
-             mock.patch("src.viral_detector.genai_types", fake_types), \
-             mock.patch("src.viral_detector.GEMINI_MODEL_LADDER", ["only-model"]), \
-             mock.patch("src.viral_detector.GEMINI_API_KEYS", ["key-b"]), \
-             mock.patch("src.viral_detector.time.sleep", lambda *_: None):
+        with mock.patch("core.viral_detector.HAS_NEW_GENAI", True), \
+             mock.patch("core.viral_detector.genai", fake_genai), \
+             mock.patch("core.viral_detector.genai_types", fake_types), \
+             mock.patch("core.viral_detector.GEMINI_MODEL_LADDER", ["only-model"]), \
+             mock.patch("core.viral_detector.GEMINI_API_KEYS", ["key-b"]), \
+             mock.patch("core.viral_detector.time.sleep", lambda *_: None):
             result = query_gemini_models("prompt", "key-a")
 
         self.assertIsNotNone(result)
@@ -267,12 +267,12 @@ class TestGeminiModelLadder(unittest.TestCase):
         fake_types.HttpOptions = mock.Mock()
         fake_types.GenerateContentConfig = mock.Mock()
 
-        with mock.patch("src.viral_detector.HAS_NEW_GENAI", True), \
-             mock.patch("src.viral_detector.genai", fake_genai), \
-             mock.patch("src.viral_detector.genai_types", fake_types), \
-             mock.patch("src.viral_detector.GEMINI_MODEL_LADDER", ["busy-model", "ok-model"]), \
-             mock.patch("src.viral_detector.GEMINI_API_KEYS", ["key-b"]), \
-             mock.patch("src.viral_detector.time.sleep", lambda *_: None):
+        with mock.patch("core.viral_detector.HAS_NEW_GENAI", True), \
+             mock.patch("core.viral_detector.genai", fake_genai), \
+             mock.patch("core.viral_detector.genai_types", fake_types), \
+             mock.patch("core.viral_detector.GEMINI_MODEL_LADDER", ["busy-model", "ok-model"]), \
+             mock.patch("core.viral_detector.GEMINI_API_KEYS", ["key-b"]), \
+             mock.patch("core.viral_detector.time.sleep", lambda *_: None):
             result = query_gemini_models("prompt", "key-a")
 
         self.assertIsNotNone(result)

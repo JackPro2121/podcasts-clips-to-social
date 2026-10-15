@@ -1,10 +1,10 @@
 import unittest
 from pathlib import Path
 import tempfile
-from src.slack_notifier import SlackNotifier
-from src.channel_discovery import extract_youtube_id, load_history, record_history
-from src.transcriber import TranscriptSegment, WordTimestamp
-from src.subtitle_generator import create_styled_ass_subtitles
+from v1.slack_notifier import SlackNotifier
+from v1.channel_discovery import extract_youtube_id, load_history, record_history
+from core.transcriber import TranscriptSegment, WordTimestamp
+from core.subtitle_generator import create_styled_ass_subtitles
 
 class TestSlackAndHistory(unittest.TestCase):
     def test_extract_youtube_id(self):

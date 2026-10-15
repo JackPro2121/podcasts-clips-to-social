@@ -14,9 +14,9 @@ from __future__ import annotations
 from pathlib import Path
 import unittest
 
-from src.face_tracker import FramingDecision
-from src.hook_engine import HOOK_MAX_LEAD_IN_S, HOOK_PREROLL_S
-from src.video_editor import render_viral_clip
+from core.face_tracker import FramingDecision
+from v1.hook_engine import HOOK_MAX_LEAD_IN_S, HOOK_PREROLL_S
+from core.video_editor import render_viral_clip
 
 
 def _framing() -> FramingDecision:

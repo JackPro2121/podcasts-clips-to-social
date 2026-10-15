@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 
-from src.source_index import (
+from v1.source_index import (
     SourceMediaInfo,
     build_source_index,
     probe_source_media,
@@ -36,7 +36,7 @@ class TestSourceIndex(unittest.TestCase):
             ],
         }
         result = MagicMock(returncode=0, stdout=json.dumps(payload), stderr="")
-        with patch("src.source_index.subprocess.run", return_value=result):
+        with patch("v1.source_index.subprocess.run", return_value=result):
             media = probe_source_media(Path("clip.mp4"))
         self.assertEqual(media.width, 1080)
         self.assertEqual(media.height, 1920)
@@ -59,12 +59,12 @@ class TestSourceIndex(unittest.TestCase):
             sample_rate=48000,
             channels=2,
         )
-        with patch("src.source_index.probe_source_media", return_value=media), \
-             patch("src.source_index._sample_frames", return_value=samples), \
-             patch("src.source_index.detect_clip_shots", return_value=[(0.0, 1.5), (1.5, 4.0)]), \
-             patch("src.source_index.detect_slide_heuristics", return_value=False), \
-             patch("src.source_index._face_count", return_value=0.0), \
-             patch("src.source_index._audio_events", return_value=[]):
+        with patch("v1.source_index.probe_source_media", return_value=media), \
+             patch("v1.source_index._sample_frames", return_value=samples), \
+             patch("v1.source_index.detect_clip_shots", return_value=[(0.0, 1.5), (1.5, 4.0)]), \
+             patch("v1.source_index.detect_slide_heuristics", return_value=False), \
+             patch("v1.source_index._face_count", return_value=0.0), \
+             patch("v1.source_index._audio_events", return_value=[]):
             index = build_source_index(Path("clip.mp4"), sample_fps=2.0)
         self.assertEqual(len(index.shots), 2)
         self.assertEqual(index.quality["sample_count"], 4)
@@ -81,12 +81,12 @@ class TestSourceIndex(unittest.TestCase):
         frame = np.zeros((100, 200, 3), dtype=np.uint8)
         samples = [(0.0, frame), (1.0, frame.copy()), (2.0, frame.copy())]
         media = SourceMediaInfo("clip.mp4", 3.0, 200, 100, 1.0)
-        with patch("src.source_index.probe_source_media", return_value=media), \
-             patch("src.source_index._sample_frames", return_value=samples), \
-             patch("src.source_index.detect_clip_shots", return_value=[(0.0, 3.0)]), \
-             patch("src.source_index.detect_slide_heuristics", return_value=False), \
-             patch("src.source_index._face_count", return_value=0.0), \
-             patch("src.source_index._audio_events", return_value=[]):
+        with patch("v1.source_index.probe_source_media", return_value=media), \
+             patch("v1.source_index._sample_frames", return_value=samples), \
+             patch("v1.source_index.detect_clip_shots", return_value=[(0.0, 3.0)]), \
+             patch("v1.source_index.detect_slide_heuristics", return_value=False), \
+             patch("v1.source_index._face_count", return_value=0.0), \
+             patch("v1.source_index._audio_events", return_value=[]):
             index = build_source_index(Path("clip.mp4"), sample_fps=1.0)
         self.assertGreaterEqual(index.quality["freeze_interval_count"], 1)
         self.assertEqual(index.quality["freeze_duration"], 2.0)

@@ -23,8 +23,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.face_tracker import FramingDecision, ShotPlan
-from src.video_editor import build_video_filtergraph
+from core.face_tracker import FramingDecision, ShotPlan
+from core.video_editor import build_video_filtergraph
 
 SOURCE_W, SOURCE_H = 1920, 1080
 
@@ -134,7 +134,7 @@ class TestRenderedShotIsNeverFrozen(unittest.TestCase):
         return src
 
     def test_frozen_source_renders_without_freeze_event(self):
-        from src.config import FPS
+        from core.config import FPS
 
         tmp = Path(tempfile.mkdtemp())
         try:

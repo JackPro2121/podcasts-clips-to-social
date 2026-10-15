@@ -19,9 +19,9 @@ import unittest
 import cv2
 import numpy as np
 
-from src.director_v2 import ShotDirective, apply_shot_directives
-from src.face_tracker import FramingDecision, ShotPlan
-from src.video_editor import (
+from v1.director_v2 import ShotDirective, apply_shot_directives
+from core.face_tracker import FramingDecision, ShotPlan
+from core.video_editor import (
     _punch_zoom_filter,
     render_viral_clip,
     OUTPUT_HEIGHT,

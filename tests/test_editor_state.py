@@ -3,8 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.editor_models import StageStatus
-from src.run_state import RunStateStore
+from v1.editor_models import StageStatus
+from v1.run_state import RunStateStore
 
 
 class TestRunStateStore(unittest.TestCase):

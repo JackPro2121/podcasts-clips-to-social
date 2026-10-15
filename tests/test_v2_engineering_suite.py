@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from src.streamers.spec import (
+from v2.streamers.spec import (
     STREAMER_MIN_CLIP_DURATION_S,
     STREAMER_MAX_CLIP_DURATION_S,
     STREAMER_HASHTAG_MIN,
@@ -23,18 +23,18 @@ from src.streamers.spec import (
     STREAMER_TIER2_HOLD_S,
     STREAMER_SPLIT_MAX_PANE_W,
 )
-from src.streamers.gate import verify_clip
-from src.streamers.discovery import (
+from v2.streamers.gate import verify_clip
+from v2.streamers.discovery import (
     load_streamer_history,
     record_failed_attempt,
     _load_cursor,
     _save_cursor,
 )
-from src.streamers.layout_compositor import (
+from v2.streamers.layout_compositor import (
     _compute_disjoint_split_panes,
     _even,
 )
-from src.streamers.chat_analyzer import (
+from v2.streamers.chat_analyzer import (
     detect_chat_spikes,
 )
 
@@ -77,7 +77,7 @@ class TestV2PublicationGate(unittest.TestCase):
             mock_verdict.findings = []
             mock_verdict.metrics = {}
 
-            with patch("src.streamers.gate._import_verdict") as mock_import:
+            with patch("v2.streamers.gate._import_verdict") as mock_import:
                 mock_mod = MagicMock()
                 mock_mod.verify.return_value = mock_verdict
                 mock_import.return_value = mock_mod
@@ -116,7 +116,7 @@ class TestV2PublicationGate(unittest.TestCase):
             mock_verdict.findings = [f_mock]
             mock_verdict.metrics = {}
 
-            with patch("src.streamers.gate._import_verdict") as mock_import:
+            with patch("v2.streamers.gate._import_verdict") as mock_import:
                 mock_mod = MagicMock()
                 mock_mod.verify.return_value = mock_verdict
                 mock_mod.Finding = MagicMock(return_value=f_mock)
@@ -172,7 +172,7 @@ class TestV2DiscoveryRotationAndHistory(unittest.TestCase):
     def test_cursor_round_robin_saving(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             cursor_file = Path(tmpdir) / "streamer_cursor.json"
-            with patch("src.streamers.discovery.STREAMER_CURSOR_FILE", cursor_file):
+            with patch("v2.streamers.discovery.STREAMER_CURSOR_FILE", cursor_file):
                 self.assertEqual(_load_cursor(), -1)
                 _save_cursor(3)
                 self.assertEqual(_load_cursor(), 3)
@@ -182,7 +182,7 @@ class TestV2DiscoveryRotationAndHistory(unittest.TestCase):
     def test_retry_budget_blacklisting(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             test_hist = Path(tmpdir) / "streamer_history.json"
-            with patch("src.streamers.discovery.STREAMER_HISTORY_FILE", test_hist):
+            with patch("v2.streamers.discovery.STREAMER_HISTORY_FILE", test_hist):
                 record_failed_attempt("bad_vod_1", "Download timeout")
                 h1 = load_streamer_history()
                 self.assertEqual(h1["attempts"].get("bad_vod_1"), 1)

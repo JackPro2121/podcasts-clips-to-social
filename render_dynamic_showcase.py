@@ -17,14 +17,14 @@ def main():
     words = []
     segments = []
     try:
-        from src.transcriber import transcribe_audio_whisper
+        from core.transcriber import transcribe_audio_whisper
         segments = transcribe_audio_whisper(video_path, model_size="tiny.en")
         for s in segments:
             words.extend(s.words)
         print(f"[+] Successfully transcribed {len(words)} word timestamps.")
     except Exception as e:
         print(f"[-] Whisper transcription fallback: {e}")
-        from src.transcriber import WordTimestamp
+        from core.transcriber import WordTimestamp
         dummy_words = [
             ("TO", 0.5, 0.8), ("GET", 0.9, 1.2), ("BETTER", 1.3, 1.7), ("DEEPER", 1.8, 2.2),
             ("SLEEP", 2.3, 3.0), ("YOU", 3.2, 3.5), ("HAVE", 3.6, 3.9), ("TO", 4.0, 4.3),
@@ -45,7 +45,7 @@ def main():
 
     # STEP 2: Shot-by-Shot Face & Slide Intelligence
     print("\n[*] Step 2: Running PySceneDetect & YuNet / YOLO Face & Slide Tracking...")
-    from src.face_tracker import analyze_faces_in_clip
+    from core.face_tracker import analyze_faces_in_clip
     framing = analyze_faces_in_clip(str(video_path), start_time, end_time)
 
     print(f"\n[+] Framing Decision Mode: {framing.mode}")
@@ -55,8 +55,8 @@ def main():
 
     # STEP 3: Subtitle Generation
     print("\n[*] Step 3: Generating Shot-Aware Hormozi ASS Subtitles + Royal Purple Hook Pill...")
-    from src.subtitle_generator import create_styled_ass_subtitles
-    from src.transcriber import TranscriptSegment
+    from core.subtitle_generator import create_styled_ass_subtitles
+    from core.transcriber import TranscriptSegment
     
     # Pack words into segments if needed
     if not segments:
@@ -76,7 +76,7 @@ def main():
 
     # STEP 4: Render Viral Clip
     print("\n[*] Step 4: Executing Studio-Grade FFmpeg Multi-Shot Dynamic Render Pass...")
-    from src.video_editor import render_viral_clip
+    from core.video_editor import render_viral_clip
     rendered_path = render_viral_clip(
         source_video_path=video_path,
         start_time=start_time,

@@ -13,15 +13,15 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from src.downloader import (
+from core.downloader import (
     classify_ytdlp_error,
     best_available_height,
     VideoUnavailableError,
 )
-from src.channel_discovery import classify_candidate_entry
-from src.viral_detector import _safe_int, strip_emojis
-from src.subtitle_generator import format_ass_timestamp, default_margin_v, get_subtitle_margin_v
-from src.config import SUBTITLE_MARGIN_MIN_V, SUBTITLE_MARGIN_MAX_V
+from v1.channel_discovery import classify_candidate_entry
+from core.viral_detector import _safe_int, strip_emojis
+from core.subtitle_generator import format_ass_timestamp, default_margin_v, get_subtitle_margin_v
+from core.config import SUBTITLE_MARGIN_MIN_V, SUBTITLE_MARGIN_MAX_V
 
 
 class TestDownloaderClassification(unittest.TestCase):
@@ -61,9 +61,9 @@ class TestDownloaderClassification(unittest.TestCase):
         self.assertTrue(issubclass(VideoUnavailableError, Exception))
 
     def test_targeted_apify_download_uses_segment_actor(self):
-        from src.downloader import download_via_apify
+        from core.downloader import download_via_apify
         expected = {"video_path": Path("clip.mp4"), "duration": 30.0}
-        with patch("src.downloader.download_segment_via_apify", return_value=expected) as segment:
+        with patch("core.downloader.download_segment_via_apify", return_value=expected) as segment:
             result = download_via_apify(
                 "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
                 Path("downloads"),
@@ -76,8 +76,8 @@ class TestDownloaderClassification(unittest.TestCase):
 
     def test_download_segment_via_apify_integer_timestamps_and_offset(self):
         from unittest.mock import MagicMock
-        from src.downloader import download_segment_via_apify
-        from src.preflight import PreflightReport
+        from core.downloader import download_segment_via_apify
+        from core.preflight import PreflightReport
         import tempfile
 
         fake_start_response = MagicMock()
@@ -97,9 +97,9 @@ class TestDownloaderClassification(unittest.TestCase):
             out_dir = Path(tmpdir)
             with patch("requests.post", return_value=fake_start_response) as mock_post, \
                  patch("requests.get", side_effect=[fake_poll_response, fake_stream_response]), \
-                 patch("src.downloader.get_video_height", return_value=1080), \
-                 patch("src.downloader.get_video_duration", return_value=30.6), \
-                 patch("src.preflight.preflight_source", return_value=PreflightReport(ok=True)):
+                 patch("core.downloader.get_video_height", return_value=1080), \
+                 patch("core.downloader.get_video_duration", return_value=30.6), \
+                 patch("core.preflight.preflight_source", return_value=PreflightReport(ok=True)):
                 result = download_segment_via_apify(
                     video_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
                     output_dir=out_dir,
@@ -123,8 +123,8 @@ class TestDownloaderClassification(unittest.TestCase):
 
     def test_segment_start_anchors_on_the_moment_when_pre_roll_is_requested(self):
         from unittest.mock import MagicMock, patch
-        from src.downloader import download_segment_via_apify
-        from src.preflight import PreflightReport
+        from core.downloader import download_segment_via_apify
+        from core.preflight import PreflightReport
         import tempfile
 
         fake_start_response = MagicMock()
@@ -144,9 +144,9 @@ class TestDownloaderClassification(unittest.TestCase):
             out_dir = Path(tmpdir)
             with patch("requests.post", return_value=fake_start_response) as mock_post, \
                  patch("requests.get", side_effect=[fake_poll_response, fake_stream_response]), \
-                 patch("src.downloader.get_video_height", return_value=1080), \
-                 patch("src.downloader.get_video_duration", return_value=30.6), \
-                 patch("src.preflight.preflight_source", return_value=PreflightReport(ok=True)):
+                 patch("core.downloader.get_video_height", return_value=1080), \
+                 patch("core.downloader.get_video_duration", return_value=30.6), \
+                 patch("core.preflight.preflight_source", return_value=PreflightReport(ok=True)):
                 # The download starts 2.4s before the moment (pre-roll) but the
                 # reported offset must still be the MOMENT's offset in the file.
                 result = download_segment_via_apify(
@@ -166,7 +166,7 @@ class TestDownloaderClassification(unittest.TestCase):
 
     def test_download_clip_segment_prioritizes_apify(self):
         from unittest.mock import patch
-        from src.downloader import download_clip_segment
+        from core.downloader import download_clip_segment
         import tempfile
 
         fake_apify_res = {
@@ -176,10 +176,10 @@ class TestDownloaderClassification(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as tmpdir:
             out_dir = Path(tmpdir)
-            with patch("src.downloader.APIFY_API_TOKEN", "dummy-apify-token"), \
-                 patch("src.downloader.download_via_apify", return_value=fake_apify_res) as mock_apify, \
-                 patch("src.downloader.get_video_height", return_value=1080), \
-                 patch("src.downloader.get_video_duration", return_value=30.0), \
+            with patch("core.downloader.APIFY_API_TOKEN", "dummy-apify-token"), \
+                 patch("core.downloader.download_via_apify", return_value=fake_apify_res) as mock_apify, \
+                 patch("core.downloader.get_video_height", return_value=1080), \
+                 patch("core.downloader.get_video_duration", return_value=30.0), \
                  patch("yt_dlp.YoutubeDL") as mock_ydl:
                 # Provide a dummy file so get_video_height / stat don't fail
                 dummy_file = out_dir / "clip_apify.mp4"
@@ -203,7 +203,7 @@ class TestDownloaderClassification(unittest.TestCase):
 
 class TestReleaseCleanupSafety(unittest.TestCase):
     def test_buffer_lookup_failure_preserves_releases(self):
-        from src.release_cleaner import clean_old_releases
+        from v1.release_cleaner import clean_old_releases
 
         class BrokenBuffer:
             last_error = "Buffer API timeout"
@@ -294,7 +294,7 @@ class TestFiltergraphValidity(unittest.TestCase):
     aspect-fill edit and any pad-wiring mistakes)."""
 
     def _render(self, framing):
-        from src.video_editor import build_video_filtergraph
+        from core.video_editor import build_video_filtergraph
         graph = build_video_filtergraph(framing, ass_subtitle_path=None, burn_subtitles=False)
         cmd = [
             "ffmpeg", "-hide_banner", "-f", "lavfi",
@@ -307,8 +307,8 @@ class TestFiltergraphValidity(unittest.TestCase):
 
     def test_broll_render_terminates_at_clip_duration(self):
         import tempfile
-        from src.face_tracker import FramingDecision
-        from src.video_editor import render_viral_clip
+        from core.face_tracker import FramingDecision
+        from core.video_editor import render_viral_clip
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
@@ -366,8 +366,8 @@ class TestFiltergraphValidity(unittest.TestCase):
     def test_no_audio_render_produces_audio_stream(self):
         import json
         import tempfile
-        from src.face_tracker import FramingDecision
-        from src.video_editor import render_viral_clip
+        from core.face_tracker import FramingDecision
+        from core.video_editor import render_viral_clip
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
@@ -423,10 +423,10 @@ class TestFiltergraphValidity(unittest.TestCase):
     def test_real_ass_burn_in_produces_subtitle_pixels(self):
         import tempfile
         from PIL import Image
-        from src.face_tracker import FramingDecision
-        from src.video_editor import build_video_filtergraph
-        from src.subtitle_generator import create_styled_ass_subtitles
-        from src.transcriber import TranscriptSegment, WordTimestamp
+        from core.face_tracker import FramingDecision
+        from core.video_editor import build_video_filtergraph
+        from core.subtitle_generator import create_styled_ass_subtitles
+        from core.transcriber import TranscriptSegment, WordTimestamp
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
@@ -475,8 +475,8 @@ class TestFiltergraphValidity(unittest.TestCase):
             self.assertGreater(bright_pixels, 10)
 
     def test_requested_missing_ass_file_fails_before_render(self):
-        from src.face_tracker import FramingDecision
-        from src.video_editor import build_video_filtergraph
+        from core.face_tracker import FramingDecision
+        from core.video_editor import build_video_filtergraph
 
         with self.assertRaises(FileNotFoundError):
             build_video_filtergraph(
@@ -486,24 +486,24 @@ class TestFiltergraphValidity(unittest.TestCase):
             )
 
     def test_single_smooth(self):
-        from src.face_tracker import FramingDecision
+        from core.face_tracker import FramingDecision
         self._render(FramingDecision(mode="single_smooth", face_count=1,
                                      smoothed_center_x=960, video_width=1920, video_height=1080))
 
     def test_blur_stack(self):
-        from src.face_tracker import FramingDecision
+        from core.face_tracker import FramingDecision
         self._render(FramingDecision(mode="blur_stack", face_count=0,
                                      video_width=1920, video_height=1080))
 
     def test_split_screen(self):
-        from src.face_tracker import FramingDecision
+        from core.face_tracker import FramingDecision
         self._render(FramingDecision(mode="split_screen", face_count=2,
                                      speaker1_box=(100, 0, 900, 1080),
                                      speaker2_box=(920, 0, 900, 1080),
                                      video_width=1920, video_height=1080))
 
     def test_multi_shot_dynamic(self):
-        from src.face_tracker import FramingDecision, ShotPlan
+        from core.face_tracker import FramingDecision, ShotPlan
         s1 = ShotPlan(start=0.0, end=0.5, mode="single_smooth", crop_x=480)
         s2 = ShotPlan(start=0.5, end=1.0, mode="split_screen", crop_x=0,
                       speaker1_box=(100, 0, 900, 1080), speaker2_box=(920, 0, 900, 1080))

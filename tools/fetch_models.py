@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_MODELS_DIR = REPO_ROOT / "src" / "models"
+DEFAULT_MODELS_DIR = REPO_ROOT / "core" / "models"
 CHUNK = 1 << 20
 
 VGG = "https://www.robots.ox.ac.uk/~vgg/software/lipsync/data"

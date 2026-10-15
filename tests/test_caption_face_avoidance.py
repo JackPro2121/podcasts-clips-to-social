@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.composition_planner import (
+from v1.composition_planner import (
     _anchor_to_ass,
     _caption_anchor,
     _conflicts,
@@ -40,7 +40,7 @@ from src.composition_planner import (
     NormalizedRect,
     ShotComposition,
 )
-from src.source_index import IndexedShot, TextRegion
+from v1.source_index import IndexedShot, TextRegion
 
 WIDTH, HEIGHT = 1080, 1920
 
@@ -351,7 +351,7 @@ class TestMultiFaceBandSelection(unittest.TestCase):
     """
 
     def test_two_faces_at_opposite_heights_choose_the_centre_band(self) -> None:
-        from main import _caption_band_clearing_faces
+        from v1.main import _caption_band_clearing_faces
 
         chosen = _caption_band_clearing_faces(
             [(117.0, 733.0), (1115.0, 1875.0)], 1920.0, margin=76.8
@@ -364,19 +364,19 @@ class TestMultiFaceBandSelection(unittest.TestCase):
         self.assertLess(y1, 1115.0)
 
     def test_single_upper_face_prefers_a_lower_band(self) -> None:
-        from main import _caption_band_clearing_faces
+        from v1.main import _caption_band_clearing_faces
 
         chosen = _caption_band_clearing_faces([(117.0, 733.0)], 1920.0, margin=76.8)
         self.assertEqual(chosen[0], "lower_center")  # type: ignore[index]
 
     def test_single_lower_face_prefers_the_top_band(self) -> None:
-        from main import _caption_band_clearing_faces
+        from v1.main import _caption_band_clearing_faces
 
         chosen = _caption_band_clearing_faces([(1115.0, 1875.0)], 1920.0, margin=76.8)
         self.assertEqual(chosen[0], "top_safe")  # type: ignore[index]
 
     def test_face_covering_every_band_picks_the_least_overlap(self) -> None:
-        from main import _caption_band_clearing_faces
+        from v1.main import _caption_band_clearing_faces
 
         chosen = _caption_band_clearing_faces([(0.0, 1920.0)], 1920.0, margin=0.0)
         self.assertIsNotNone(chosen)
@@ -384,7 +384,7 @@ class TestMultiFaceBandSelection(unittest.TestCase):
 
 
 def _caption_rect_for(anchor: str) -> NormalizedRect:
-    from src.composition_planner import _caption_rect
+    from v1.composition_planner import _caption_rect
 
     return _caption_rect(anchor, DEFAULT_SAFE_ZONE)
 
@@ -398,7 +398,7 @@ class TestTimeRangedPlacementPlanning(unittest.TestCase):
     """
 
     def test_two_speakers_at_different_heights_switch_bands(self) -> None:
-        from main import _plan_time_ranged_placements
+        from v1.main import _plan_time_ranged_placements
 
         windows = [
             (0.0, 3.0, [(117.0, 733.0)]),      # upper speaker
@@ -411,7 +411,7 @@ class TestTimeRangedPlacementPlanning(unittest.TestCase):
         self.assertNotEqual(placements[1].anchor, "bottom_safe")
 
     def test_stable_layout_merges_into_one_placement(self) -> None:
-        from main import _plan_time_ranged_placements
+        from v1.main import _plan_time_ranged_placements
 
         spans = [(117.0, 733.0)]
         windows = [(0.0, 3.0, spans), (3.0, 6.0, spans), (6.0, 9.0, spans)]
@@ -421,7 +421,7 @@ class TestTimeRangedPlacementPlanning(unittest.TestCase):
         self.assertGreaterEqual(placements[0].end, 6.0)
 
     def test_no_faces_defaults_to_the_lower_band(self) -> None:
-        from main import _plan_time_ranged_placements
+        from v1.main import _plan_time_ranged_placements
 
         placements = _plan_time_ranged_placements([(0.0, 3.0, [])], 3.0)
         self.assertEqual(len(placements), 1)

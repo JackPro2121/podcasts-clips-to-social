@@ -1,9 +1,9 @@
 import unittest
 from unittest.mock import patch
 
-from src.composition_planner import NormalizedRect, ShotComposition, CompositionPlan, SafeZone
-from src.editorial_qa import run_editorial_qa
-from src.edit_director import EditPlan, HookCandidate, StoryBeat
+from v1.composition_planner import NormalizedRect, ShotComposition, CompositionPlan, SafeZone
+from v1.editorial_qa import run_editorial_qa
+from v1.edit_director import EditPlan, HookCandidate, StoryBeat
 
 
 class TestEditorialQa(unittest.TestCase):
@@ -43,9 +43,9 @@ class TestEditorialQa(unittest.TestCase):
                 {"codec_type": "audio", "codec_name": "aac", "sample_rate": "48000"},
             ],
         }
-        with patch("src.editorial_qa._probe_output", return_value=probe), \
-             patch("src.editorial_qa._detect_intervals", side_effect=[[], []]), \
-             patch("src.editorial_qa._loudness_metrics", return_value={"integrated_lufs": -14.0, "peak_dbfs": -1.8}):
+        with patch("v1.editorial_qa._probe_output", return_value=probe), \
+             patch("v1.editorial_qa._detect_intervals", side_effect=[[], []]), \
+             patch("v1.editorial_qa._loudness_metrics", return_value={"integrated_lufs": -14.0, "peak_dbfs": -1.8}):
             report = run_editorial_qa("output.mp4", self._edit_plan(), self._composition(), report_id="qa_pass")
         self.assertTrue(report.passed)
         self.assertEqual(report.issues, [])
@@ -60,9 +60,9 @@ class TestEditorialQa(unittest.TestCase):
         }
         edit_plan = self._edit_plan()
         edit_plan.warnings.append("endpoint_not_proven_complete")
-        with patch("src.editorial_qa._probe_output", return_value=probe), \
-             patch("src.editorial_qa._detect_intervals", side_effect=[[], []]), \
-             patch("src.editorial_qa._loudness_metrics", return_value={"integrated_lufs": -14.0, "peak_dbfs": -1.8}):
+        with patch("v1.editorial_qa._probe_output", return_value=probe), \
+             patch("v1.editorial_qa._detect_intervals", side_effect=[[], []]), \
+             patch("v1.editorial_qa._loudness_metrics", return_value={"integrated_lufs": -14.0, "peak_dbfs": -1.8}):
             report = run_editorial_qa("output.mp4", edit_plan, self._composition(), report_id="qa_incomplete")
         self.assertTrue(report.passed)
         self.assertIn("incomplete_endpoint", {issue.code for issue in report.issues})
@@ -78,9 +78,9 @@ class TestEditorialQa(unittest.TestCase):
         }
         edit_plan = self._edit_plan()
         edit_plan.warnings.append("endpoint_caption_fragment")
-        with patch("src.editorial_qa._probe_output", return_value=probe), \
-             patch("src.editorial_qa._detect_intervals", side_effect=[[], []]), \
-             patch("src.editorial_qa._loudness_metrics", return_value={"integrated_lufs": -14.0, "peak_dbfs": -1.8}):
+        with patch("v1.editorial_qa._probe_output", return_value=probe), \
+             patch("v1.editorial_qa._detect_intervals", side_effect=[[], []]), \
+             patch("v1.editorial_qa._loudness_metrics", return_value={"integrated_lufs": -14.0, "peak_dbfs": -1.8}):
             report = run_editorial_qa("output.mp4", edit_plan, self._composition(), report_id="qa_fragment")
         self.assertTrue(report.passed)
         self.assertIn("fragmented_endpoint", {issue.code for issue in report.issues})
@@ -96,9 +96,9 @@ class TestEditorialQa(unittest.TestCase):
         }
         composition = self._composition()
         composition.shots[0].protected_regions = [NormalizedRect(0.1, 0.64, 0.5, 0.1)]
-        with patch("src.editorial_qa._probe_output", return_value=probe), \
-             patch("src.editorial_qa._detect_intervals", side_effect=[[], [{"start": 4.0, "end": 6.0, "duration": 2.0}]]), \
-             patch("src.editorial_qa._loudness_metrics", return_value={"integrated_lufs": -14.0, "peak_dbfs": -1.8}):
+        with patch("v1.editorial_qa._probe_output", return_value=probe), \
+             patch("v1.editorial_qa._detect_intervals", side_effect=[[], [{"start": 4.0, "end": 6.0, "duration": 2.0}]]), \
+             patch("v1.editorial_qa._loudness_metrics", return_value={"integrated_lufs": -14.0, "peak_dbfs": -1.8}):
             report = run_editorial_qa("output.mp4", self._edit_plan(), composition, report_id="qa_fail")
         self.assertFalse(report.passed)
         codes = {issue.code for issue in report.issues}

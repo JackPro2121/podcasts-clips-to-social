@@ -1,8 +1,8 @@
 """Tests for the picture-in-picture (host over slide) layout."""
 import unittest
 
-from src.face_tracker import FramingDecision, ShotPlan
-from src.video_editor import (
+from core.face_tracker import FramingDecision, ShotPlan
+from core.video_editor import (
     PIP_INSET_HEIGHT,
     PIP_INSET_WIDTH,
     PIP_INSET_X,
@@ -27,12 +27,12 @@ def _graph(shot, active=(0, 0, W, H)):
 
 class TestPipGeometry(unittest.TestCase):
     def test_inset_is_portrait_and_scaled_off_the_output(self):
-        from src.config import OUTPUT_WIDTH
+        from core.config import OUTPUT_WIDTH
         self.assertEqual(PIP_INSET_WIDTH, int(OUTPUT_WIDTH * 0.30))
         self.assertGreater(PIP_INSET_HEIGHT, PIP_INSET_WIDTH)
 
     def test_inset_clears_the_caption_band(self):
-        from src.config import OUTPUT_HEIGHT, SUBTITLE_MARGIN_MIN_V
+        from core.config import OUTPUT_HEIGHT, SUBTITLE_MARGIN_MIN_V
         self.assertGreater(PIP_INSET_Y, 240, "must clear the top platform UI")
         self.assertLess(
             PIP_INSET_Y + PIP_INSET_HEIGHT,
@@ -41,7 +41,7 @@ class TestPipGeometry(unittest.TestCase):
         )
 
     def test_inset_stays_inside_the_output_frame(self):
-        from src.config import OUTPUT_HEIGHT, OUTPUT_WIDTH
+        from core.config import OUTPUT_HEIGHT, OUTPUT_WIDTH
         self.assertGreaterEqual(PIP_INSET_X, 0)
         self.assertLessEqual(PIP_INSET_X + PIP_INSET_WIDTH, OUTPUT_WIDTH)
         self.assertLessEqual(PIP_INSET_Y + PIP_INSET_HEIGHT, OUTPUT_HEIGHT)
@@ -100,7 +100,7 @@ class TestPipFiltergraph(unittest.TestCase):
         self.assertNotRegex(self.graph, rf"crop={W}:{H}:\d+:")
 
     def test_output_is_9x16(self):
-        from src.config import OUTPUT_HEIGHT, OUTPUT_WIDTH
+        from core.config import OUTPUT_HEIGHT, OUTPUT_WIDTH
         self.assertIn(f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}", self.graph)
 
 

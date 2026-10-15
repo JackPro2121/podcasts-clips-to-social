@@ -29,12 +29,12 @@ on:
   push:
     branches: [main]
     paths:
-      - 'src/video_editor.py'
-      - 'src/face_tracker.py'
-      - 'src/subtitle_generator.py'
-      - 'src/editorial_qa.py'
-      - 'src/config.py'
-      - 'src/verification/**'
+      - 'core/video_editor.py'
+      - 'core/face_tracker.py'
+      - 'core/subtitle_generator.py'
+      - 'v1/editorial_qa.py'
+      - 'core/config.py'
+      - 'core/verification/**'
       - 'tests/test_visual_regressions.py'
       - 'tests/fixtures/manifest.json'
       - 'tools/fetch_fixtures.py'
@@ -86,7 +86,7 @@ jobs:
           print(f"cv2 {cv2.__version__}  numpy {numpy.__version__}")
           PY
           echo "--- text detector tier ---"
-          python -c "from src.text_detection import get_text_detector as g; print(g().name)"
+          python -c "from v1.text_detection import get_text_detector as g; print(g().name)"
 
       - name: Fetch the golden-master corpus
         # The real published artifacts, by public URL, SHA-256 verified.
@@ -106,8 +106,8 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
-          from src.verification import mirror
-          from src.text_detection import get_text_detector
+          from core.verification import mirror
+          from v1.text_detection import get_text_detector
           name = str(get_text_detector().name)
           print(f"[verifier] text detection tier: {name}")
           if "ocr" in name.lower():
@@ -134,7 +134,7 @@ jobs:
           import json
           import sys
           from pathlib import Path
-          from src.verification import verdict as V
+          from core.verification import verdict as V
 
           results = V.verify_corpus(with_mirror=True)
           if not results:

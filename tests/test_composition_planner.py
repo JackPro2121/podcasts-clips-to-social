@@ -1,8 +1,8 @@
 import unittest
 
-from src.composition_planner import DEFAULT_SAFE_ZONE, build_composition_plan
-from src.edit_director import EditPlan, HookCandidate, StoryBeat
-from src.source_index import IndexedShot, SourceIndex, SourceMediaInfo, TextRegion
+from v1.composition_planner import DEFAULT_SAFE_ZONE, build_composition_plan
+from v1.edit_director import EditPlan, HookCandidate, StoryBeat
+from v1.source_index import IndexedShot, SourceIndex, SourceMediaInfo, TextRegion
 
 
 class TestCompositionPlanner(unittest.TestCase):

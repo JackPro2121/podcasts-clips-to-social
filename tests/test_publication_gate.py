@@ -30,7 +30,7 @@ import ast
 import unittest
 from pathlib import Path
 
-MAIN = Path(__file__).resolve().parent.parent / "main.py"
+MAIN = Path(__file__).resolve().parent.parent / "v1" / "main.py"
 
 
 def _source() -> str:
@@ -175,7 +175,7 @@ class TestRunStateSettings(unittest.TestCase):
     """A shortfall has to land in the manifest, not only in a scrolling log."""
 
     def test_record_settings_exists_and_merges(self) -> None:
-        from src.run_state import RunStateStore
+        from v1.run_state import RunStateStore
 
         self.assertTrue(hasattr(RunStateStore, "record_settings"))
         signature = RunStateStore.record_settings.__doc__ or ""
@@ -184,7 +184,7 @@ class TestRunStateSettings(unittest.TestCase):
     def test_record_settings_does_not_clobber_existing_keys(self) -> None:
         import inspect
 
-        from src.run_state import RunStateStore
+        from v1.run_state import RunStateStore
 
         source = inspect.getsource(RunStateStore.record_settings)
         self.assertIn(".update(", source, "must merge, not replace")

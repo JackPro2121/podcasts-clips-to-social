@@ -24,7 +24,7 @@
         ├───────────────────────────────────────┤                       ├───────────────────────────────────────┤
         │ • CLI: main.py                        │                       │ • CLI: main_streamer.py               │
         │ • CI: podcast_clipper.yml             │                       │ • CI: streamer_clipper.yml            │
-        │ • Core: src/                          │                       │ • Core: src/streamers/                │
+        │ • Core: src/                          │                       │ • Core: v2/streamers/                │
         │ • Tone: Finance / Serious / Interview │                       │ • Tone: Unhinged / Chaotic / Funny    │
         │ • Subtitles: Hormozi / Center Pop     │                       │ • Subtitles: TikTok Meme Box + Lower  │
         │ • Face: YuNet Active Speaker          │                       │ • Face: SFace ArcFace ID Locking      │
@@ -44,16 +44,16 @@ Automated clipping of 1-to-3 hour podcasts focused on Personal Finance, Wealth C
 ### Technical Specifications
 * **Entrypoint**: [`main.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/main.py)
 * **GitHub Actions Workflow**: [`.github/workflows/podcast_clipper.yml`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/.github/workflows/podcast_clipper.yml)
-* **Viral Detector**: [`src/viral_detector.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/src/viral_detector.py) (Gemini Flash tuned for debt drama, net worth confessions, business secrets).
+* **Viral Detector**: [`core/viral_detector.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/core/viral_detector.py) (Gemini Flash tuned for debt drama, net worth confessions, business secrets).
 * **Face Tracking & Layout**:
-  - [`src/face_tracker.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/src/face_tracker.py): OpenCV YuNet on CPU tracks active mouth motion.
+  - [`core/face_tracker.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/core/face_tracker.py): OpenCV YuNet on CPU tracks active mouth motion.
   - Generates single 9:16 portrait or dual-speaker split screen (Top 1080x960 / Bottom 1080x960) with zero black bars.
 * **Audio Engineering**:
   - 80Hz rumble cut, +2.5dB vocal presence boost at 3kHz.
   - Dynamic sidechain ducking on background music (`sidechaincompress`).
   - EBU R128 (-14.0 LUFS / -1.5 dBTP) broadcast normalization.
 * **Subtitles**:
-  - [`src/subtitle_generator.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/src/subtitle_generator.py): Word-by-word spring bounce animation (`hormozi`, `neon_green`, `luxury_gold`).
+  - [`core/subtitle_generator.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/core/subtitle_generator.py): Word-by-word spring bounce animation (`hormozi`, `neon_green`, `luxury_gold`).
 * **Publishing**:
   - Uses `BUFFER_ACCESS_TOKEN` and `BUFFER_CHANNEL_IDS` to schedule to podcast-specific social channels.
 
@@ -68,26 +68,26 @@ Extracts high-retention TikTok/Shorts clips from 3-to-5 hour live streams of top
 * **Entrypoint**: [`main_streamer.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/main_streamer.py)
 * **GitHub Actions Workflow**: [`.github/workflows/streamer_clipper.yml`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/.github/workflows/streamer_clipper.yml)
 * **Zero-Download Discovery**:
-  - [`src/streamers/discovery.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/src/streamers/discovery.py): Checks YouTube channel RSS feeds (60s latency, $0 API cost) and Firecrawl. Skips previously clipped streams via [`data/streamer_history.json`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/data/streamer_history.json).
+  - [`v2/streamers/discovery.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/v2/streamers/discovery.py): Checks YouTube channel RSS feeds (60s latency, $0 API cost) and Firecrawl. Skips previously clipped streams via [`data/streamer_history.json`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/data/streamer_history.json).
   - Fetches native timed text without downloading the full 15GB video file.
 * **Streamer Viral Intelligence**:
-  - [`src/streamers/viral_detector.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/src/streamers/viral_detector.py): Gemini 3.8/2.5 Flash finds explosive screaming, rage, comedy fails, and desk slams. Generates high-CTR all-caps hook titles.
+  - [`v2/streamers/viral_detector.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/v2/streamers/viral_detector.py): Gemini 3.8/2.5 Flash finds explosive screaming, rage, comedy fails, and desk slams. Generates high-CTR all-caps hook titles.
   - Enforces strict hashtag bounds: **2 to 4 hashtags** (e.g. `#kaicenat #streamer #funny #shorts`).
 * **SFace Streamer Identity Locking & 3-Tier State Machine**:
-  - [`src/streamers/face_tracker.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/src/streamers/face_tracker.py):
-    - **SFace (SphereFace / ArcFace ONNX)** + YuNet: Loads pre-computed ground-truth embeddings from `src/models/streamer_profiles/` (`kai_cenat.npy`, `ishowspeed.npy`, `xqc.npy`). Rejects guests (MrBeast, Kevin Hart, AMP crew) from hijacking the camera.
+  - [`v2/streamers/face_tracker.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/v2/streamers/face_tracker.py):
+    - **SFace (SphereFace / ArcFace ONNX)** + YuNet: Loads pre-computed ground-truth embeddings from `core/models/streamer_profiles/` (`kai_cenat.npy`, `ishowspeed.npy`, `xqc.npy`). Rejects guests (MrBeast, Kevin Hart, AMP crew) from hijacking the camera.
     - **Tier 1 (Locked)**: Streamer centered with smooth spring-damper LERP panning and safe headroom above the face.
     - **Tier 2 (Occluded / Turning / Running)**: Momentary face loss ($<1.5\text{s}$) holds last known position without jerky movements.
     - **Tier 3 (Off-Screen Exit $>1.5\text{s}$)**: Streamer leaves chair/room $\rightarrow$ Smooth autonomous fallback to **Wide Room View** (`presentation_slide` mode with blurred backdrop). Instant snap-back when the streamer returns!
 * **Stream Layout Intelligence Engine**:
-  - [`src/streamers/layout_compositor.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/src/streamers/layout_compositor.py):
+  - [`v2/streamers/layout_compositor.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/v2/streamers/layout_compositor.py):
     - **Mode 1 (`stacked_webcam`)**: Detects stationary corner webcam ROI. Generates auto-stacked 9:16 layout (Top 50%: Facecam Reaction / Bottom 50%: Gameplay/Video).
     - **Mode 2 (`multi_person_room`)**: Detects 2+ prominent people in room/collab streams (Kai Cenat x MrBeast, Speed x Adin). Uses SFace ArcFace identity recognition to place Host/Streamer on the Top pane (1080x960) and Guest on the Bottom pane (1080x960) with zero blurry bars, zero letterboxing, and 100% full-screen vertical immersion!
     - **Mode 3 (`single_streamer_room`)**: Single-creator desk/room framing with SFace identity lock.
 * **Audio Scream & Energy Analyzer**:
-  - [`src/streamers/audio_analyzer.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/src/streamers/audio_analyzer.py): Detects decibel volume jumps ($>6\text{ dB}$ above median) via FFmpeg raw PCM to trigger dynamic punch-zooms (1.2x zoompan).
+  - [`v2/streamers/audio_analyzer.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/v2/streamers/audio_analyzer.py): Detects decibel volume jumps ($>6\text{ dB}$ above median) via FFmpeg raw PCM to trigger dynamic punch-zooms (1.2x zoompan).
 * **Live Chat Velocity Engine**:
-  - [`src/streamers/chat_analyzer.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/src/streamers/chat_analyzer.py): Calculates Messages Per Second (MPS) and weights viral emotes (`💀`, `LMAO`, `COOKED`, `W`, `L`).
+  - [`v2/streamers/chat_analyzer.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/v2/streamers/chat_analyzer.py): Calculates Messages Per Second (MPS) and weights viral emotes (`💀`, `LMAO`, `COOKED`, `W`, `L`).
 * **Aesthetics & In-App TikTok Meme Hook Sticker**:
   - Persistent multi-line connected white meme container box placed in upper safe-zone (`MarginV = 130`) hugging bold black text with 8px rounded corners, subtle drop shadow, and viral emojis (`💀`, `😭`, `🔥`).
   - High-energy kinetic subtitles (`tiktok_streamer`: Montserrat Black 58pt, uppercase, 2-word bursts, Electric Yellow pop `#00E6FF`) in the lower safe-zone.
@@ -190,7 +190,7 @@ python main_streamer.py --video-url "https://www.youtube.com/watch?v=VIDEO_ID" -
 
 ## 🛡️ Critical Commandments for AI Agents
 
-1. **V1 Pipeline Inviolability**: Do NOT touch or edit `src/face_tracker.py`, `main.py`, or `src/viral_detector.py` when developing V2 features. All streamer-specific improvements belong strictly in `src/streamers/`.
+1. **V1 Pipeline Inviolability**: Do NOT touch or edit `core/face_tracker.py`, `main.py`, or `core/viral_detector.py` when developing V2 features. All streamer-specific improvements belong strictly in `v2/streamers/`.
 2. **Buffer Isolation**: Never reuse `BUFFER_ACCESS_TOKEN` for streamer clips. Streamer publishing must strictly read `STREAMER_BUFFER_ACCESS_TOKEN`.
 3. **Hashtag Strictness**: Streamer social captions must contain **between 2 and 4 hashtags**. Never generate 5+ hashtags or 0 hashtags.
 4. **Anti-Detection & Safe Zones**:

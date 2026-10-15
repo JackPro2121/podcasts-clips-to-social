@@ -14,7 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-import main
+import v1.main as main
 
 
 def _moment(start, end):
@@ -145,7 +145,7 @@ class TestBackfillMetadataEnrichment(unittest.TestCase):
     """
 
     def _segments(self):
-        from src.transcriber import TranscriptSegment
+        from core.transcriber import TranscriptSegment
 
         return [
             TranscriptSegment(
@@ -173,8 +173,8 @@ class TestBackfillMetadataEnrichment(unittest.TestCase):
         extras = [self._backfill()]
         with mock.patch.object(main, "detect_viral_moments", return_value=primary), mock.patch.object(
             main, "fallback_rule_based_detector", return_value=extras
-        ), mock.patch("src.config.GEMINI_API_KEY", key), mock.patch(
-            "src.viral_detector.query_gemini_models", llm
+        ), mock.patch("core.config.GEMINI_API_KEY", key), mock.patch(
+            "core.viral_detector.query_gemini_models", llm
         ):
             pool = main._detection_pool(self._segments(), num_clips=1, niche="finance")
         return pool, llm

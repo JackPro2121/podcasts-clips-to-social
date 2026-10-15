@@ -8,18 +8,18 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.composition_planner import (
+from v1.composition_planner import (
     CaptionPlacement,
     NormalizedRect,
     ShotComposition,
     build_caption_placements,
 )
-from src.subtitle_generator import create_styled_ass_subtitles
-from src.transcriber import TranscriptSegment, WordTimestamp
+from core.subtitle_generator import create_styled_ass_subtitles
+from core.transcriber import TranscriptSegment, WordTimestamp
 
 
 def _plan_with_shots(shots):
-    from src.composition_planner import CompositionPlan, DEFAULT_SAFE_ZONE
+    from v1.composition_planner import CompositionPlan, DEFAULT_SAFE_ZONE
     return CompositionPlan(
         plan_id="composition_test",
         width=1080,

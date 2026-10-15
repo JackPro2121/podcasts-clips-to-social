@@ -3,9 +3,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.composition_planner import CompositionPlan, SafeZone
-from src.edit_director import EditPlan, HookCandidate, StoryBeat
-from src.platform_profiles import (
+from v1.composition_planner import CompositionPlan, SafeZone
+from v1.edit_director import EditPlan, HookCandidate, StoryBeat
+from v1.platform_profiles import (
     PerformanceFeedback,
     build_platform_variant,
     get_platform_profile,

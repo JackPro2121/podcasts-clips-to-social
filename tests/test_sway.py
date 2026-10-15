@@ -6,7 +6,7 @@ import unittest
 
 import numpy as np
 
-from src.verification import sway
+from core.verification import sway
 
 
 def _triangle(fps: float, seconds: float, freq: float, amplitude: float) -> np.ndarray:

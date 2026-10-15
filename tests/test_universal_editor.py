@@ -4,9 +4,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from src.source_index import IndexedShot, SourceIndex, SourceMediaInfo
-from src.transcriber import TranscriptSegment, WordTimestamp
-from src.universal_editor import build_clip_editor_artifacts
+from v1.source_index import IndexedShot, SourceIndex, SourceMediaInfo
+from core.transcriber import TranscriptSegment, WordTimestamp
+from v1.universal_editor import build_clip_editor_artifacts
 
 
 class TestUniversalEditor(unittest.TestCase):
@@ -18,7 +18,7 @@ class TestUniversalEditor(unittest.TestCase):
         )
         segments = [TranscriptSegment(10.0, 40.0, "A complete story about a house.", [WordTimestamp("A", 10.0, 10.5), WordTimestamp("house.", 39.0, 40.0)])]
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("src.universal_editor.build_source_index", return_value=index):
+            with patch("v1.universal_editor.build_source_index", return_value=index):
                 artifacts = build_clip_editor_artifacts(
                     Path("clip.mp4"),
                     segments,
@@ -40,7 +40,7 @@ class TestUniversalEditor(unittest.TestCase):
         index = SourceIndex(media=media, shots=[])
         segments = [TranscriptSegment(10.0, 40.0, "Now.", [WordTimestamp("Now.", 39.0, 40.0)])]
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("src.universal_editor.build_source_index", return_value=index):
+            with patch("v1.universal_editor.build_source_index", return_value=index):
                 artifacts = build_clip_editor_artifacts(
                     Path("clip.mp4"),
                     segments,

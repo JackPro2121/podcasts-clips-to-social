@@ -15,7 +15,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.preflight import PreflightReport, preflight_source
+from core.preflight import PreflightReport, preflight_source
 
 HAS_FFMPEG = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
 

@@ -1,9 +1,9 @@
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from src.thumbnail_generator import generate_clip_thumbnail, calculate_smart_title_y
-from src.broll_manager import select_best_video_file, find_broll_cues_for_clip, download_broll_clip, _broll_cache_path
-from src.transcriber import WordTimestamp
+from core.thumbnail_generator import generate_clip_thumbnail, calculate_smart_title_y
+from v1.broll_manager import select_best_video_file, find_broll_cues_for_clip, download_broll_clip, _broll_cache_path
+from core.transcriber import WordTimestamp
 
 
 
@@ -49,8 +49,8 @@ class TestBrollAndThumbnail(unittest.TestCase):
             tmp_path = Path(tmpdir)
             output_path = tmp_path / "nested" / "thumb.jpg"
             frame = Image.new("RGBA", (320, 240), (30, 60, 90, 255))
-            with patch("src.thumbnail_generator.extract_frame_at_time", side_effect=[None, frame]) as extract_mock, \
-                 patch("src.thumbnail_generator._probe_video_duration", return_value=4.0):
+            with patch("core.thumbnail_generator.extract_frame_at_time", side_effect=[None, frame]) as extract_mock, \
+                 patch("core.thumbnail_generator._probe_video_duration", return_value=4.0):
                 result = generate_clip_thumbnail(
                     clip_path=tmp_path / "missing.mp4",
                     title="A long title that should stay inside the canvas",
@@ -91,8 +91,8 @@ class TestBrollAndThumbnail(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             response = MagicMock(status_code=200)
             response.iter_content.return_value = [b"x" * 20000]
-            with patch("src.broll_manager.requests.get", return_value=response), \
-                 patch("src.broll_manager.subprocess.run", return_value=MagicMock(returncode=1, stdout="")):
+            with patch("v1.broll_manager.requests.get", return_value=response), \
+                 patch("v1.broll_manager.subprocess.run", return_value=MagicMock(returncode=1, stdout="")):
                 result = download_broll_clip("https://example.com/clip.mp4", "money", Path(tmpdir))
             self.assertIsNone(result)
             self.assertEqual(list(Path(tmpdir).glob("*.mp4")), [])
@@ -104,8 +104,8 @@ class TestBrollAndThumbnail(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             response = MagicMock(status_code=200)
             response.iter_content.return_value = [b"x" * 20000]
-            with patch("src.broll_manager.requests.get", return_value=response) as get_request, \
-                 patch("src.broll_manager.subprocess.run", return_value=MagicMock(returncode=0, stdout="video\n")):
+            with patch("v1.broll_manager.requests.get", return_value=response) as get_request, \
+                 patch("v1.broll_manager.subprocess.run", return_value=MagicMock(returncode=0, stdout="video\n")):
                 result = download_broll_clip("https://example.com/clip.mp4", "money", Path(tmpdir))
                 self.assertIsNotNone(result)
                 self.assertEqual(list(Path(tmpdir).glob("*.part")), [])
@@ -113,8 +113,8 @@ class TestBrollAndThumbnail(unittest.TestCase):
                 self.assertEqual(cached, result)
                 get_request.assert_called_once()
 
-    @patch("src.broll_manager.search_pexels_broll")
-    @patch("src.broll_manager.download_broll_clip")
+    @patch("v1.broll_manager.search_pexels_broll")
+    @patch("v1.broll_manager.download_broll_clip")
     def test_find_broll_cues_for_clip(self, mock_download, mock_search):
         """B-roll cues should match finance keywords within safe time bounds."""
         mock_search.return_value = [{"video_files": [{"file_type": "video/mp4", "height": 1920, "width": 1080, "link": "https://example.com/test.mp4"}]}]
@@ -128,8 +128,8 @@ class TestBrollAndThumbnail(unittest.TestCase):
             WordTimestamp(word="money", start=6.0, end=6.5),
             WordTimestamp(word="today", start=7.0, end=7.5)
         ]
-        with patch("src.broll_manager.ENABLE_BROLL", True), \
-             patch("src.broll_manager.PEXELS_API_KEY", "test-key"), \
+        with patch("v1.broll_manager.ENABLE_BROLL", True), \
+             patch("v1.broll_manager.PEXELS_API_KEY", "test-key"), \
              patch.object(Path, "exists", return_value=True):
             cues = find_broll_cues_for_clip(words, clip_duration=30.0, max_brolls=1)
             self.assertEqual(len(cues), 1)
@@ -138,8 +138,8 @@ class TestBrollAndThumbnail(unittest.TestCase):
 
     def test_video_filtergraph_with_cover_overlay(self):
         """Filtergraph should properly overlay 0.25s cover thumbnail frame."""
-        from src.video_editor import build_video_filtergraph
-        from src.face_tracker import FramingDecision
+        from core.video_editor import build_video_filtergraph
+        from core.face_tracker import FramingDecision
 
         framing = FramingDecision(mode="single_smooth", face_count=1, smoothed_center_x=960)
         fg = build_video_filtergraph(
@@ -152,8 +152,8 @@ class TestBrollAndThumbnail(unittest.TestCase):
         self.assertIn("overlay=enable='between(t,0,0.25)'[outv]", fg)
 
     def test_broll_filtergraph_uses_finite_source_window(self):
-        from src.video_editor import build_video_filtergraph
-        from src.face_tracker import FramingDecision
+        from core.video_editor import build_video_filtergraph
+        from core.face_tracker import FramingDecision
 
         framing = FramingDecision(mode="single_smooth", face_count=1, smoothed_center_x=960)
         fg = build_video_filtergraph(
@@ -170,8 +170,8 @@ class TestBrollAndThumbnail(unittest.TestCase):
     def test_render_bounds_output_and_builds_broll_input(self):
         import tempfile
         from unittest.mock import MagicMock, patch
-        from src.face_tracker import FramingDecision
-        from src.video_editor import render_viral_clip
+        from core.face_tracker import FramingDecision
+        from core.video_editor import render_viral_clip
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
@@ -188,9 +188,9 @@ class TestBrollAndThumbnail(unittest.TestCase):
                 return result
 
             with patch("subprocess.run", side_effect=fake_run) as mock_run, \
-                 patch("src.video_editor._measure_loudness", return_value=fake_loudness_measurement()), \
-                 patch("src.video_editor._apply_measured_loudness", side_effect=copy_normalized_output), \
-                 patch("src.video_editor._validate_rendered_output"):
+                 patch("core.video_editor._measure_loudness", return_value=fake_loudness_measurement()), \
+                 patch("core.video_editor._apply_measured_loudness", side_effect=copy_normalized_output), \
+                 patch("core.video_editor._validate_rendered_output"):
                 render_viral_clip(
                     source_video_path=source_path,
                     start_time=0.0,
@@ -226,7 +226,7 @@ class TestBrollAndThumbnail(unittest.TestCase):
             self.assertIn("between(t,0.25,0.75)", filter_graph)
 
     def test_measured_loudnorm_filter_contains_measurements(self):
-        from src.video_editor import _measured_loudnorm_filter
+        from core.video_editor import _measured_loudnorm_filter
 
         measured = fake_loudness_measurement()
         filter_text = _measured_loudnorm_filter(measured)
@@ -237,8 +237,8 @@ class TestBrollAndThumbnail(unittest.TestCase):
     def test_render_rejects_underlength_source_duration(self):
         import tempfile
         from unittest.mock import MagicMock, patch
-        from src.face_tracker import FramingDecision
-        from src.video_editor import render_viral_clip
+        from core.face_tracker import FramingDecision
+        from core.video_editor import render_viral_clip
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
@@ -273,8 +273,8 @@ class TestBrollAndThumbnail(unittest.TestCase):
     def test_render_adds_silent_voice_bed_for_confirmed_no_audio(self):
         import tempfile
         from unittest.mock import MagicMock, patch
-        from src.face_tracker import FramingDecision
-        from src.video_editor import render_viral_clip
+        from core.face_tracker import FramingDecision
+        from core.video_editor import render_viral_clip
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
@@ -289,9 +289,9 @@ class TestBrollAndThumbnail(unittest.TestCase):
                 return MagicMock(returncode=0, stdout="", stderr="")
 
             with patch("subprocess.run", side_effect=fake_run) as mock_run, \
-                 patch("src.video_editor._measure_loudness", return_value=fake_loudness_measurement()), \
-                 patch("src.video_editor._apply_measured_loudness", side_effect=copy_normalized_output), \
-                 patch("src.video_editor._validate_rendered_output"):
+                 patch("core.video_editor._measure_loudness", return_value=fake_loudness_measurement()), \
+                 patch("core.video_editor._apply_measured_loudness", side_effect=copy_normalized_output), \
+                 patch("core.video_editor._validate_rendered_output"):
                 render_viral_clip(
                     source_video_path=source_path,
                     start_time=0.0,
@@ -322,8 +322,8 @@ class TestBrollAndThumbnail(unittest.TestCase):
     def test_render_fails_when_audio_probe_cannot_classify_source(self):
         import tempfile
         from unittest.mock import MagicMock, patch
-        from src.face_tracker import FramingDecision
-        from src.video_editor import render_viral_clip
+        from core.face_tracker import FramingDecision
+        from core.video_editor import render_viral_clip
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
@@ -362,7 +362,7 @@ class TestBrollAndThumbnail(unittest.TestCase):
 
     def test_calculate_smart_title_y_high_face_uses_chest(self):
         """When face is in upper part of frame, title should sit on chest below chin."""
-        from src.face_tracker import FaceBox
+        from core.face_tracker import FaceBox
         face = FaceBox(x=300, y=350, w=400, h=450, center_x=500, center_y=575)
         y = calculate_smart_title_y([face], total_text_h=184)
         chin_bottom = 350 + 450 + int(450 * 0.15)  # 867
@@ -371,7 +371,7 @@ class TestBrollAndThumbnail(unittest.TestCase):
 
     def test_calculate_smart_title_y_low_face_uses_headroom(self):
         """When face is in lower part of frame, title should sit in headroom above skull."""
-        from src.face_tracker import FaceBox
+        from core.face_tracker import FaceBox
         face = FaceBox(x=300, y=1100, w=400, h=450, center_x=500, center_y=1325)
         y = calculate_smart_title_y([face], total_text_h=184)
         head_top = 1100 - int(450 * 0.35)  # 943

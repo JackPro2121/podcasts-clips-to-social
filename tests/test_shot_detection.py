@@ -12,14 +12,14 @@ import unittest
 from unittest import mock
 import numpy as np
 
-from src.shot_detection import (
+from core.shot_detection import (
     ShotBoundaryResult,
     TransNetV2Detector,
     detect_shot_boundaries,
     normalise_shots,
     reset_shot_detector_cache,
 )
-from src import scene_classifier
+from core import scene_classifier
 
 
 class TestNormaliseShots(unittest.TestCase):
@@ -65,7 +65,7 @@ class TestTransNetV2Detector(unittest.TestCase):
     def test_try_create_returns_none_when_weights_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             missing_model = Path(tmp_dir) / "non_existent.onnx"
-            with mock.patch("src.shot_detection.TRANSNET_MODEL_PATH", str(missing_model)):
+            with mock.patch("core.shot_detection.TRANSNET_MODEL_PATH", str(missing_model)):
                 detector = TransNetV2Detector.try_create(fps=30.0)
                 self.assertIsNone(detector)
 
@@ -133,8 +133,8 @@ class TestDetectShotBoundaries(unittest.TestCase):
             dummy_video = Path(tmp_dir) / "dummy.mp4"
             dummy_video.write_bytes(b"dummy")
 
-            with mock.patch("src.shot_detection.TRANSNET_MODEL_PATH", str(Path(tmp_dir) / "absent.onnx")):
-                with mock.patch("src.shot_detection._detect_with_pyscenedetect") as mock_psd:
+            with mock.patch("core.shot_detection.TRANSNET_MODEL_PATH", str(Path(tmp_dir) / "absent.onnx")):
+                with mock.patch("core.shot_detection._detect_with_pyscenedetect") as mock_psd:
                     mock_psd.return_value = ([(0.0, 5.0)], "scenedetect")
                     result = detect_shot_boundaries(dummy_video, 0.0, 5.0)
                     self.assertIsInstance(result, ShotBoundaryResult)
@@ -146,7 +146,7 @@ class TestDetectShotBoundaries(unittest.TestCase):
             dummy_video = Path(tmp_dir) / "dummy.mp4"
             dummy_video.write_bytes(b"dummy")
 
-            with mock.patch("src.shot_detection.detect_shot_boundaries") as mock_det:
+            with mock.patch("core.shot_detection.detect_shot_boundaries") as mock_det:
                 mock_det.return_value = ShotBoundaryResult(
                     shots=[(0.0, 3.0), (3.0, 6.0)],
                     source="transnetv2",

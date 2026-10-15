@@ -1,8 +1,8 @@
 import unittest
 from pathlib import Path
-from src.config import TARGET_LUFS, OUTPUT_WIDTH, OUTPUT_HEIGHT
-from src.downloader import extract_youtube_id, _AUDIO_EN_PREF, _HD_FORMAT, _ANY_FORMAT, _FAILSAFE_FORMAT
-from src.transcriber import (
+from core.config import TARGET_LUFS, OUTPUT_WIDTH, OUTPUT_HEIGHT
+from core.downloader import extract_youtube_id, _AUDIO_EN_PREF, _HD_FORMAT, _ANY_FORMAT, _FAILSAFE_FORMAT
+from core.transcriber import (
     is_english_language_code,
     looks_like_english_text,
     parse_native_transcript,
@@ -10,9 +10,9 @@ from src.transcriber import (
     WordTimestamp,
     verify_audio_language,
 )
-from src.viral_detector import fallback_rule_based_detector, parse_clips_json
-from src.face_tracker import FramingDecision
-from src.subtitle_generator import (
+from core.viral_detector import fallback_rule_based_detector, parse_clips_json
+from core.face_tracker import FramingDecision
+from core.subtitle_generator import (
     format_ass_timestamp,
     generate_ass_header,
     create_styled_ass_subtitles,
@@ -20,7 +20,7 @@ from src.subtitle_generator import (
     escape_ass_text,
     sanitize_watermark
 )
-from src.video_editor import (
+from core.video_editor import (
     build_video_filtergraph,
     build_audio_filtergraph,
     sanitize_ffmpeg_path,
@@ -64,7 +64,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertIn(_AUDIO_EN_PREF, _FAILSAFE_FORMAT)
 
     def test_language_verification_rejects_confident_foreign_audio_despite_english_transcript(self):
-        from src import transcriber
+        from core import transcriber
         transcriber._WHISPER_MODELS.clear()
         with unittest.mock.patch("faster_whisper.WhisperModel") as mock_model_cls:
             mock_instance = unittest.mock.MagicMock()
@@ -86,10 +86,10 @@ class TestPodcastClipperPipeline(unittest.TestCase):
 
     def test_fallback_to_english_audio_track(self):
         from unittest import mock
-        from src.downloader import try_fallback_english_audio
-        with mock.patch("src.downloader.fetch_english_audio_segment") as mock_fetch, \
-             mock.patch("src.downloader.remux_video_with_audio") as mock_remux, \
-             mock.patch("src.transcriber.verify_audio_language") as mock_verify:
+        from core.downloader import try_fallback_english_audio
+        with mock.patch("core.downloader.fetch_english_audio_segment") as mock_fetch, \
+             mock.patch("core.downloader.remux_video_with_audio") as mock_remux, \
+             mock.patch("core.transcriber.verify_audio_language") as mock_verify:
             mock_fetch.return_value = Path("audio_en.m4a")
             mock_remux.return_value = True
             mock_verify.return_value = "en"
@@ -168,7 +168,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
 
     def test_buffer_results_preserve_partial_dispatch(self):
         from unittest.mock import patch, MagicMock
-        from src.buffer_client import BufferClient
+        from v1.buffer_client import BufferClient
 
         success = MagicMock(status_code=200)
         success.json.return_value = {"data": {"createPost": {"post": {"id": "post-1"}}}}
@@ -176,9 +176,9 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         failure.json.return_value = {"data": {"createPost": {"message": "rejected"}}}
 
         with patch(
-            "src.buffer_client.BufferClient.get_channels",
+            "v1.buffer_client.BufferClient.get_channels",
             return_value=[{"id": "a", "service": "youtube"}, {"id": "b", "service": "youtube"}],
-        ), patch("src.buffer_client.requests.post", side_effect=[success, failure]):
+        ), patch("v1.buffer_client.requests.post", side_effect=[success, failure]):
             results = BufferClient("token").schedule_video_post(
                 "https://example.com/video.mp4",
                 "caption",
@@ -191,7 +191,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
 
     def test_buffer_channel_query_uses_organization_id_scalar(self):
         from unittest.mock import MagicMock, patch
-        from src.buffer_client import BufferClient
+        from v1.buffer_client import BufferClient
 
         org_response = MagicMock(status_code=200)
         org_response.json.return_value = {
@@ -202,7 +202,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
             "data": {"channels": [{"id": "channel-1", "name": "TikTok", "service": "tiktok"}]}
         }
 
-        with patch("src.buffer_client.requests.post", side_effect=[org_response, channel_response]) as post:
+        with patch("v1.buffer_client.requests.post", side_effect=[org_response, channel_response]) as post:
             channels = BufferClient("token").get_channels()
 
         self.assertEqual(channels[0]["service"], "tiktok")
@@ -230,7 +230,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertEqual(format_ass_timestamp(3661.5), "1:01:01.50")
 
     def test_clip_window_extends_to_sentence_boundaries(self):
-        from src.viral_detector import _normalize_clip_window
+        from core.viral_detector import _normalize_clip_window
 
         segments = [
             TranscriptSegment(
@@ -252,7 +252,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertEqual(_normalize_clip_window(20.5, 55.5, segments), (20.0, 56.2))
 
     def test_clip_window_rejects_incomplete_endpoint_without_sentence_boundary(self):
-        from src.viral_detector import _normalize_clip_window
+        from core.viral_detector import _normalize_clip_window
 
         segments = [
             TranscriptSegment(
@@ -269,7 +269,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertIsNone(_normalize_clip_window(0.0, 40.0, segments))
 
     def test_clip_window_repairs_incomplete_endpoint_to_next_sentence(self):
-        from src.viral_detector import _normalize_clip_window
+        from core.viral_detector import _normalize_clip_window
 
         segments = [
             TranscriptSegment(
@@ -433,7 +433,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
 
     def test_local_transcript_alignment_replaces_estimated_timing(self):
         from unittest.mock import patch
-        from src.transcriber import align_clip_transcript
+        from core.transcriber import align_clip_transcript
 
         fallback = [
             TranscriptSegment(
@@ -454,7 +454,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
                 ],
             )
         ]
-        with patch("src.transcriber.transcribe_audio_whisper", return_value=aligned) as transcribe:
+        with patch("core.transcriber.transcribe_audio_whisper", return_value=aligned) as transcribe:
             result = align_clip_transcript(
                 clip_path=Path("clip.mp4"),
                 render_start=0.5,
@@ -584,7 +584,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
     def test_scene_classifier_document_detection(self):
         import numpy as np
         import cv2
-        from src.scene_classifier import detect_slide_heuristics, classify_frame_scene
+        from core.scene_classifier import detect_slide_heuristics, classify_frame_scene
 
         # Create synthetic document frame (white background with text lines)
         doc_frame = np.ones((720, 1280, 3), dtype=np.uint8) * 245
@@ -599,7 +599,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertTrue(scene_info["is_presentation"])
 
     def test_multi_shot_dynamic_filtergraph(self):
-        from src.face_tracker import ShotPlan
+        from core.face_tracker import ShotPlan
         shots = [
             ShotPlan(start=0.0, end=5.0, mode="presentation_slide", margin_v=420),
             ShotPlan(start=5.0, end=12.0, mode="portrait_face", crop_x=650, margin_v=220),
@@ -622,7 +622,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertIn("setsar=1:1", fg)
 
     def test_dynamic_shot_subtitles_margin(self):
-        from src.face_tracker import ShotPlan
+        from core.face_tracker import ShotPlan
         words = [
             WordTimestamp(word="Slide", start=2.0, end=2.5),
             WordTimestamp(word="Speaker", start=6.0, end=6.5),
@@ -648,7 +648,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
             created.unlink()
 
     def test_dynamic_split_shot_uses_divider_alignment(self):
-        from src.face_tracker import ShotPlan
+        from core.face_tracker import ShotPlan
         words = [WordTimestamp(word="Both", start=2.0, end=2.5)]
         seg = TranscriptSegment(start=2.0, end=3.0, text="Both", words=words)
         shot = ShotPlan(
@@ -679,7 +679,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
         self.assertNotIn("C:/", sanitized)
 
     def test_ytdlp_client_variants_order(self):
-        from src.downloader import _ytdlp_client_variants
+        from core.downloader import _ytdlp_client_variants
         variants = _ytdlp_client_variants()
         labels = [v[0] for v in variants]
         self.assertIn("android_vr", labels)
@@ -689,7 +689,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
 
     def test_cobalt_downloader_mock_success(self):
         from unittest.mock import patch, MagicMock
-        from src.downloader import download_via_cobalt
+        from core.downloader import download_via_cobalt
         import tempfile
 
         fake_post_response = MagicMock()
@@ -709,8 +709,8 @@ class TestPodcastClipperPipeline(unittest.TestCase):
             out_dir = Path(tmpdir)
             with patch("requests.post", return_value=fake_post_response), \
                  patch("requests.get", return_value=fake_stream_response), \
-                 patch("src.downloader.get_video_height", return_value=1080), \
-                 patch("src.downloader.get_video_duration", return_value=45.0):
+                 patch("core.downloader.get_video_height", return_value=1080), \
+                 patch("core.downloader.get_video_duration", return_value=45.0):
                 res = download_via_cobalt("https://www.youtube.com/watch?v=dQw4w9WgXcQ", out_dir)
                 self.assertIsNotNone(res)
                 self.assertEqual(res["height"], 1080)
@@ -718,31 +718,31 @@ class TestPodcastClipperPipeline(unittest.TestCase):
                 self.assertTrue(res["video_path"].exists())
 
     def test_get_video_duration_fallback(self):
-        from src.downloader import get_video_duration
+        from core.downloader import get_video_duration
         dur = get_video_duration(Path("non_existent_file.mp4"))
         self.assertEqual(dur, 0.0)
 
     def test_fetch_transcript_only_returns_none_on_bad_url(self):
         """fetch_transcript_only must return None gracefully for non-YouTube inputs."""
-        from src.downloader import fetch_transcript_only
+        from core.downloader import fetch_transcript_only
         result = fetch_transcript_only("https://example.com/not-a-youtube-url")
         self.assertIsNone(result)
 
     def test_fetch_transcript_only_returns_none_when_no_captions(self):
         """fetch_transcript_only must return None when youtube_transcript_api finds nothing."""
         from unittest.mock import patch
-        from src.downloader import fetch_transcript_only
-        with patch("src.downloader.fetch_youtube_transcript", return_value=None), \
-             patch("src.transcriber.fetch_transcript_chocodata", return_value=None):
+        from core.downloader import fetch_transcript_only
+        with patch("core.downloader.fetch_youtube_transcript", return_value=None), \
+             patch("core.transcriber.fetch_transcript_chocodata", return_value=None):
             result = fetch_transcript_only("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
         self.assertIsNone(result)
 
     def test_fetch_transcript_only_success(self):
         """fetch_transcript_only must return video_id + transcript on success."""
         from unittest.mock import patch
-        from src.downloader import fetch_transcript_only
+        from core.downloader import fetch_transcript_only
         fake_transcript = [{"text": "Hello world", "start": 0.0, "duration": 2.0}]
-        with patch("src.downloader.fetch_youtube_transcript", return_value=fake_transcript):
+        with patch("core.downloader.fetch_youtube_transcript", return_value=fake_transcript):
             result = fetch_transcript_only("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
         self.assertIsNotNone(result)
         self.assertEqual(result["video_id"], "dQw4w9WgXcQ")
@@ -750,10 +750,10 @@ class TestPodcastClipperPipeline(unittest.TestCase):
 
     def test_fetch_transcript_only_uses_apify_when_native_captions_missing(self):
         from unittest.mock import patch
-        from src.downloader import fetch_transcript_only
+        from core.downloader import fetch_transcript_only
         fallback = [{"text": "Timed fallback", "start": 0.0, "duration": 2.0}]
-        with patch("src.downloader.fetch_youtube_transcript", return_value=None), \
-             patch("src.downloader.fetch_transcript_via_apify", return_value=fallback) as apify:
+        with patch("core.downloader.fetch_youtube_transcript", return_value=None), \
+             patch("core.downloader.fetch_transcript_via_apify", return_value=fallback) as apify:
             result = fetch_transcript_only(
                 "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
                 allow_apify_fallback=True,
@@ -764,7 +764,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
     def test_download_clip_segment_permanent_error_returns_none(self):
         """download_clip_segment must return None cleanly on a permanent video error."""
         from unittest.mock import patch
-        from src.downloader import download_clip_segment
+        from core.downloader import download_clip_segment
         import tempfile
 
         perm_exc = Exception("video unavailable")
@@ -772,7 +772,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
             # Keep test isolation: a developer .env with a live Apify token
             # let the Apify strategy make a REAL download and return a dict,
             # so the yt-dlp permanent-error path under test never ran.
-            with patch("src.downloader.APIFY_API_TOKEN", None), \
+            with patch("core.downloader.APIFY_API_TOKEN", None), \
                  patch("yt_dlp.YoutubeDL") as MockYDL:
                 instance = MockYDL.return_value.__enter__.return_value
                 instance.extract_info.side_effect = perm_exc
@@ -788,7 +788,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
     def test_download_clip_segment_segment_start_always_zero(self):
         """Returned dict from download_clip_segment must have segment_start=0.0."""
         from unittest.mock import patch
-        from src.downloader import download_clip_segment
+        from core.downloader import download_clip_segment
         import tempfile
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -798,8 +798,8 @@ class TestPodcastClipperPipeline(unittest.TestCase):
             dummy_mp4.write_bytes(b"\x00" * (600 * 1024))  # 600 KB stub
 
             with patch("yt_dlp.YoutubeDL") as MockYDL, \
-                 patch("src.downloader.get_video_height", return_value=1080), \
-                 patch("src.downloader.get_video_duration", return_value=60.0):
+                 patch("core.downloader.get_video_height", return_value=1080), \
+                 patch("core.downloader.get_video_duration", return_value=60.0):
                 instance = MockYDL.return_value.__enter__.return_value
                 instance.extract_info.return_value = {"id": "dQw4w9WgXcQ"}
                 result = download_clip_segment(
@@ -815,7 +815,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
 
     def test_top_hook_badge_generation(self):
         """Top hook retention capsule badge must be generated in safe-zone without emojis."""
-        from src.config import HOOK_BADGE_MARGIN_V
+        from core.config import HOOK_BADGE_MARGIN_V
         words = [
             WordTimestamp(word="I", start=0.0, end=0.2),
             WordTimestamp(word="Lost", start=0.2, end=0.5),
@@ -879,8 +879,8 @@ class TestPodcastClipperPipeline(unittest.TestCase):
     def test_render_viral_clip_with_sfx_and_ducking(self):
         """render_viral_clip must assemble sidechain compressor and adelay for SFX."""
         from unittest.mock import patch, MagicMock
-        from src.face_tracker import FramingDecision
-        from src.video_editor import render_viral_clip
+        from core.face_tracker import FramingDecision
+        from core.video_editor import render_viral_clip
 
         measurement = {
             "input_i": -14.0,
@@ -894,9 +894,9 @@ class TestPodcastClipperPipeline(unittest.TestCase):
             Path(destination_path).write_bytes(Path(source_path).read_bytes())
 
         with patch("subprocess.run") as mock_run, \
-             patch("src.video_editor._measure_loudness", return_value=measurement), \
-             patch("src.video_editor._apply_measured_loudness", side_effect=copy_normalized_output), \
-             patch("src.video_editor._validate_rendered_output"):
+             patch("core.video_editor._measure_loudness", return_value=measurement), \
+             patch("core.video_editor._apply_measured_loudness", side_effect=copy_normalized_output), \
+             patch("core.video_editor._validate_rendered_output"):
             mock_res = MagicMock()
             mock_res.returncode = 0
             mock_res.stdout = "audio"
@@ -952,8 +952,8 @@ class TestPodcastClipperPipeline(unittest.TestCase):
 
     def test_whisper_probe_uses_clip_local_framing_range(self):
         from unittest.mock import patch
-        from src.viral_detector import ViralClipCandidate
-        import main
+        from core.viral_detector import ViralClipCandidate
+        import v1.main as main
         import tempfile
 
         moment = ViralClipCandidate(
@@ -999,7 +999,7 @@ class TestPodcastClipperPipeline(unittest.TestCase):
                      patch.object(main, "generate_clip_thumbnail", return_value=None), \
                      patch.object(main, "render_viral_clip", return_value=str(clip_path)), \
                      patch.object(main, "upload_clip_to_github_release", return_value=None), \
-                     patch("src.release_cleaner.clean_old_releases"), \
+                     patch("v1.release_cleaner.clean_old_releases"), \
                      patch.object(main, "record_history"), \
                      patch.object(main, "SlackNotifier"):
                     main.run_pipeline(

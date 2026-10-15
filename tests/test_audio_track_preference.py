@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import unittest
 
-from src import downloader
+from core import downloader
 
 try:
     from yt_dlp.utils import match_filter_func

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.verification import fixtures, geometry, motion, probe
+from core.verification import fixtures, geometry, motion, probe
 
 
 def _frame(width: int, height: int, box: tuple[int, int, int, int], fill: int = 180) -> list:
@@ -583,7 +583,7 @@ class TestCaptionOnFace(unittest.TestCase):
             self.skipTest(fixtures.fetch_hint())
 
     def test_broke_clip_captions_must_clear_the_face(self) -> None:
-        from src.verification import captions, faces, verdict
+        from core.verification import captions, faces, verdict
 
         master = fixtures.by_id("broke_1")
         self.assertIsNotNone(master)
@@ -612,7 +612,7 @@ class TestCaptionOnFace(unittest.TestCase):
 
     def test_disney_clip_captions_are_clear_of_the_face(self) -> None:
         """The negative control: a low number must be achievable, or the gate is noise."""
-        from src.verification import captions, faces
+        from core.verification import captions, faces
 
         master = fixtures.by_id("disney_2")
         self.assertIsNotNone(master)
@@ -640,7 +640,7 @@ class TestUpperFaceBandL1(unittest.TestCase):
     """
 
     def test_upper_band_is_much_smaller_than_the_whole_face(self) -> None:
-        from src.verification import faces
+        from core.verification import faces
 
         box = faces.FaceBox(x=182.8, y=9.8, width=407.7, height=303.5, score=0.9)
         upper = box.upper_face()
@@ -650,7 +650,7 @@ class TestUpperFaceBandL1(unittest.TestCase):
         self.assertAlmostEqual(upper[3], box.height * 0.55, places=3)
 
     def test_upper_band_keeps_the_eye_line(self) -> None:
-        from src.verification import faces
+        from core.verification import faces
 
         # Eyes sit at roughly 40% of face height from the top.
         box = faces.FaceBox(x=0.0, y=100.0, width=200.0, height=300.0, score=0.9)
@@ -660,7 +660,7 @@ class TestUpperFaceBandL1(unittest.TestCase):
         self.assertGreaterEqual(y + h, eye_line)
 
     def test_avoid_rects_defaults_to_upper_only(self) -> None:
-        from src.verification import faces
+        from core.verification import faces
 
         report = faces.FaceReport(detector="test", samples=1, frames_with_faces=1)
         report.boxes = [faces.FaceBox(x=100.0, y=50.0, width=200.0, height=200.0, score=0.9)]
@@ -685,7 +685,7 @@ class TestSwayCalibrationAgainstHumans(unittest.TestCase):
             self.skipTest(fixtures.fetch_hint())
 
     def test_human_accepted_clips_never_block_on_sway(self) -> None:
-        from src.verification import sway
+        from core.verification import sway
 
         checked = 0
         for master in fixtures.available():
@@ -709,7 +709,7 @@ class TestSwayCalibrationAgainstHumans(unittest.TestCase):
         self.assertGreaterEqual(checked, 4, "expected the four human-PASS golden masters")
 
     def test_gross_sway_defect_still_blocks(self) -> None:
-        from src.verification import sway
+        from core.verification import sway
 
         master = fixtures.by_id("sixty_k_1")
         self.assertIsNotNone(master, "sixty_k_1 fixture is required for this pin")

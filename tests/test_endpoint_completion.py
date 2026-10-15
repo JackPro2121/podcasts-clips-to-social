@@ -16,19 +16,19 @@ import unittest
 from contextlib import redirect_stdout
 from types import SimpleNamespace
 
-from src.creative_spec import (
+from core.creative_spec import (
     DURATION_QUANTIZATION_MARGIN_S,
     MAX_CLIP_DURATION_S,
     MIN_CLIP_DURATION_S,
 )
-from src.endpoint import (
+from core.endpoint import (
     EndpointResolution,
     endpoint_is_complete,
     resolve_endpoint,
     word_boundary_ends,
 )
-from src.transcriber import TranscriptSegment, WordTimestamp
-from src.universal_editor import _endpoint_warnings
+from core.transcriber import TranscriptSegment, WordTimestamp
+from v1.universal_editor import _endpoint_warnings
 
 
 def _seg(start, end, text, spec):
@@ -208,7 +208,7 @@ class TestResolveEndpoint(unittest.TestCase):
 
 class TestMomentRepair(unittest.TestCase):
     def test_run_reproduction_ends_at_the_sentence_not_the_magic_clamp(self):
-        import main
+        import v1.main as main
 
         segments = _run_case_segments()
         moment = SimpleNamespace(start_time=71.76, end_time=123.5, duration=51.74)
@@ -221,7 +221,7 @@ class TestMomentRepair(unittest.TestCase):
         self.assertIn("Extended", buffer.getvalue())
 
     def test_gap_boundary_endpoint_is_not_moved_and_not_claimed(self):
-        import main
+        import v1.main as main
 
         segments = [
             _seg(
@@ -242,7 +242,7 @@ class TestMomentRepair(unittest.TestCase):
         self.assertNotIn("Extended", buffer.getvalue())
 
     def test_incomplete_endpoint_is_reported_honestly(self):
-        import main
+        import v1.main as main
 
         segments = [
             _seg(

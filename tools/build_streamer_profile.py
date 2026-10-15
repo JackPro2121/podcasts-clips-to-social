@@ -22,7 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.streamers.face_tracker import MODELS_DIR, SFACE_PATH, YUNET_PATH, StreamerIdentityTracker
+from v2.streamers.face_tracker import MODELS_DIR, SFACE_PATH, YUNET_PATH, StreamerIdentityTracker
 
 PROFILES_DIR = MODELS_DIR / "streamer_profiles"
 PROFILES_DIR.mkdir(parents=True, exist_ok=True)

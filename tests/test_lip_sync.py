@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from src.verification import lip_sync
+from core.verification import lip_sync
 
 
 class TestQualityBands(unittest.TestCase):

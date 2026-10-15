@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import unittest
 
-from src.edit_cues import plan_broll_cues, plan_cut_whooshes
-from src.jump_cutter import build_cut_plan
+from v1.edit_cues import plan_broll_cues, plan_cut_whooshes
+from core.jump_cutter import build_cut_plan
 
 
 class TestPlanBrollCues(unittest.TestCase):

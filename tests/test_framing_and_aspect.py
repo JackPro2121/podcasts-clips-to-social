@@ -5,22 +5,22 @@ import cv2
 import tempfile
 import os
 from pathlib import Path
-from src.face_tracker import (
+from core.face_tracker import (
     ShotPlan, FramingDecision,
     detect_letterbox_margins, analyze_faces_in_clip
 )
-from src.config import HOOK_BADGE_MARGIN_V
-from src.video_editor import build_video_filtergraph
+from core.config import HOOK_BADGE_MARGIN_V
+from core.video_editor import build_video_filtergraph
 
 class TestFramingAndAspect(unittest.TestCase):
     def test_frame_window_uses_exclusive_fractional_boundaries(self):
-        from src.face_tracker import _frame_window
+        from core.face_tracker import _frame_window
 
         self.assertEqual(_frame_window(0.05, 1.05, 10.0), (1, 11))
 
     def test_relative_frame_timestamp_prefers_pts(self):
         from unittest.mock import MagicMock
-        from src.face_tracker import _relative_frame_timestamp
+        from core.face_tracker import _relative_frame_timestamp
 
         cap = MagicMock()
         cap.get.return_value = 1050.0
@@ -37,12 +37,12 @@ class TestFramingAndAspect(unittest.TestCase):
     def test_model_download_is_atomic(self):
         import tempfile
         from unittest.mock import MagicMock, patch
-        from src.face_tracker import _download_model_atomically
+        from core.face_tracker import _download_model_atomically
 
         with tempfile.TemporaryDirectory() as tmpdir:
             destination = Path(tmpdir) / "model.onnx"
             response = MagicMock(status_code=200, content=b"x" * 200000)
-            with patch("src.face_tracker.requests.get", return_value=response):
+            with patch("core.face_tracker.requests.get", return_value=response):
                 result = _download_model_atomically("https://example.com/model.onnx", destination, 100000)
             self.assertTrue(result)
             self.assertTrue(destination.exists())
@@ -50,13 +50,13 @@ class TestFramingAndAspect(unittest.TestCase):
 
     def test_scene_analysis_releases_capture_on_empty_read(self):
         from unittest.mock import MagicMock, patch
-        from src.scene_classifier import analyze_clip_presentation_ratio
+        from core.scene_classifier import analyze_clip_presentation_ratio
 
         capture = MagicMock()
         capture.isOpened.return_value = True
         capture.get.return_value = 25.0
         capture.read.return_value = (False, None)
-        with patch("src.scene_classifier.cv2.VideoCapture", return_value=capture):
+        with patch("core.scene_classifier.cv2.VideoCapture", return_value=capture):
             result = analyze_clip_presentation_ratio(Path("unused.mp4"), 0.0, 1.0)
         self.assertEqual(result, 0.0)
         capture.release.assert_called_once()
@@ -164,7 +164,7 @@ class TestFramingAndAspect(unittest.TestCase):
 
     def test_single_dynamic_shot_preserves_shot_plan(self):
         from unittest.mock import patch
-        from src.face_tracker import FaceBox
+        from core.face_tracker import FaceBox
 
         temp_dir = tempfile.mkdtemp()
         vid_path = Path(temp_dir) / "test_single_shot.mp4"
@@ -174,10 +174,10 @@ class TestFramingAndAspect(unittest.TestCase):
         writer.release()
 
         face = FaceBox(x=140, y=70, w=40, h=40, center_x=160, center_y=90)
-        with patch("src.face_tracker.detect_clip_shots", return_value=[(0.0, 1.0)]), \
-             patch("src.face_tracker.get_face_detector", return_value=object()), \
-             patch("src.face_tracker.detect_faces_in_frame", return_value=[face]), \
-             patch("src.face_tracker.classify_frame_scene", return_value={"is_presentation": False}):
+        with patch("core.face_tracker.detect_clip_shots", return_value=[(0.0, 1.0)]), \
+             patch("core.face_tracker.get_face_detector", return_value=object()), \
+             patch("core.face_tracker.detect_faces_in_frame", return_value=[face]), \
+             patch("core.face_tracker.classify_frame_scene", return_value={"is_presentation": False}):
             decision = analyze_faces_in_clip(vid_path, 0.0, 1.0, sample_fps=2.5)
 
         if vid_path.exists():
@@ -193,7 +193,7 @@ class TestFramingAndAspect(unittest.TestCase):
 
     def test_dominant_speaker_branches_return_portrait_shots(self):
         from unittest.mock import patch
-        from src.face_tracker import FaceBox
+        from core.face_tracker import FaceBox
 
         temp_dir = tempfile.mkdtemp()
         vid_path = Path(temp_dir) / "test_dominant_speaker.mp4"
@@ -211,11 +211,11 @@ class TestFramingAndAspect(unittest.TestCase):
                 (20.0, None) if index == dominant_index else (0.0, None)
                 for index in range(6)
             ]
-            with patch("src.face_tracker.detect_clip_shots", return_value=[(0.0, 1.0)]), \
-                 patch("src.face_tracker.get_face_detector", return_value=object()), \
-                 patch("src.face_tracker.detect_faces_in_frame", return_value=faces), \
-                 patch("src.face_tracker.classify_frame_scene", return_value={"is_presentation": False}), \
-                 patch("src.face_tracker._estimate_mouth_motion", side_effect=motion_values):
+            with patch("core.face_tracker.detect_clip_shots", return_value=[(0.0, 1.0)]), \
+                 patch("core.face_tracker.get_face_detector", return_value=object()), \
+                 patch("core.face_tracker.detect_faces_in_frame", return_value=faces), \
+                 patch("core.face_tracker.classify_frame_scene", return_value={"is_presentation": False}), \
+                 patch("core.face_tracker._estimate_mouth_motion", side_effect=motion_values):
                 decision = analyze_faces_in_clip(vid_path, 0.0, 1.0, sample_fps=2.5)
             self.assertIn(decision.mode, ("single_smooth", "multi_shot_dynamic"))
             if decision.mode == "multi_shot_dynamic":
@@ -231,9 +231,9 @@ class TestFramingAndAspect(unittest.TestCase):
 
     def test_manual_framing_uses_probed_dimensions(self):
         from unittest.mock import patch
-        import main
+        import v1.main as main
 
-        with patch("main.get_video_dimensions", return_value=(321, 241)):
+        with patch("v1.main.get_video_dimensions", return_value=(321, 241)):
             split = main._manual_framing(Path("unused.mp4"), "split")
             crop = main._manual_framing(Path("unused.mp4"), "crop")
             blur = main._manual_framing(Path("unused.mp4"), "blur_stack")
@@ -246,12 +246,12 @@ class TestFramingAndAspect(unittest.TestCase):
         self.assertEqual((blur.active_w, blur.active_h), (321, 241))
 
     def test_slide_layout_with_person_uses_visual_scene_mode(self):
-        from src.face_tracker import _is_visual_layout_scene
+        from core.face_tracker import _is_visual_layout_scene
 
         self.assertTrue(_is_visual_layout_scene({"is_presentation": False, "has_slide_layout": True}))
 
     def test_unstable_face_timeline_disables_panning(self):
-        from src.face_tracker import _stable_face_timeline
+        from core.face_tracker import _stable_face_timeline
 
         timeline = [
             (0.0, 578), (0.4, 600), (0.8, 700), (1.2, 700),
@@ -262,15 +262,15 @@ class TestFramingAndAspect(unittest.TestCase):
         self.assertEqual(_stable_face_timeline(timeline, 1080), [])
 
     def test_smooth_monotonic_face_timeline_is_preserved(self):
-        from src.face_tracker import _stable_face_timeline
+        from core.face_tracker import _stable_face_timeline
 
         timeline = [(0.0, 900), (0.4, 950), (0.8, 1000), (1.2, 1050)]
 
         self.assertEqual(len(_stable_face_timeline(timeline, 1920)), 4)
 
     def test_complete_transcript_endpoint_extends_moment(self):
-        import main
-        from src.transcriber import TranscriptSegment
+        import v1.main as main
+        from core.transcriber import TranscriptSegment
 
         moment = SimpleNamespace(start_time=10.0, end_time=40.0, duration=30.0)
         segments = [

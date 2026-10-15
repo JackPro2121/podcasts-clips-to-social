@@ -66,4 +66,4 @@ jobs:
           if [ "$INPUT_DRY_RUN" = "true" ]; then
             args+=(--dry-run)
           fi
-          python -m src.release_cleaner "${args[@]}"
+          python -m v1.release_cleaner "${args[@]}"

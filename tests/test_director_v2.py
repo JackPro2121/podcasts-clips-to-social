@@ -18,13 +18,13 @@ from unittest import mock
 
 import numpy as np
 
-from src import director_v2
-from src.composition_planner import (
+from v1 import director_v2
+from v1.composition_planner import (
     CaptionPlacement,
     NormalizedRect,
     build_caption_placements,
 )
-from src.director_v2 import (
+from v1.director_v2 import (
     DIRECTOR_CAPTION_ANCHORS,
     DIRECTOR_LAYOUTS,
     ShotDirective,
@@ -35,9 +35,9 @@ from src.director_v2 import (
     parse_shot_directives,
     plan_shot_directives,
 )
-from src.face_tracker import FramingDecision, ShotPlan
-from src.source_index import SourceIndex, SourceMediaInfo
-from src.transcriber import TranscriptSegment
+from core.face_tracker import FramingDecision, ShotPlan
+from v1.source_index import SourceIndex, SourceMediaInfo
+from core.transcriber import TranscriptSegment
 
 BOX_A = (100, 100, 200, 200)
 BOX_B = (1400, 100, 200, 200)
@@ -405,7 +405,7 @@ class TestApplyShotDirectives(unittest.TestCase):
 
 class TestApplyCaptionDirectives(unittest.TestCase):
     def _plan(self, anchor: str = "center"):
-        from src.composition_planner import (
+        from v1.composition_planner import (
             CompositionPlan,
             DEFAULT_SAFE_ZONE,
             ShotComposition,
@@ -473,7 +473,7 @@ class TestApplyCaptionDirectives(unittest.TestCase):
 
 class TestDirectorPrompt(unittest.TestCase):
     def _sheet(self, count: int = 8):
-        from src.director_v2 import ContactSheet
+        from v1.director_v2 import ContactSheet
         return ContactSheet(
             path=Path("sheet.jpg"),
             tiles=[i * 1.5 for i in range(count)],
@@ -538,7 +538,7 @@ class TestDirectorPrompt(unittest.TestCase):
 class TestPlanShotDirectives(unittest.TestCase):
     def test_disabled_by_config_returns_nothing(self):
         # Explicitly disable director-v2 — default changed to True (Pillar 3)
-        with mock.patch("src.config.DIRECTOR_V2_ENABLED", False), \
+        with mock.patch("core.config.DIRECTOR_V2_ENABLED", False), \
              mock.patch.object(director_v2, "build_contact_sheet") as sheet:
             review = plan_shot_directives(
                 video_path=Path("v.mp4"),
@@ -554,11 +554,11 @@ class TestPlanShotDirectives(unittest.TestCase):
         self.assertEqual(review.failure, "disabled_by_config")
 
     def _enable(self):
-        return mock.patch("src.config.DIRECTOR_V2_ENABLED", True)
+        return mock.patch("core.config.DIRECTOR_V2_ENABLED", True)
 
     def test_no_api_key_is_reported_not_raised(self):
         with self._enable(), mock.patch(
-            "src.config.GEMINI_API_KEY", ""
+            "core.config.GEMINI_API_KEY", ""
         ), mock.patch.object(
             director_v2, "build_contact_sheet",
             return_value=director_v2.ContactSheet(
@@ -579,11 +579,11 @@ class TestPlanShotDirectives(unittest.TestCase):
             tile_width=320, tile_height=180,
         )
         with self._enable(), mock.patch(
-            "src.config.GEMINI_API_KEY", "k"
+            "core.config.GEMINI_API_KEY", "k"
         ), mock.patch.object(
             director_v2, "build_contact_sheet", return_value=sheet
         ), mock.patch(
-            "src.viral_detector.query_gemini_models", side_effect=RuntimeError("503")
+            "core.viral_detector.query_gemini_models", side_effect=RuntimeError("503")
         ):
             review = plan_shot_directives(
                 video_path=Path("v.mp4"), source_index=None, segments=[],
@@ -599,11 +599,11 @@ class TestPlanShotDirectives(unittest.TestCase):
         )
         reply = _reply({"start": 0.0, "end": 5.0, "layout": "pip_slide", "keep": True})
         with self._enable(), mock.patch(
-            "src.config.GEMINI_API_KEY", "k"
+            "core.config.GEMINI_API_KEY", "k"
         ), mock.patch.object(
             director_v2, "build_contact_sheet", return_value=sheet
         ), mock.patch(
-            "src.viral_detector.query_gemini_models", return_value=reply
+            "core.viral_detector.query_gemini_models", return_value=reply
         ) as call:
             review = plan_shot_directives(
                 video_path=Path("v.mp4"), source_index=_index(), segments=_segments(),
@@ -620,11 +620,11 @@ class TestPlanShotDirectives(unittest.TestCase):
             tile_width=320, tile_height=180,
         )
         with self._enable(), mock.patch(
-            "src.config.GEMINI_API_KEY", "k"
+            "core.config.GEMINI_API_KEY", "k"
         ), mock.patch.object(
             director_v2, "build_contact_sheet", return_value=sheet
         ), mock.patch(
-            "src.viral_detector.query_gemini_models", return_value="I think it's fine"
+            "core.viral_detector.query_gemini_models", return_value="I think it's fine"
         ):
             review = plan_shot_directives(
                 video_path=Path("v.mp4"), source_index=None, segments=[],
@@ -648,11 +648,11 @@ class TestDirectiveReachesTheRenderer(unittest.TestCase):
     """The point of the phase: a directive must change real filtergraph output."""
 
     def _graph(self, shot: ShotPlan) -> str:
-        from src.video_editor import build_video_filtergraph
+        from core.video_editor import build_video_filtergraph
         return build_video_filtergraph(_framing([shot]))
 
     def test_pip_slide_directive_emits_a_real_pip_chain(self):
-        from src.video_editor import (
+        from core.video_editor import (
             PIP_INSET_WIDTH,
             PIP_INSET_X,
             PIP_SLIDE_CANVAS_RATIO,
@@ -678,7 +678,7 @@ class TestDirectiveReachesTheRenderer(unittest.TestCase):
         self.assertIn(canvas, graph)
 
     def test_presentation_slide_directive_changes_the_chain(self):
-        from src.video_editor import build_video_filtergraph
+        from core.video_editor import build_video_filtergraph
         base = _shot(0, 5, "portrait_face", speaker1_box=BOX_A)
         updated, _ = apply_shot_directives(
             _framing([base]),
@@ -687,7 +687,7 @@ class TestDirectiveReachesTheRenderer(unittest.TestCase):
         self.assertIn("overlay=(W-w)/2:(H-h)/2", build_video_filtergraph(updated))
 
     def test_rejected_directive_leaves_the_graph_unchanged(self):
-        from src.video_editor import build_video_filtergraph
+        from core.video_editor import build_video_filtergraph
         base = _shot(0, 5, "portrait_face")
         before = build_video_filtergraph(_framing([base]))
         updated, _ = apply_shot_directives(
@@ -705,7 +705,7 @@ class TestContactSheetAgainstRealVideo(unittest.TestCase):
     """
 
     def test_sheet_is_built_from_an_actual_encoded_file(self):
-        from src.source_index import probe_source_media
+        from v1.source_index import probe_source_media
         with tempfile_dir() as tmp:
             video = tmp / "clip.mp4"
             result = subprocess.run(
@@ -743,7 +743,7 @@ class TestContactSheetAgainstRealVideo(unittest.TestCase):
             self.assertEqual(header, b"\xff\xd8")
 
     def test_sampler_returns_increasing_timestamps(self):
-        from src.source_index import probe_source_media, sample_frames_at
+        from v1.source_index import probe_source_media, sample_frames_at
         with tempfile_dir() as tmp:
             video = tmp / "clip.mp4"
             result = subprocess.run(
@@ -769,15 +769,15 @@ class TestContactSheetAgainstRealVideo(unittest.TestCase):
 
 class TestSourceIndexSampler(unittest.TestCase):
     def test_sample_frames_at_derives_a_sane_rate(self):
-        from src.source_index import sample_frames_at
-        with mock.patch("src.source_index._sample_frames") as inner:
+        from v1.source_index import sample_frames_at
+        with mock.patch("v1.source_index._sample_frames") as inner:
             sample_frames_at(Path("v.mp4"), 0.0, 48.0, count=12)
         self.assertEqual(inner.call_args.kwargs["sample_fps"], 0.25)  # 12 / 48 s
         self.assertEqual(inner.call_args.kwargs["max_samples"], 12)
 
     def test_zero_count_cannot_divide_by_zero(self):
-        from src.source_index import sample_frames_at
-        with mock.patch("src.source_index._sample_frames") as inner:
+        from v1.source_index import sample_frames_at
+        with mock.patch("v1.source_index._sample_frames") as inner:
             sample_frames_at(Path("v.mp4"), 5.0, 5.0, count=0)
         self.assertEqual(inner.call_args.kwargs["max_samples"], 1)
 

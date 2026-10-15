@@ -32,8 +32,8 @@ from pathlib import Path
 
 import numpy as np
 
-from src.face_tracker import FramingDecision, ShotPlan
-from src.video_editor import render_viral_clip
+from core.face_tracker import FramingDecision, ShotPlan
+from core.video_editor import render_viral_clip
 
 FLASH_EVERY_S = 2.0
 FIRST_EVENT_S = 1.0

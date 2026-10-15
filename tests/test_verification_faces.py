@@ -23,7 +23,7 @@ from unittest import mock
 
 import numpy as np
 
-from src.verification.faces import _load_yunet, detect_in_frame
+from core.verification.faces import _load_yunet, detect_in_frame
 
 
 class RecordingDetector:
@@ -64,7 +64,7 @@ class TestDetectInFrame(unittest.TestCase):
 class TestLoadDetector(unittest.TestCase):
     def test_load_yunet_rejects_backends_without_detect(self) -> None:
         with mock.patch(
-            "src.face_tracker.get_face_detector", return_value=object()
+            "core.face_tracker.get_face_detector", return_value=object()
         ):
             detector, reason = _load_yunet()
         self.assertIsNone(detector)

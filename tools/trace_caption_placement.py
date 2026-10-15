@@ -22,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.composition_planner import (  # noqa: E402
+from v1.composition_planner import (  # noqa: E402
     _anchor_to_ass,
     _caption_anchor,
     _caption_rect,
@@ -30,8 +30,8 @@ from src.composition_planner import (  # noqa: E402
     DEFAULT_SAFE_ZONE,
     NormalizedRect,
 )
-from src.source_index import build_source_index  # noqa: E402
-from src.verification import fixtures, probe  # noqa: E402
+from v1.source_index import build_source_index  # noqa: E402
+from core.verification import fixtures, probe  # noqa: E402
 
 
 def trace(master_id: str) -> int:

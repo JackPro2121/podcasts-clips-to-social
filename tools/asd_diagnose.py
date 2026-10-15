@@ -24,7 +24,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.verification import av_sync, faces as faces_mod  # noqa: E402
+from core.verification import av_sync, faces as faces_mod  # noqa: E402
 
 WIDTH, HEIGHT = 480, 270
 

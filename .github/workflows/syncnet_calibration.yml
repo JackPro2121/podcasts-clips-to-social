@@ -6,7 +6,7 @@ name: SyncNet Calibration
 # benchmark number for a different domain.
 #
 # The JSON artifact is the evidence for the threshold picked in
-# src/verification/lip_sync.py.
+# core/verification/lip_sync.py.
 
 on:
   workflow_dispatch:
@@ -54,7 +54,7 @@ jobs:
       - name: Cache pretrained checkpoints
         uses: actions/cache@v4
         with:
-          path: src/models
+          path: core/models
           key: ml-models-${{ hashFiles('tools/fetch_models.py') }}
 
       - name: Fetch official checkpoints

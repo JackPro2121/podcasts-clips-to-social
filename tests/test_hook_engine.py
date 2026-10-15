@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.hook_engine import (
+from v1.hook_engine import (
     HOOK_MAX_LEAD_IN_S,
     build_hook_plan,
     first_line,
@@ -63,22 +63,22 @@ class TestHookStart(unittest.TestCase):
 
 class TestClampLeadInToSegment(unittest.TestCase):
     def test_lead_in_beyond_the_segment_head_is_clamped(self):
-        from src.hook_engine import clamp_lead_in_to_segment
+        from v1.hook_engine import clamp_lead_in_to_segment
 
         self.assertAlmostEqual(clamp_lead_in_to_segment(0.4, 1.6), 0.4, places=3)
 
     def test_enough_head_keeps_the_full_lead_in(self):
-        from src.hook_engine import clamp_lead_in_to_segment
+        from v1.hook_engine import clamp_lead_in_to_segment
 
         self.assertAlmostEqual(clamp_lead_in_to_segment(2.9, 1.6), 1.6, places=3)
 
     def test_nothing_before_the_moment_means_no_lead_in(self):
-        from src.hook_engine import clamp_lead_in_to_segment
+        from v1.hook_engine import clamp_lead_in_to_segment
 
         self.assertAlmostEqual(clamp_lead_in_to_segment(0.0, 1.6), 0.0, places=3)
 
     def test_negative_inputs_never_go_below_zero(self):
-        from src.hook_engine import clamp_lead_in_to_segment
+        from v1.hook_engine import clamp_lead_in_to_segment
 
         self.assertAlmostEqual(clamp_lead_in_to_segment(-1.0, 1.6), 0.0, places=3)
 
@@ -131,19 +131,19 @@ class TestBuildHookPlan(unittest.TestCase):
 
 class TestLeadInGuard(unittest.TestCase):
     def test_lead_in_inside_the_contract_is_allowed(self):
-        from src.hook_engine import can_extend_with_lead_in
+        from v1.hook_engine import can_extend_with_lead_in
 
         self.assertTrue(can_extend_with_lead_in(42.0, 1.4))
         self.assertTrue(can_extend_with_lead_in(53.5, 0.0))
 
     def test_lead_in_that_breaks_the_ceiling_is_refused(self):
-        from src.hook_engine import can_extend_with_lead_in
+        from v1.hook_engine import can_extend_with_lead_in
 
         self.assertFalse(can_extend_with_lead_in(53.0, 1.4))
         self.assertFalse(can_extend_with_lead_in(55.0, 0.5))
 
     def test_zero_lead_in_is_always_fine(self):
-        from src.hook_engine import can_extend_with_lead_in
+        from v1.hook_engine import can_extend_with_lead_in
 
         self.assertTrue(can_extend_with_lead_in(55.0, 0.0))
 

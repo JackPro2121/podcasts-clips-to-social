@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.caption_emphasis import (
+from core.caption_emphasis import (
     EMPHASIS_POP_TAGS,
     emphasised_line,
     is_emphasis_word,

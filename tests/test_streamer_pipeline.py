@@ -4,14 +4,14 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from src.streamers.discovery import (
+from v2.streamers.discovery import (
     STREAMER_CHANNELS, extract_video_id_from_url, load_streamer_history,
     record_streamer_history
 )
-from src.streamers.viral_detector import (
+from v2.streamers.viral_detector import (
     parse_streamer_clips_json, _heuristic_streamer_detector
 )
-from src.transcriber import TranscriptSegment
+from core.transcriber import TranscriptSegment
 
 
 class TestStreamerPipeline(unittest.TestCase):
@@ -34,7 +34,7 @@ class TestStreamerPipeline(unittest.TestCase):
         """Streamer history should persist without touching main history file."""
         with tempfile.TemporaryDirectory() as tmpdir:
             test_hist = Path(tmpdir) / "streamer_history.json"
-            with patch("src.streamers.discovery.STREAMER_HISTORY_FILE", test_hist):
+            with patch("v2.streamers.discovery.STREAMER_HISTORY_FILE", test_hist):
                 record_streamer_history("test_video_123", "Test Title", "Kai Cenat")
                 history = load_streamer_history()
                 self.assertIn("test_video_123", history)
@@ -106,8 +106,8 @@ class TestStreamerPipeline(unittest.TestCase):
 
     def test_dead_air_remapping_synchronizes_captions(self):
         """When dead-air silence is cut, words must shift onto the compacted timeline."""
-        from src.jump_cutter import build_cut_plan
-        from src.transcriber import WordTimestamp
+        from core.jump_cutter import build_cut_plan
+        from core.transcriber import WordTimestamp
 
         # Segment with speech at 0-1s, 2s silence (1-3s), speech at 3-4s
         words = [
@@ -126,7 +126,7 @@ class TestStreamerPipeline(unittest.TestCase):
 
     def test_multi_person_split_screen_framing(self):
         """Multi-person room framing must produce split_screen mode with 2 speakers and ZERO blurry presentation_slide."""
-        from src.streamers.layout_compositor import build_streamer_framing
+        from v2.streamers.layout_compositor import build_streamer_framing
         import numpy as np
         import cv2
 
@@ -158,8 +158,8 @@ class TestStreamerPipeline(unittest.TestCase):
 
     def test_tiktok_meme_box_sanitizes_emojis(self):
         """Top TikTok meme box must strip emojis and astral unicode in ASS to prevent '▯' tofu rectangles."""
-        from src.subtitle_generator import create_styled_ass_subtitles
-        from src.transcriber import TranscriptSegment, WordTimestamp
+        from core.subtitle_generator import create_styled_ass_subtitles
+        from core.transcriber import TranscriptSegment, WordTimestamp
 
         with tempfile.TemporaryDirectory() as tmpdir:
             ass_out = Path(tmpdir) / "test.ass"

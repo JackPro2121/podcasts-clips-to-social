@@ -7,8 +7,8 @@ filtering, and debate/split-screen transitions in src/face_tracker.py.
 from __future__ import annotations
 
 import unittest
-from src.face_tracker import FaceBox, _segment_two_speaker_shots
-from src.creative_spec import SPEAKER_MIN_DWELL_S
+from core.face_tracker import FaceBox, _segment_two_speaker_shots
+from core.creative_spec import SPEAKER_MIN_DWELL_S
 
 
 class TestSmartSpeakerSwitching(unittest.TestCase):

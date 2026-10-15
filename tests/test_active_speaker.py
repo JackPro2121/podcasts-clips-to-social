@@ -15,7 +15,7 @@ import unittest
 
 import numpy as np
 
-from src.active_speaker import (
+from core.active_speaker import (
     Track,
     pick_speaker,
     scores_from_series,

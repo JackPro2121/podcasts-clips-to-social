@@ -14,7 +14,7 @@ import unittest
 
 import numpy as np
 
-from src.shot_detection import TransNetV2Detector
+from core.shot_detection import TransNetV2Detector
 
 
 class _StubInput:

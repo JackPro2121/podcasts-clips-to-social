@@ -8,12 +8,12 @@ Tests:
 """
 
 import unittest
-from src.transcriber import TranscriptSegment, WordTimestamp
-from src.streamers.censor import (
+from core.transcriber import TranscriptSegment, WordTimestamp
+from v2.streamers.censor import (
     censor_word_text,
     censor_transcript_segments,
 )
-from src.streamers.editing_enhancer import (
+from v2.streamers.editing_enhancer import (
     build_streamer_retention_plan,
 )
 

@@ -31,8 +31,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.face_tracker import FramingDecision, ShotPlan
-from src.video_editor import _motion_guarantee_filter, build_video_filtergraph, render_viral_clip
+from core.face_tracker import FramingDecision, ShotPlan
+from core.video_editor import _motion_guarantee_filter, build_video_filtergraph, render_viral_clip
 
 HAS_FFMPEG = bool(
     subprocess.run(["ffmpeg", "-version"], capture_output=True).returncode == 0
@@ -118,7 +118,7 @@ class TestMotionGuaranteeIsOneChokePoint(unittest.TestCase):
         camera movement, while still moving far more than freezedetect's n=0.003
         per-pixel threshold on a textured frame.
         """
-        from src.creative_spec import MOTION_POLICY
+        from core.creative_spec import MOTION_POLICY
 
         peak_to_peak = MOTION_POLICY.peak_to_peak_px
         self.assertLessEqual(
@@ -132,7 +132,7 @@ class TestMotionGuaranteeIsOneChokePoint(unittest.TestCase):
 
     def test_axes_are_out_of_phase(self) -> None:
         """A diagonal trace reads as life; a single-axis slide reads as a fault."""
-        from src.creative_spec import MOTION_POLICY
+        from core.creative_spec import MOTION_POLICY
 
         self.assertNotAlmostEqual(
             MOTION_POLICY.PHASE_X, MOTION_POLICY.PHASE_Y, places=2,
@@ -140,7 +140,7 @@ class TestMotionGuaranteeIsOneChokePoint(unittest.TestCase):
         )
 
     def test_gain_scales_amplitude(self) -> None:
-        from src.creative_spec import MOTION_POLICY
+        from core.creative_spec import MOTION_POLICY
 
         small = _motion_guarantee_filter(0.5)
         large = _motion_guarantee_filter(1.5)
@@ -305,7 +305,7 @@ class TestEveryBranchMovesAStaticSource(unittest.TestCase):
                     if keyword.arg == "name" and isinstance(keyword.value, ast.Constant):
                         covered.add(keyword.value.value)
 
-        editor = Path(__file__).resolve().parent.parent / "src" / "video_editor.py"
+        editor = Path(__file__).resolve().parent.parent / "core" / "video_editor.py"
         editor_source = editor.read_text(encoding="utf-8")
 
         top_level = set(

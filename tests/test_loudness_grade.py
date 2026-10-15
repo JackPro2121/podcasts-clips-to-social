@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.verification import loudness
+from core.verification import loudness
 
 
 class TestGrade(unittest.TestCase):
@@ -59,14 +59,14 @@ class TestRenderContract(unittest.TestCase):
     """
 
     def test_renderer_accepts_only_within_the_verdict_contract(self) -> None:
-        from src.video_editor import _loudness_within_contract
+        from core.video_editor import _loudness_within_contract
 
         self.assertTrue(_loudness_within_contract({"input_i": -14.4, "input_tp": -1.6}))
         self.assertFalse(_loudness_within_contract({"input_i": -14.6, "input_tp": -1.6}))
         self.assertFalse(_loudness_within_contract({"input_i": -14.0, "input_tp": -1.19}))
 
     def test_tolerance_boundary_is_inside_on_both_sides(self) -> None:
-        from src.video_editor import _loudness_within_contract
+        from core.video_editor import _loudness_within_contract
 
         # -1.2 vs the -1.5 ceiling is exactly the 0.3 tolerance; float
         # subtraction must not flip it (the trap the verdict fixed).
@@ -74,7 +74,7 @@ class TestRenderContract(unittest.TestCase):
         self.assertTrue(_loudness_within_contract({"input_i": -14.5, "input_tp": -1.8}))
 
     def test_renderer_and_verdict_share_the_contract_constants(self) -> None:
-        from src import creative_spec, video_editor
+        from core import creative_spec, video_editor
 
         self.assertEqual(video_editor.LUFS_TOLERANCE, creative_spec.LUFS_TOLERANCE)
         self.assertEqual(

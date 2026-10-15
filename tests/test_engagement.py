@@ -1,7 +1,7 @@
 """Tests for the editorial engagement (pacing energy) analysis."""
 import unittest
 
-from src.engagement import (
+from v1.engagement import (
     DEAD_AIR_SECONDS,
     EngagementSample,
     analyze_window,
@@ -10,7 +10,7 @@ from src.engagement import (
     rank_candidates,
     summarise,
 )
-from src.transcriber import TranscriptSegment, WordTimestamp
+from core.transcriber import TranscriptSegment, WordTimestamp
 
 
 def _segment(start, end, text, words=None):
@@ -158,7 +158,7 @@ class TestRankCandidates(unittest.TestCase):
     def test_combined_score_blends_base_and_energy(self):
         candidate = rank_candidates([], [])
         self.assertEqual(candidate, [])
-        from src.engagement import WindowCandidate
+        from v1.engagement import WindowCandidate
         high_base_low_energy = WindowCandidate(
             start=0.0, end=30.0, base_score=1.0,
             engagement=EngagementSample(0.0, 30.0, word_count=10, score=0.0),

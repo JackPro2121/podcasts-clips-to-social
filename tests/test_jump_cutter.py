@@ -16,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-from src.jump_cutter import build_cut_plan
+from core.jump_cutter import build_cut_plan
 
 HAS_FFMPEG = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
 
@@ -160,7 +160,7 @@ class TestCompactMedia(unittest.TestCase):
         # Same file, but the clip window starts 0.5s in: clip-relative words
         # (0.0-0.4) and (2.7-2.95) must compact the FILE's 0.5-0.9 and
         # 3.2-3.45 bursts, landing at remap() positions in the output.
-        from src.jump_cutter import compact_media
+        from core.jump_cutter import compact_media
 
         plan = build_cut_plan([(0.0, 0.4), (2.7, 2.95)], 3.5, min_duration_s=1.0)
         self.assertTrue(plan.applied)
@@ -172,7 +172,7 @@ class TestCompactMedia(unittest.TestCase):
         self.assertAlmostEqual(centres[1], plan.remap(2.825), delta=0.12)
 
     def test_compacted_media_places_every_burst_at_its_remapped_time(self):
-        from src.jump_cutter import compact_media
+        from core.jump_cutter import compact_media
 
         source_centres = self._burst_centres(self.source)
         self.assertEqual(len(source_centres), 2, source_centres)
@@ -215,7 +215,7 @@ class TestPrepareCompactedClip(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_prepare_returns_compacted_media_and_remapped_words(self):
-        from src.jump_cutter import prepare_compacted_clip
+        from core.jump_cutter import prepare_compacted_clip
 
         words = [(0.5, 0.9), (3.2, 3.45)]
         prepared = prepare_compacted_clip(
@@ -234,7 +234,7 @@ class TestPrepareCompactedClip(unittest.TestCase):
         self.assertGreaterEqual(duration, 1.0)
 
     def test_no_cut_needed_returns_none(self):
-        from src.jump_cutter import prepare_compacted_clip
+        from core.jump_cutter import prepare_compacted_clip
 
         prepared = prepare_compacted_clip(
             self.source, [(0.0, 3.9)], 4.0, self.workspace, min_duration_s=1.0
@@ -242,7 +242,7 @@ class TestPrepareCompactedClip(unittest.TestCase):
         self.assertIsNone(prepared)
 
     def test_floor_guard_returns_none(self):
-        from src.jump_cutter import prepare_compacted_clip
+        from core.jump_cutter import prepare_compacted_clip
 
         prepared = prepare_compacted_clip(
             self.source, [(0.5, 0.9), (3.2, 3.45)], 4.0, self.workspace

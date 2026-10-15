@@ -32,9 +32,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.config import OUTPUT_HEIGHT, OUTPUT_WIDTH
-from src.face_tracker import PANE_ASPECT, FramingDecision, ShotPlan, _pane_dimensions
-from src.video_editor import build_video_filtergraph
+from core.config import OUTPUT_HEIGHT, OUTPUT_WIDTH
+from core.face_tracker import PANE_ASPECT, FramingDecision, ShotPlan, _pane_dimensions
+from core.video_editor import build_video_filtergraph
 
 
 def _vertical_source(path: Path, seconds: int = 3) -> bool:
@@ -233,7 +233,7 @@ class TestSplitScreenRendersFullBleed(unittest.TestCase):
             speaker1_box=(120, 100, 540, 480),
             speaker2_box=(1260, 100, 540, 480),
         )
-        from src.video_editor import render_viral_clip
+        from core.video_editor import render_viral_clip
 
         try:
             render_viral_clip(

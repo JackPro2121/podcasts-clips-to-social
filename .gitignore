@@ -52,11 +52,11 @@ Thumbs.db
 scratch/
 *.mp4
 # Model weights are ignored by default, with one deliberate exception below.
-src/models/*.onnx
+core/models/*.onnx
 # Deep-verification checkpoints (SyncNet / S3FD), fetched from their official
 # sources by tools/fetch_models.py with pinned SHA-256.
-src/models/*.pth
-src/models/*.model
+core/models/*.pth
+core/models/*.model
 
 # EXCEPTION: the YuNet face detector is tracked.
 #
@@ -71,7 +71,7 @@ src/models/*.model
 # Tracking it removes a network dependency from a gate that has to be reliable,
 # and both files on disk were byte-identical (sha256 8f2383e4dd3cfbb4553ea871),
 # so nothing is lost.
-!src/models/face_detection_yunet.onnx
+!core/models/face_detection_yunet.onnx
 
 # transnetv2.onnx stays ignored. It is a 300+ MB optional shot detector that
 # nothing downloads, so every run silently falls back to PySceneDetect. Either

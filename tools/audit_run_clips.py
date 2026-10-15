@@ -10,7 +10,7 @@ CLIPS_DIR = REPO_ROOT / "downloaded_clips" / "run_37778680165" / "viral-podcast-
 OUTPUT_DIR = REPO_ROOT / "audit_inspection" / "run_37778680165"
 
 sys.path.insert(0, str(REPO_ROOT))
-from src.verification import verdict
+from core.verification import verdict
 
 def get_ffprobe_info(clip_path: Path):
     cmd = [

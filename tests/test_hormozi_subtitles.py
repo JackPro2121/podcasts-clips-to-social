@@ -16,7 +16,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.creative_spec import (
+from core.creative_spec import (
     HOOK_BADGE_DURATION_S,
     MAX_WORDS_PER_CAPTION,
     MAX_WORDS_PER_CAPTION_FAST_SPEECH,
@@ -27,7 +27,7 @@ from src.creative_spec import (
     DANGER_RED,
     POWER_GOLD,
 )
-from src.subtitle_generator import (
+from core.subtitle_generator import (
     create_styled_ass_subtitles,
     DANGER_KEYWORDS,
     MONEY_KEYWORDS,
@@ -37,7 +37,7 @@ from src.subtitle_generator import (
     ASS_COLOR_POWER_GOLD,
     ASS_COLOR_YELLOW,
 )
-from src.transcriber import TranscriptSegment, WordTimestamp
+from core.transcriber import TranscriptSegment, WordTimestamp
 
 
 class TestHormoziSubtitleAesthetic(unittest.TestCase):

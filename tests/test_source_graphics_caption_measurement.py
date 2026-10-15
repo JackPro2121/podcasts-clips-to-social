@@ -25,7 +25,7 @@ from pathlib import Path
 
 import numpy as np
 
-from src.verification.captions import (
+from core.verification.captions import (
     Rect,
     _persistent_caption_rows,
     measure_on_face,

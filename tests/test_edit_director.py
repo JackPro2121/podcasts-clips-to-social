@@ -1,14 +1,14 @@
 import unittest
 
-from src.edit_director import (
+from v1.edit_director import (
     EditPlan,
     HookCandidate,
     build_director_prompt,
     build_semantic_edit_plans,
     validate_edit_plan,
 )
-from src.source_index import IndexedShot, SourceIndex, SourceMediaInfo
-from src.transcriber import TranscriptSegment, WordTimestamp
+from v1.source_index import IndexedShot, SourceIndex, SourceMediaInfo
+from core.transcriber import TranscriptSegment, WordTimestamp
 
 
 class TestEditDirector(unittest.TestCase):
