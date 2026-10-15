@@ -104,21 +104,32 @@ PODCASTS-CLIPS-TO-SOCIAL/
 │   ├── podcast_clipper.yml          # [V1] Podcast production workflow
 │   ├── streamer_clipper.yml         # [V2] Streamer production workflow
 │   └── cleanup_old_releases.yml     # Storage hygiene (5-day release purge)
-├── src/
+├── core/                            # SHARED ENGINE (imported by V1 and V2)
 │   ├── config.py                    # Shared configs, fonts, safe-zones, audio targets
 │   ├── creative_spec.py             # Visual metrics, tolerances, motion policies
 │   ├── downloader.py                # Targeted range downloader & Apify proxy
 │   ├── transcriber.py               # faster-whisper & YouTube timed text parser
 │   ├── jump_cutter.py               # Dead-air trimming and audio compaction
-│   ├── face_tracker.py              # [V1] Active mouth tracker & podcast framing
+│   ├── face_tracker.py              # Shared face tracker & framing primitives
 │   ├── subtitle_generator.py        # Styled ASS subtitle generator (V1 & V2 themes)
 │   ├── video_editor.py              # FFmpeg filtergraph engine, studio color grade, loudnorm
 │   ├── thumbnail_generator.py       # Universal CTR thumbnail engine (V1 & V2 styles)
-│   ├── buffer_client.py             # [V1] Podcast Buffer publisher
 │   ├── github_uploader.py           # Release uploader for direct asset URLs
-│   ├── models/
-│   │   ├── face_detection_yunet.onnx         # 232KB tracked face detector
-│   │   └── face_recognition_sface_2021dec.onnx # Auto-downloaded SFace recognizer
+│   ├── viral_detector.py            # Shared Gemini viral-moment helpers
+│   ├── ... (endpoint, preflight, scene_classifier, shot_detection, active_speaker,
+│   │        caption_emphasis)
+│   ├── verification/                # Pixel/geometry/loudness verification package
+│   └── models/
+│       ├── face_detection_yunet.onnx         # 232KB tracked face detector
+│       ├── face_recognition_sface_2021dec.onnx # Auto-downloaded SFace recognizer
+│       └── streamer_profiles/                # [V2] SFace identity embeddings (*.npy)
+├── v1/                              # [V1 EXCLUSIVE] Podcast pipeline
+│   ├── main.py                      # V1 orchestrator
+│   ├── buffer_client.py             # [V1] Podcast Buffer publisher
+│   └── ... (edit_director, director_v2, broll_manager, hook_engine, repair,
+│            run_state, editorial_qa, universal_editor, text_detection, ...)
+├── v2/                              # [V2 EXCLUSIVE] Streamer pipeline
+│   ├── main_streamer.py             # V2 CLI entrypoint
 │   └── streamers/                   # [V2 EXCLUSIVE ENGINE]
 │       ├── __init__.py
 │       ├── pipeline.py              # V2 Orchestrator
@@ -132,8 +143,8 @@ PODCASTS-CLIPS-TO-SOCIAL/
 │   └── streamer_history.json        # [V2] Processed streamer VOD registry
 ├── clips/
 │   └── streamers/                   # Output directory for rendered V2 clips
-├── main.py                          # [V1] CLI Entrypoint
-├── main_streamer.py                 # [V2] CLI Entrypoint
+├── main.py                          # [V1] CLI Entrypoint (shim -> v1.main)
+├── main_streamer.py                 # [V2] CLI Entrypoint (shim -> v2.main_streamer)
 ├── requirements.txt                 # Dependencies
 ├── AGENTS.md                        # Canonical architecture & operational guide
 └── README.md                        # Project documentation
