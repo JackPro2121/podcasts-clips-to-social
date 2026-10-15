@@ -1,37 +1,48 @@
-# AGENTS.md — Autonomous AI Media Engine (V1 Podcast & V2 Streamer Pipelines)
+# AGENTS.md — Autonomous AI Media Engine (V1 Podcast Pipeline)
 
 > **CRITICAL DIRECTIVE FOR ALL AGENTS & DEVELOPERS:**
-> This repository houses **TWO INDEPENDENT, ISOLATED PRODUCTION PIPELINES**:
-> 1. **V1 Pipeline**: High-CPM Long-Form Podcasts (Personal Finance, Tech, Interviews)
-> 2. **V2 Pipeline**: High-Energy US Live Streamers (Kai Cenat, IShowSpeed, Jynxzi, CaseOh, xQc)
-> 
-> **RULE OF ISOLATION**: Changes to the V2 Streamer pipeline must **NEVER** break, alter, or regress the V1 Podcast pipeline. Each pipeline has its own entrypoint, workflow, and dedicated Buffer publishing credentials.
+> This repository is the **V1 Podcast pipeline** only — high-CPM long-form podcasts
+> (Personal Finance, Tech, Interviews).
+>
+> The **V2 Streamer pipeline** (Kai Cenat, IShowSpeed, Jynxzi, CaseOh, xQc) lives in
+> its own repository:
+> **[`JackPro2121/streamer-clips-to-social`](https://github.com/JackPro2121/streamer-clips-to-social)**
+> (private mirror: `ranajawadai/streamer-clips-to-social`).
+>
+> **RULE OF ISOLATION**: the two pipelines share exactly one artifact — the
+> `clips-core` engine submodule mounted at `core/`. Everything else is separate:
+> separate entrypoints, separate workflows, separate Buffer credentials. A change
+> made here is **not** a change to V2, and vice versa. Never let work on one
+> pipeline regress the other.
 
 ---
 
 ## 🎯 System Architecture Overview
 
 ```
-                               ┌─────────────────────────────────────────────────────────┐
-                               │           PODCASTS-CLIPS-TO-SOCIAL ENGINE               │
-                               └────────────────────────────┬────────────────────────────┘
-                                                            │
-                            ┌───────────────────────────────┴───────────────────────────────┐
-                            ▼                                                               ▼
-        ┌───────────────────────────────────────┐                       ┌───────────────────────────────────────┐
-        │       V1: PODCAST CLIPPER             │                       │       V2: STREAMER CLIPPER            │
-        │   (Wealth, Finance, Long-Form)        │                       │   (Kai Cenat, Speed, US Streamers)    │
-        ├───────────────────────────────────────┤                       ├───────────────────────────────────────┤
-        │ • CLI: main.py                        │                       │ • CLI: main_streamer.py               │
-        │ • CI: podcast_clipper.yml             │                       │ • CI: streamer_clipper.yml            │
-        │ • Core: core/ + v1/                   │                       │ • Core: v2/streamers/                │
-        │ • Tone: Finance / Serious / Interview │                       │ • Tone: Unhinged / Chaotic / Funny    │
-        │ • Subtitles: Hormozi / Center Pop     │                       │ • Subtitles: TikTok Meme Box + Lower  │
-        │ • Face: YuNet Active Speaker          │                       │ • Face: SFace ArcFace ID Locking      │
-        │ • Framing: Split-Screen (Host/Guest)  │                       │ • Framing: 3-Tier State Machine +     │
-        │ • Buffer: BUFFER_ACCESS_TOKEN         │                       │            Auto-Stacked (Webcam/Game) │
-        │                                       │                       │ • Buffer: STREAMER_BUFFER_ACCESS_TOKEN│
-        └───────────────────────────────────────┘                       └───────────────────────────────────────┘
+                          ┌─────────────────────────────────────────┐
+                          │      TWO REPOSITORIES, ONE ENGINE       │
+                          └────────────────────┬────────────────────┘
+                                               │
+                             ┌─────────────────┴──────────────────┐
+                             │   clips-core (git submodule)       │
+                             │   mounted at core/ in both repos   │
+                             └─────────────────┬──────────────────┘
+                  ┌────────────────────────────┴────────────────────────────┐
+                  ▼                                                         ▼
+   ┌─────────────────────────────────┐                    ┌─────────────────────────────────┐
+   │  THIS REPO: V1 PODCAST CLIPPER  │                    │  V2 STREAMER CLIPPER (own repo) │
+   │   (Wealth, Finance, Long-Form)  │                    │   (Kai Cenat, Speed, US Streams)│
+   ├─────────────────────────────────┤                    ├─────────────────────────────────┤
+   │ • CLI: main.py                  │                    │ • CLI: main_streamer.py         │
+   │ • CI: podcast_clipper.yml       │                    │ • CI: streamer_clipper.yml      │
+   │ • Code: core/ + v1/             │                    │ • Code: core/ + streamers/      │
+   │ • Tone: Finance / Serious       │                    │ • Tone: Unhinged / Chaotic      │
+   │ • Subtitles: Hormozi / Center Pop│                   │ • Subtitles: TikTok Meme Box    │
+   │ • Face: YuNet Active Speaker    │                    │ • Face: SFace ArcFace ID Lock   │
+   │ • Framing: Split-Screen         │                    │ • Framing: 3-Tier State Machine │
+   │ • Buffer: BUFFER_ACCESS_TOKEN   │                    │ • Buffer: STREAMER_BUFFER_*     │
+   └─────────────────────────────────┘                    └─────────────────────────────────┘
 ```
 
 ---
@@ -42,7 +53,7 @@
 Automated clipping of 1-to-3 hour podcasts focused on Personal Finance, Wealth Creation, and High-CPM Niches (Caleb Hammer *Financial Audit*, Dave Ramsey, Graham Stephan, Humphrey Yang, Huberman Lab).
 
 ### Technical Specifications
-* **Entrypoint**: [`main.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/main.py)
+* **Entrypoint**: [`main.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/main.py) (thin shim -> `v1.main`)
 * **GitHub Actions Workflow**: [`.github/workflows/podcast_clipper.yml`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/.github/workflows/podcast_clipper.yml)
 * **Viral Detector**: [`core/viral_detector.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/core/viral_detector.py) (Gemini Flash tuned for debt drama, net worth confessions, business secrets).
 * **Face Tracking & Layout**:
@@ -56,99 +67,6 @@ Automated clipping of 1-to-3 hour podcasts focused on Personal Finance, Wealth C
   - [`core/subtitle_generator.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/core/subtitle_generator.py): Word-by-word spring bounce animation (`hormozi`, `neon_green`, `luxury_gold`).
 * **Publishing**:
   - Uses `BUFFER_ACCESS_TOKEN` and `BUFFER_CHANNEL_IDS` to schedule to podcast-specific social channels.
-
----
-
-## ⚡ Deep Dive: Pipeline V2 (Streamer Viral Clipper)
-
-### Purpose & Niche
-Extracts high-retention TikTok/Shorts clips from 3-to-5 hour live streams of top US creators (Kai Cenat, IShowSpeed, Jynxzi, CaseOh, xQc, Adin Ross). Designed to compete directly with top plug channels (*Onlyclipin*, *Prada Clips*).
-
-### Technical Specifications
-* **Entrypoint**: [`main_streamer.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/main_streamer.py)
-* **GitHub Actions Workflow**: [`.github/workflows/streamer_clipper.yml`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/.github/workflows/streamer_clipper.yml)
-* **Zero-Download Discovery**:
-  - [`v2/streamers/discovery.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/v2/streamers/discovery.py): Checks YouTube channel RSS feeds (60s latency, $0 API cost) and Firecrawl. Skips previously clipped streams via [`data/streamer_history.json`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/data/streamer_history.json).
-  - Fetches native timed text without downloading the full 15GB video file.
-* **Streamer Viral Intelligence**:
-  - [`v2/streamers/viral_detector.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/v2/streamers/viral_detector.py): Gemini 3.8/2.5 Flash finds explosive screaming, rage, comedy fails, and desk slams. Generates high-CTR all-caps hook titles.
-  - Enforces strict hashtag bounds: **2 to 4 hashtags** (e.g. `#kaicenat #streamer #funny #shorts`).
-* **SFace Streamer Identity Locking & 3-Tier State Machine**:
-  - [`v2/streamers/face_tracker.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/v2/streamers/face_tracker.py):
-    - **SFace (SphereFace / ArcFace ONNX)** + YuNet: Loads pre-computed ground-truth embeddings from `core/models/streamer_profiles/` (`kai_cenat.npy`, `ishowspeed.npy`, `xqc.npy`). Rejects guests (MrBeast, Kevin Hart, AMP crew) from hijacking the camera.
-    - **Tier 1 (Locked)**: Streamer centered with smooth spring-damper LERP panning and safe headroom above the face.
-    - **Tier 2 (Occluded / Turning / Running)**: Momentary face loss ($<1.5\text{s}$) holds last known position without jerky movements.
-    - **Tier 3 (Off-Screen Exit $>1.5\text{s}$)**: Streamer leaves chair/room $\rightarrow$ Smooth autonomous fallback to **Wide Room View** (`presentation_slide` mode with blurred backdrop). Instant snap-back when the streamer returns!
-* **Stream Layout Intelligence Engine**:
-  - [`v2/streamers/layout_compositor.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/v2/streamers/layout_compositor.py):
-    - **Mode 1 (`stacked_webcam`)**: Detects stationary corner webcam ROI. Generates auto-stacked 9:16 layout (Top 50%: Facecam Reaction / Bottom 50%: Gameplay/Video).
-    - **Mode 2 (`multi_person_room`)**: Detects 2+ prominent people in room/collab streams (Kai Cenat x MrBeast, Speed x Adin). Uses SFace ArcFace identity recognition to place Host/Streamer on the Top pane (1080x960) and Guest on the Bottom pane (1080x960) with zero blurry bars, zero letterboxing, and 100% full-screen vertical immersion!
-    - **Mode 3 (`single_streamer_room`)**: Single-creator desk/room framing with SFace identity lock.
-* **Audio Scream & Energy Analyzer**:
-  - [`v2/streamers/audio_analyzer.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/v2/streamers/audio_analyzer.py): Detects decibel volume jumps ($>6\text{ dB}$ above median) via FFmpeg raw PCM to trigger dynamic punch-zooms (1.2x zoompan).
-* **Live Chat Velocity Engine**:
-  - [`v2/streamers/chat_analyzer.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/v2/streamers/chat_analyzer.py): Calculates Messages Per Second (MPS) and weights viral emotes (`💀`, `LMAO`, `COOKED`, `W`, `L`).
-* **Aesthetics & In-App TikTok Meme Hook Sticker**:
-  - Persistent multi-line connected white meme container box placed in upper safe-zone (`MarginV = 130`) hugging bold black text with 8px rounded corners, subtle drop shadow, and viral emojis (`💀`, `😭`, `🔥`).
-  - High-energy kinetic subtitles (`tiktok_streamer`: Montserrat Black 58pt, uppercase, 2-word bursts, Electric Yellow pop `#00E6FF`) in the lower safe-zone.
-* **Publishing Isolation**:
-  - Uses `STREAMER_BUFFER_ACCESS_TOKEN` and `STREAMER_BUFFER_CHANNEL_IDS`. **Zero crossover** with podcast accounts.
-
----
-
-## 📁 Repository Directory Structure
-
-```
-PODCASTS-CLIPS-TO-SOCIAL/
-├── .github/workflows/
-│   ├── podcast_clipper.yml          # [V1] Podcast production workflow
-│   ├── streamer_clipper.yml         # [V2] Streamer production workflow
-│   └── cleanup_old_releases.yml     # Storage hygiene (5-day release purge)
-├── core/                            # SHARED ENGINE (git submodule -> clips-core)
-│   ├── config.py                    # Shared configs, fonts, safe-zones, audio targets
-│   ├── creative_spec.py             # Visual metrics, tolerances, motion policies
-│   ├── downloader.py                # Targeted range downloader & Apify proxy
-│   ├── transcriber.py               # faster-whisper & YouTube timed text parser
-│   ├── jump_cutter.py               # Dead-air trimming and audio compaction
-│   ├── face_tracker.py              # Shared face tracker & framing primitives
-│   ├── subtitle_generator.py        # Styled ASS subtitle generator (V1 & V2 themes)
-│   ├── video_editor.py              # FFmpeg filtergraph engine, studio color grade, loudnorm
-│   ├── thumbnail_generator.py       # Universal CTR thumbnail engine (V1 & V2 styles)
-│   ├── github_uploader.py           # Release uploader for direct asset URLs
-│   ├── viral_detector.py            # Shared Gemini viral-moment helpers
-│   ├── ... (endpoint, preflight, scene_classifier, shot_detection, active_speaker,
-│   │        caption_emphasis, text_detection)
-│   ├── verification/                # Pixel/geometry/loudness verification package
-│   └── models/
-│       ├── face_detection_yunet.onnx         # 232KB tracked face detector
-│       ├── face_recognition_sface_2021dec.onnx # Auto-downloaded SFace recognizer
-│       └── streamer_profiles/                # [V2] SFace identity embeddings (*.npy)
-├── v1/                              # [V1 EXCLUSIVE] Podcast pipeline
-│   ├── main.py                      # V1 orchestrator
-│   ├── buffer_client.py             # [V1] Podcast Buffer publisher
-│   └── ... (edit_director, director_v2, broll_manager, hook_engine, repair,
-│            run_state, editorial_qa, universal_editor, ...)
-├── v2/                              # [V2 EXCLUSIVE] Streamer pipeline
-│   ├── main_streamer.py             # V2 CLI entrypoint
-│   └── streamers/                   # [V2 EXCLUSIVE ENGINE]
-│       ├── __init__.py
-│       ├── pipeline.py              # V2 Orchestrator
-│       ├── discovery.py             # YouTube RSS & Firecrawl streamer discoverer
-│       ├── viral_detector.py        # Streamer viral moment finder (Gemini 3.8 Flash)
-│       ├── face_tracker.py          # SFace Identity Locking & 3-Tier State Machine
-│       ├── layout_compositor.py     # Auto-stacked webcam/gameplay compositor
-│       ├── audio_analyzer.py        # Decibel scream & audio peak detector
-│       └── chat_analyzer.py         # Live chat velocity (MPS) & emote analyzer
-├── data/
-│   └── streamer_history.json        # [V2] Processed streamer VOD registry
-├── clips/
-│   └── streamers/                   # Output directory for rendered V2 clips
-├── main.py                          # [V1] CLI Entrypoint (shim -> v1.main)
-├── main_streamer.py                 # [V2] CLI Entrypoint (shim -> v2.main_streamer)
-├── requirements.txt                 # Dependencies
-├── AGENTS.md                        # Canonical architecture & operational guide
-└── README.md                        # Project documentation
-```
 
 ---
 
@@ -172,24 +90,83 @@ git add core && git commit -m "chore: bump clips-core to <sha>"
   already does).
 * Large model weights (`SFace`, `S3FD/SyncNet`, `TransNetV2`) are gitignored in
   `clips-core` and fetched by `tools/fetch_models.py`. Only the 232 KB YuNet
-  detector and the V2 streamer identity profiles ship in git.
+  detector ships in git here; the V2 streamer identity profiles ship in the
+  streamer repo's clone of the engine.
 * Paths resolve at runtime and can be overridden with `CLIPS_CORE_ROOT`,
   `CLIPS_CORE_MODELS_DIR`, and `CLIPS_CORE_ASSETS_DIR`.
+* **Engine changes are shared.** Because V2 mounts the same submodule, an engine
+  edit must be verified against both pipelines before the pointer is bumped.
 
 ---
 
-## 🔑 Environment Variables & Secrets Reference
+## 📁 Repository Directory Structure
+
+```
+PODCASTS-CLIPS-TO-SOCIAL/                 # V1 Podcast pipeline (this repo)
+├── .github/workflows/
+│   ├── podcast_clipper.yml          # [V1] Podcast production workflow
+│   ├── visual_verification.yml      # [V1] Render/visual regression verification
+│   └── cleanup_old_releases.yml     # Storage hygiene (5-day release purge)
+├── core/                            # SHARED ENGINE (git submodule -> clips-core)
+│   ├── config.py                    # Shared configs, fonts, safe-zones, audio targets
+│   ├── creative_spec.py             # Visual metrics, tolerances, motion policies
+│   ├── downloader.py                # Targeted range downloader & Apify proxy
+│   ├── transcriber.py               # faster-whisper & YouTube timed text parser
+│   ├── jump_cutter.py               # Dead-air trimming and audio compaction
+│   ├── face_tracker.py              # Shared face tracker & framing primitives
+│   ├── subtitle_generator.py        # Styled ASS subtitle generator (V1 & V2 themes)
+│   ├── video_editor.py              # FFmpeg filtergraph engine, studio color grade, loudnorm
+│   ├── thumbnail_generator.py       # Universal CTR thumbnail engine (V1 & V2 styles)
+│   ├── github_uploader.py           # Release uploader for direct asset URLs
+│   ├── viral_detector.py            # Shared Gemini viral-moment helpers
+│   ├── ... (endpoint, preflight, scene_classifier, shot_detection, active_speaker,
+│   │        caption_emphasis, text_detection)
+│   ├── verification/                # Pixel/geometry/loudness verification package
+│   └── models/
+│       ├── face_detection_yunet.onnx         # 232KB tracked face detector
+│       └── face_recognition_sface_2021dec.onnx # Auto-downloaded SFace recognizer
+├── v1/                              # [V1 EXCLUSIVE] Podcast pipeline
+│   ├── main.py                      # V1 orchestrator
+│   ├── buffer_client.py             # [V1] Podcast Buffer publisher
+│   └── ... (edit_director, director_v2, broll_manager, hook_engine, repair,
+│            run_state, editorial_qa, universal_editor, ...)
+├── data/
+│   └── history.json                 # [V1] Processed episode registry
+├── tools/                           # Model fetch, smoke tests, diagnostics
+├── tests/                           # V1 + shared-engine test suite
+├── clips/                           # Rendered V1 output
+├── main.py                          # [V1] CLI Entrypoint (shim -> v1.main)
+├── requirements.txt                 # Dependencies
+├── AGENTS.md                        # Canonical architecture & operational guide
+└── README.md                        # Project documentation
+```
+
+> The **V2 streamer pipeline is not in this repository.** Its layout
+> (`main_streamer.py`, `streamers/`, `data/streamer_history.json`,
+> `.github/workflows/streamer_clipper.yml`) lives in
+> [`streamer-clips-to-social`](https://github.com/JackPro2121/streamer-clips-to-social).
+
+---
+
+## 🔑 Environment Variables & Secrets Reference (V1)
 
 | Secret Name | Pipeline | Required? | Purpose |
 | :--- | :---: | :---: | :--- |
-| `GEMINI_API_KEY` | V1 & V2 | **Yes** | Google AI Studio key for viral moment extraction. |
-| `APIFY_API_TOKEN` | V1 & V2 | Optional | Residential proxy fallback for YouTube datacenter bypass. |
-| `FIRECRAWL_API_KEY` | V2 | Optional | Real-time streamer VOD search engine. |
+| `GEMINI_API_KEY` | V1 | **Yes** | Google AI Studio key for viral moment extraction. |
+| `GEMINI_API_KEY_2`..`_4` | V1 | Optional | Additional keys for LLM ladder rotation. |
+| `APIFY_API_TOKEN` | V1 | Optional | Residential proxy fallback for YouTube datacenter bypass. |
 | `BUFFER_ACCESS_TOKEN` | **V1 Only** | Optional | Social publishing token for Podcast accounts. |
 | `BUFFER_CHANNEL_IDS` | **V1 Only** | Optional | Specific podcast social channels in Buffer. |
-| `STREAMER_BUFFER_ACCESS_TOKEN` | **V2 Only** | Optional | **Isolated** social token for Streamer TikTok/Reels accounts. |
-| `STREAMER_BUFFER_CHANNEL_IDS` | **V2 Only** | Optional | **Isolated** streamer social channels in Buffer. |
-| `STREAMER_WATERMARK` | **V2 Only** | Optional | Channel watermark text (default: `@streamersclips`). |
+| `GROQ_API_KEY`, `OLLAMA_API_KEY`, `OPENROUTER_API_KEY` | V1 | Optional | LLM fallback tiers. |
+| `PEXELS_API_KEY` | V1 | Optional | B-roll source (`ENABLE_BROLL`). |
+| `YOUTUBE_COOKIES` | V1 | Optional | YouTube resilience when datacenter IPs are blocked. |
+
+`GITHUB_TOKEN` is provided automatically by Actions.
+
+> **V2 secrets** — `STREAMER_BUFFER_ACCESS_TOKEN`, `STREAMER_BUFFER_CHANNEL_IDS`,
+> `STREAMER_WATERMARK`, `FIRECRAWL_API_KEY` — belong to the
+> [streamer repo](https://github.com/JackPro2121/streamer-clips-to-social). Never
+> reuse the V1 `BUFFER_*` names as streamer credentials, or vice versa.
 
 ---
 
@@ -208,30 +185,33 @@ python main.py --url "https://www.youtube.com/watch?v=VIDEO_ID" --post-to-buffer
 ```
 
 ### ⚡ Running Pipeline V2 (Streamers)
+Moved out of this repository. Clone and run it from there:
+
 ```bash
-# Auto-discover fresh stream across top US streamers:
-python main_streamer.py
+git clone https://github.com/JackPro2121/streamer-clips-to-social.git
+cd streamer-clips-to-social
+git submodule update --init --recursive
+pip install -r requirements.txt
 
-# Target specific streamer (Kai Cenat, Speed, Jynxzi, CaseOh, xQc):
+python main_streamer.py                                  # auto-discover a fresh stream
 python main_streamer.py --streamer kai_cenat --num-clips 3
-python main_streamer.py --streamer ishowspeed --num-clips 3
-
-# Process specific stream VOD URL:
 python main_streamer.py --video-url "https://www.youtube.com/watch?v=VIDEO_ID" --num-clips 3
-
-# Force specific framing mode (auto, single_smooth, split_screen, stacked_webcam, fullscreen_room):
-python main_streamer.py --video-url "https://www.youtube.com/watch?v=VIDEO_ID" --framing auto
 ```
 
 ---
 
 ## 🛡️ Critical Commandments for AI Agents
 
-1. **V1 Pipeline Inviolability**: Do NOT touch or edit `core/face_tracker.py`, `main.py`, or `core/viral_detector.py` when developing V2 features. All streamer-specific improvements belong strictly in `v2/streamers/`.
-2. **Buffer Isolation**: Never reuse `BUFFER_ACCESS_TOKEN` for streamer clips. Streamer publishing must strictly read `STREAMER_BUFFER_ACCESS_TOKEN`.
-3. **Hashtag Strictness**: Streamer social captions must contain **between 2 and 4 hashtags**. Never generate 5+ hashtags or 0 hashtags.
+1. **Pipeline isolation**: all V1 work lives in `v1/` (+ shared `core/`); all V2 work lives in the
+   [streamer repo](https://github.com/JackPro2121/streamer-clips-to-social) under `streamers/`. Never
+   add streamer-specific code to this repository.
+2. **Shared engine discipline**: `core/` is `clips-core`. An engine change affects **both** pipelines —
+   verify V1 here *and* V2 there before bumping the submodule pointer, and never let the pointers drift
+   silently.
+3. **Buffer isolation**: V1 publishing reads `BUFFER_ACCESS_TOKEN` / `BUFFER_CHANNEL_IDS` only. Streamer
+   publishing reads `STREAMER_BUFFER_ACCESS_TOKEN` / `STREAMER_BUFFER_CHANNEL_IDS` only. **Zero crossover.**
 4. **Anti-Detection & Safe Zones**:
    - Subtitles must never collide with mobile UI safe-zones (bottom 20%, top 15%, right 12%).
-   - The TikTok white meme hook box must always be placed in the upper safe-zone with drop shadow and rounded corners.
-5. **No Full-Video Downloads**: Never download 15GB stream VODs. Always fetch transcripts first and perform range downloads of 30–45s windows via `yt-dlp`.
+5. **No Full-Video Downloads**: Never download multi-GB source VODs. Fetch transcripts first and perform
+   range downloads of only the 30–45s windows you need via `yt-dlp`.
 6. **Zero Secrets in Git**: Never log, hardcode, or commit API keys or tokens into git commits or documentation.

@@ -9,7 +9,7 @@
 
 | Remote Name | Repository URL | Access Type | Role & Responsibility |
 |---|---|---|---|
-| **`origin`** | `https://github.com/JackPro2121/podcasts-clips-to-social.git` | **Public Production** | • Hosts the automated GitHub Actions CI/CD pipeline (`podcast_clipper.yml`, `streamer_clipper.yml`).<br>• **MUST REMAIN 100% CLEAN** of all credentials, API tokens, and secrets.<br>• Runs autonomous scheduling, video transcoding, and live social publishing. |
+| **`origin`** | `https://github.com/JackPro2121/podcasts-clips-to-social.git` | **Public Production** | • Hosts the automated GitHub Actions CI/CD pipeline (`podcast_clipper.yml`). The V2 streamer pipeline (and its `streamer_clipper.yml`) now lives in [`JackPro2121/streamer-clips-to-social`](https://github.com/JackPro2121/streamer-clips-to-social).<br>• **MUST REMAIN 100% CLEAN** of all credentials, API tokens, and secrets.<br>• Runs autonomous scheduling, video transcoding, and live social publishing. |
 | **`private`** | `https://github.com/ranajawadai/Private-Podcast-Clips-to-Social.git` | **Private Backup** | • Full, private mirror and long-term disaster recovery repository.<br>• Owned by `ranajawadai`.<br>• Preserves all architectural specs, engineering plans, and code history. |
 
 ---
