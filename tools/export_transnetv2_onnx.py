@@ -7,7 +7,7 @@ Why: the render job must not install torch. The ML tier already proves the
 network once, verifies it against the PyTorch outputs, and the resulting ONNX is
 hosted on the immutable release and fetched by ``tools/fetch_models.py``.
 
-Export spec (what ``src/shot_detection.TransNetV2Detector`` consumes):
+Export spec (what ``core/shot_detection.TransNetV2Detector`` consumes):
     input  ``frames``      uint8  [1, 100, 27, 48, 3]
     output ``single_frame`` float [1, 100, 1]   (sigmoid applied)
     output ``many_hot``     float [1, 100, 1]   (sigmoid applied)

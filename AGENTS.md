@@ -24,7 +24,7 @@
         ├───────────────────────────────────────┤                       ├───────────────────────────────────────┤
         │ • CLI: main.py                        │                       │ • CLI: main_streamer.py               │
         │ • CI: podcast_clipper.yml             │                       │ • CI: streamer_clipper.yml            │
-        │ • Core: src/                          │                       │ • Core: v2/streamers/                │
+        │ • Core: core/ + v1/                   │                       │ • Core: v2/streamers/                │
         │ • Tone: Finance / Serious / Interview │                       │ • Tone: Unhinged / Chaotic / Funny    │
         │ • Subtitles: Hormozi / Center Pop     │                       │ • Subtitles: TikTok Meme Box + Lower  │
         │ • Face: YuNet Active Speaker          │                       │ • Face: SFace ArcFace ID Locking      │

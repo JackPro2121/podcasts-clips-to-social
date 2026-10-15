@@ -1,6 +1,6 @@
 """Tests for the publication gate in ``main.py``.
 
-The gate is the point of the whole exercise. Everything in ``src/verification``
+The gate is the point of the whole exercise. Everything in ``core/verification``
 exists to produce a verdict, and this is where that verdict stops a bad clip from
 reaching Buffer.
 

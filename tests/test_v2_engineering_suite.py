@@ -1,12 +1,12 @@
 """Comprehensive Test Suite for V2 Streamer Pipeline Engineering Improvements.
 
 Verifies:
-1. Spec overlay bounds & assertions (src.streamers.spec)
-2. Publication Gate & verdict emission (src.streamers.gate)
-3. Round-robin cursor rotation & retry budget (src.streamers.discovery)
-4. Disjoint split-pane geometry with zero overlap (src.streamers.layout_compositor)
-5. Live chat velocity median & word-boundary regex (src.streamers.chat_analyzer)
-6. Face tracker anchor weighting (src.streamers.face_tracker)
+1. Spec overlay bounds & assertions (v2.streamers.spec)
+2. Publication Gate & verdict emission (v2.streamers.gate)
+3. Round-robin cursor rotation & retry budget (v2.streamers.discovery)
+4. Disjoint split-pane geometry with zero overlap (v2.streamers.layout_compositor)
+5. Live chat velocity median & word-boundary regex (v2.streamers.chat_analyzer)
+6. Face tracker anchor weighting (v2.streamers.face_tracker)
 """
 
 import json

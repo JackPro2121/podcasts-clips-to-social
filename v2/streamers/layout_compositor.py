@@ -10,7 +10,7 @@ Intelligent stream composition engine:
        - Top 50%: Cropped and centered Streamer Webcam reaction.
        - Bottom 50%: Cropped main content (gameplay / reaction video).
 3. For 'fullscreen_room':
-   - Routes to StreamerIdentityTracker in src/streamers/face_tracker.py for
+   - Routes to StreamerIdentityTracker in v2/streamers/face_tracker.py for
      Kai Cenat identity locking, LERP panning, and smart off-screen wide fallback!
 
 Bug fixes (V2):

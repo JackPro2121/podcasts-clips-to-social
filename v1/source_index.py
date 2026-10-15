@@ -159,7 +159,7 @@ def probe_source_media(video_path: Path) -> SourceMediaInfo:
 def _estimate_text_regions(frame: np.ndarray) -> List[TextRegion]:
     """Detect text regions via the configured tier and convert to index form.
 
-    Detection and per-frame merging live in `src.text_detection`. The boxes are
+    Detection and per-frame merging live in `v1.text_detection`. The boxes are
     merged across the whole shot below, because a per-frame detector jitters and
     an unmerged list would produce a hundred near-identical protected rects.
     """

@@ -42,7 +42,7 @@ Design rules for this package:
 2. **Never raise on a malformed input.** A verifier that crashes is a verifier
    that gets wrapped in ``try/except`` by a caller and silently skipped. Failures
    are returned as data.
-3. **Thresholds live in :mod:`src.creative_spec`, not here.** This module decides
+3. **Thresholds live in :mod:`core.creative_spec`, not here.** This module decides
    *what* the number is; the spec decides whether it is acceptable.
 4. **Report the worst sample, not the mean.** A clip that is pillarboxed for 2 of
    45 seconds is a broken clip.

@@ -241,7 +241,7 @@ def detect_clip_shots(
     """
     Splits video segment [start_sec, end_sec] into discrete camera cuts / shot intervals.
 
-    Delegates to `src.shot_detection.detect_shot_boundaries`, which prefers
+    Delegates to `core.shot_detection.detect_shot_boundaries`, which prefers
     TransNetV2 and falls back to PySceneDetect's AdaptiveDetector. The fallback
     is the historical behaviour, unchanged, and both paths share the same
     boundary normalisation so they cannot drift apart.

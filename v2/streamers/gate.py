@@ -10,14 +10,14 @@ inherited none of that: pipeline.py:318-325 reaches Buffer with nothing between
 render_viral_clip and the dispatch call.
 
 This module closes that gap. It composes the existing public verification
-primitives (src.verification.verdict.verify) behind a single V2-scoped function
+primitives (core.verification.verdict.verify) behind a single V2-scoped function
 that pipeline.py calls instead of invoking Buffer directly.
 
 V1 contract
 -----------
 This module does NOT touch or import anything from:
-    main.py, src/face_tracker.py, src/viral_detector.py
-It composes only from src/verification/ (public API) and src/streamers/spec.py.
+    main.py, core/face_tracker.py, core/viral_detector.py
+It composes only from core/verification/ (public API) and v2/streamers/spec.py.
 
 Usage
 -----

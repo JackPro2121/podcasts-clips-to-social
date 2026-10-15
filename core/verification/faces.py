@@ -21,10 +21,10 @@ after the crop, not where they were in the source.
 Method
 ------
 Reuses the tracked YuNet ONNX model that ``face_tracker`` already depends on
-(``src/models/face_detection_yunet_2023mar.onnx``, 232 KB, committed to the repo),
+(``core/models/face_detection_yunet_2023mar.onnx``, 232 KB, committed to the repo),
 so this adds no dependency. Detection runs on decoded frames at the analysis
 resolution, and boxes are returned in that same resolution, which is the
-coordinate space :mod:`src.verification.captions` expects.
+coordinate space :mod:`core.verification.captions` expects.
 
 Degrades to "no faces" rather than raising. A missing model or a decode failure
 produces an empty list and a reason, and the caller decides whether that blocks.
@@ -147,7 +147,7 @@ class FaceReport:
 def _load_yunet() -> Tuple[Optional[Any], str]:
     """Load the tracked YuNet model. Returns ``(detector, reason)``.
 
-    Delegates to :func:`src.face_tracker.get_face_detector`, which owns the
+    Delegates to :func:`core.face_tracker.get_face_detector`, which owns the
     model path *and* the download fallback, and falls back through MediaPipe to
     Haar. Re-implementing the load here was a real bug: the first version of this
     module opened the model path directly and reported "not present" on CI,
@@ -342,7 +342,7 @@ def avoid_rects(
     whole face, because the whole face saturates in a tight crop and reports a
     meaningless 100%. See :meth:`FaceBox.upper_face`.
 
-    Returns :class:`src.verification.captions.Rect` objects in the same
+    Returns :class:`core.verification.captions.Rect` objects in the same
     coordinate space the face report used.
     """
     from .captions import Rect

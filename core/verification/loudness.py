@@ -33,7 +33,7 @@ from typing import Any, Dict
 
 from . import probe
 
-# The numbers live in src.creative_spec (the single contract source) and are
+# The numbers live in core.creative_spec (the single contract source) and are
 # re-exported here for the existing callers and tests. The golden masters
 # measured -14.0..-14.4 LUFS / -1.4..-1.7 dBTP, i.e. within 0.4 LU and 0.2 dB;
 # the 0.5/0.3 tolerances are the contract, not a tuning knob - a tolerance

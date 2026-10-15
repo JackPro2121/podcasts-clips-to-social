@@ -1,7 +1,7 @@
 """Unit tests for smart dynamic speaker switching (OpusClip Pro style).
 
 Verifies active speaker detection, dwell-time enforcement, interjection
-filtering, and debate/split-screen transitions in src/face_tracker.py.
+filtering, and debate/split-screen transitions in core/face_tracker.py.
 """
 
 from __future__ import annotations

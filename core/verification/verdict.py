@@ -33,7 +33,7 @@ Design
   be both too lax (0.8 s per-event freeze tolerance) and unreadable.
 
 This module does not decide what is acceptable; the thresholds live in each
-metric module and, ultimately, in ``src.creative_spec``. It decides what is
+metric module and, ultimately, in ``core.creative_spec``. It decides what is
 *blocking*, and it is the only thing ``main.py`` is permitted to consult before
 uploading or scheduling.
 """

@@ -108,7 +108,7 @@ def _endpoint_warnings(
     """Warn when the window does not end on a sentence boundary.
 
     Boundary policy is shared with the moment normalizer and the render-time
-    endpoint repair (``src.endpoint``): a terminal word or a spoken pause both
+    endpoint repair (``core.endpoint``): a terminal word or a spoken pause both
     count. A previous text-only check flagged valid gap-terminated windows and
     missed run-on segments whose text ended with punctuation far inside the
     window.

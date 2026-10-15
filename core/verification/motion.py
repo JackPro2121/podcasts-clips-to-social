@@ -9,7 +9,7 @@ three events -- 41.1s (0.533s), 41.633s (0.6s), 42.867s (0.5s) -- totalling
 The reason is a single line of arithmetic:
 
 ```python
-# src/editorial_qa.py:178, with max_freeze_duration defaulting to 0.8 at :265
+# v1/editorial_qa.py:178, with max_freeze_duration defaulting to 0.8 at :265
 if event["duration"] > max_freeze_duration:
     issues.append(QaIssue("freeze_interval", "error", ...))
 ```

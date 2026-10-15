@@ -13,7 +13,7 @@ model (~few MB, 48x27 input), unlike a video LLM.
 
 **The weights are not downloaded.** There is no verified canonical URL for a
 TransNetV2 ONNX export, and this project does not invent URLs. Place the file at
-`src/models/transnetv2.onnx` (exported from the soCzech/TransNetV2 reference
+`core/models/transnetv2.onnx` (exported from the soCzech/TransNetV2 reference
 implementation) and the ONNX path engages automatically. Until then every call
 falls through to PySceneDetect and behaviour is byte-identical to before.
 

@@ -70,7 +70,7 @@ Requirements:
 * **Needs OCR.** Without RapidOCR the answer is "not measurable". It is not
   guessed from symmetry or face-shape priors, because a guessed answer here is
   worse than none.
-* **Reuses** :mod:`src.text_detection` rather than calling RapidOCR directly.
+* **Reuses** :mod:`v1.text_detection` rather than calling RapidOCR directly.
   That module already contains the fix for HANDOFF section 4 bug 12, where the
   OCR response was parsed as ``(box, text, confidence)`` but ``entry[1]`` -- the
   recognised *text* -- was read as the confidence. ``float("MOST PEOPLE")``
@@ -228,7 +228,7 @@ def analyse(
 
     ``exclude_rects`` are regions, in the decode resolution used here, to leave
     out of the comparison. Pass the caption band from
-    :func:`src.verification.captions.detect_caption_regions` when checking output
+    :func:`core.verification.captions.detect_caption_regions` when checking output
     directly. See the module docstring for why that exclusion is required, and for
     why output-only checking is not viable for this content type.
     """

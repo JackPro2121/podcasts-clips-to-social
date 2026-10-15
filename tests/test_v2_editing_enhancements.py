@@ -1,9 +1,9 @@
 """Test Suite for V2 Streamer Editing Enhancements.
 
 Tests:
-1. Smart profanity & shadowban keyword masking (src.streamers.censor)
-2. Velocity hook snap-zoom (0.0s to 0.35s) injection (src.streamers.editing_enhancer)
-3. 4-second rule pattern interrupt generation (src.streamers.editing_enhancer)
+1. Smart profanity & shadowban keyword masking (v2.streamers.censor)
+2. Velocity hook snap-zoom (0.0s to 0.35s) injection (v2.streamers.editing_enhancer)
+3. 4-second rule pattern interrupt generation (v2.streamers.editing_enhancer)
 4. Monotonic timestamp and casing preservation
 """
 

@@ -242,7 +242,7 @@ DIRECTOR_V2_TILES = max(4, int(os.getenv("DIRECTOR_V2_TILES", "12")))
 #
 # There is deliberately no "mser" option. A zero-dependency MSER tier was built
 # and measured first, and rejected: it silently misses glyphs (see the module
-# docstring in src/text_detection.py for the numbers).
+# docstring in v1/text_detection.py for the numbers).
 TEXT_DETECTOR = os.getenv("TEXT_DETECTOR", "auto").strip().lower()
 
 # RapidOCR reports confidence per glyph. Below this, a detection is treated as

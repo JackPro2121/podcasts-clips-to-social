@@ -22,7 +22,7 @@ on the face", because it does not care what any plan claimed.
 
 Reuse in the mirror detector
 ----------------------------
-:func:`text_mask` is also what makes :mod:`src.verification.mirror` work.
+:func:`text_mask` is also what makes :mod:`core.verification.mirror` work.
 
 The mirror detector's first CI run returned a **false negative** on the clip that
 is demonstrably mirrored. The reason is structural and worth recording: OCR found
