@@ -101,6 +101,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -136,6 +138,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - name: Set up Cloudflare WARP (Optional, Linux only)
         if: ${{ runner.os == 'Linux' && vars.ENABLE_WARP == 'true' }}

@@ -104,7 +104,7 @@ PODCASTS-CLIPS-TO-SOCIAL/
 │   ├── podcast_clipper.yml          # [V1] Podcast production workflow
 │   ├── streamer_clipper.yml         # [V2] Streamer production workflow
 │   └── cleanup_old_releases.yml     # Storage hygiene (5-day release purge)
-├── core/                            # SHARED ENGINE (imported by V1 and V2)
+├── core/                            # SHARED ENGINE (git submodule -> clips-core)
 │   ├── config.py                    # Shared configs, fonts, safe-zones, audio targets
 │   ├── creative_spec.py             # Visual metrics, tolerances, motion policies
 │   ├── downloader.py                # Targeted range downloader & Apify proxy
@@ -149,6 +149,32 @@ PODCASTS-CLIPS-TO-SOCIAL/
 ├── AGENTS.md                        # Canonical architecture & operational guide
 └── README.md                        # Project documentation
 ```
+
+---
+
+## 🧩 Shared Engine — `clips-core` (git submodule)
+
+`core/` is **not** tracked in this repository. It is a **git submodule** pointing
+at [`JackPro2121/clips-core`](https://github.com/JackPro2121/clips-core), the
+pipeline-agnostic engine shared by the podcast (V1) and streamer (V2) pipelines.
+There is exactly one copy of the engine, so an engine fix lands once.
+
+```bash
+# after cloning this repo, or after someone bumps the submodule
+git submodule update --init --recursive
+
+# pull a newer engine revision
+git -C core fetch origin && git -C core checkout <tag-or-sha>
+git add core && git commit -m "chore: bump clips-core to <sha>"
+```
+
+* GitHub Actions checkouts **must** set `submodules: true` (every workflow here
+  already does).
+* Large model weights (`SFace`, `S3FD/SyncNet`, `TransNetV2`) are gitignored in
+  `clips-core` and fetched by `tools/fetch_models.py`. Only the 232 KB YuNet
+  detector and the V2 streamer identity profiles ship in git.
+* Paths resolve at runtime and can be overridden with `CLIPS_CORE_ROOT`,
+  `CLIPS_CORE_MODELS_DIR`, and `CLIPS_CORE_ASSETS_DIR`.
 
 ---
 
