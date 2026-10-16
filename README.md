@@ -2,7 +2,6 @@
 
 [![Podcast Viral Clips (V1)](https://github.com/JackPro2121/podcasts-clips-to-social/actions/workflows/podcast_clipper.yml/badge.svg)](https://github.com/JackPro2121/podcasts-clips-to-social/actions/workflows/podcast_clipper.yml)
 [![Streamer Viral Clips (V2)](https://github.com/JackPro2121/streamer-clips-to-social/actions/workflows/streamer_clipper.yml/badge.svg)](https://github.com/JackPro2121/streamer-clips-to-social/actions/workflows/streamer_clipper.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 An enterprise-grade, **$0-budget autonomous AI media engine** that converts long-form podcasts and interviews into viral 9:16 vertical videos for **TikTok, YouTube Shorts, and Instagram Reels**.
 
@@ -49,7 +48,7 @@ credentials. A change in one pipeline is never a change in the other.
 No local setup or expensive GPU servers required! Runs entirely in GitHub Actions.
 
 ### 1. Add Repository Secrets
-In your GitHub repo: **Settings** $\rightarrow$ **Secrets and variables** $\rightarrow$ **Actions**:
+In your GitHub repo: **Settings** → **Secrets and variables** → **Actions**:
 
 | Secret Name | Required By | Description |
 | :--- | :---: | :--- |
@@ -59,6 +58,8 @@ In your GitHub repo: **Settings** $\rightarrow$ **Secrets and variables** $\righ
 | `BUFFER_CHANNEL_IDS` | Optional | Specific podcast social channels in Buffer. |
 
 The streamer-only secrets (`STREAMER_BUFFER_ACCESS_TOKEN`, `STREAMER_BUFFER_CHANNEL_IDS`, `FIRECRAWL_API_KEY`, `STREAMER_WATERMARK`) belong to the [streamer repo](https://github.com/JackPro2121/streamer-clips-to-social).
+
+The full V1 reference — LLM fallback keys, download-resilience keys (Cobalt, RapidAPI, Chocodata), Slack run alerts, and optional repository variables — lives in [`AGENTS.md`](AGENTS.md).
 
 ### 2. Trigger Workflow
 1. Navigate to the **Actions** tab in GitHub.
@@ -72,12 +73,17 @@ The streamer-only secrets (`STREAMER_BUFFER_ACCESS_TOKEN`, `STREAMER_BUFFER_CHAN
 ### Prerequisites
 - Python 3.10+
 - [FFmpeg](https://ffmpeg.org/download.html) installed and available in system PATH.
+- A Bash shell (Linux/macOS, or Git Bash / WSL on Windows) for the shared installer.
 
 ```bash
 git clone https://github.com/JackPro2121/podcasts-clips-to-social.git
 cd podcasts-clips-to-social
 git submodule update --init --recursive   # pulls the V1 core/ engine (submodule)
-pip install -r requirements.txt
+
+# Deterministic dependency install — do NOT `pip install -r requirements.txt`
+# directly; the shared installer resolves one canonical OpenCV build:
+bash core/tools/install_deps.sh           # runtime only
+bash core/tools/install_deps.sh --dev     # + dev/test tooling (pytest, ruff, mypy)
 ```
 
 ### Running Pipeline V1 (Podcasts)
@@ -95,7 +101,7 @@ The streamer pipeline is no longer in this repository:
 ```bash
 git clone https://github.com/JackPro2121/streamer-clips-to-social.git
 cd streamer-clips-to-social
-pip install -r requirements.txt
+bash core/tools/install_deps.sh           # deterministic install (vendored engine installer)
 python main_streamer.py --streamer kai_cenat --num-clips 3
 ```
 

@@ -54,18 +54,18 @@
 Automated clipping of 1-to-3 hour podcasts focused on Personal Finance, Wealth Creation, and High-CPM Niches (Caleb Hammer *Financial Audit*, Dave Ramsey, Graham Stephan, Humphrey Yang, Huberman Lab).
 
 ### Technical Specifications
-* **Entrypoint**: [`main.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/main.py) (thin shim -> `v1.main`)
-* **GitHub Actions Workflow**: [`.github/workflows/podcast_clipper.yml`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/.github/workflows/podcast_clipper.yml)
-* **Viral Detector**: [`core/viral_detector.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/core/viral_detector.py) (Gemini Flash tuned for debt drama, net worth confessions, business secrets).
+* **Entrypoint**: [`main.py`](main.py) (thin shim -> `v1.main`)
+* **GitHub Actions Workflow**: [`.github/workflows/podcast_clipper.yml`](.github/workflows/podcast_clipper.yml)
+* **Viral Detector**: [`core/viral_detector.py`](core/viral_detector.py) (Gemini Flash tuned for debt drama, net worth confessions, business secrets).
 * **Face Tracking & Layout**:
-  - [`core/face_tracker.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/core/face_tracker.py): OpenCV YuNet on CPU tracks active mouth motion.
+  - [`core/face_tracker.py`](core/face_tracker.py): OpenCV YuNet on CPU tracks active mouth motion.
   - Generates single 9:16 portrait or dual-speaker split screen (Top 1080x960 / Bottom 1080x960) with zero black bars.
 * **Audio Engineering**:
   - 80Hz rumble cut, +2.5dB vocal presence boost at 3kHz.
   - Dynamic sidechain ducking on background music (`sidechaincompress`).
   - EBU R128 (-14.0 LUFS / -1.5 dBTP) broadcast normalization.
 * **Subtitles**:
-  - [`core/subtitle_generator.py`](file:///d:/Workspace/PODCASTS-CLIPS-TO-SOCIAL/core/subtitle_generator.py): Word-by-word spring bounce animation (`hormozi`, `neon_green`, `luxury_gold`).
+  - [`core/subtitle_generator.py`](core/subtitle_generator.py): Word-by-word spring bounce animation (`hormozi`, `neon_green`, `luxury_gold`).
 * **Publishing**:
   - Uses `BUFFER_ACCESS_TOKEN` and `BUFFER_CHANNEL_IDS` to schedule to podcast-specific social channels.
 
@@ -112,6 +112,9 @@ PODCASTS-CLIPS-TO-SOCIAL/                 # V1 Podcast pipeline (this repo)
 ├── .github/workflows/
 │   ├── podcast_clipper.yml          # [V1] Podcast production workflow
 │   ├── visual_verification.yml      # [V1] Render/visual regression verification
+│   ├── model_smoke.yml              # ML model-weight smoke checks
+│   ├── export_transnetv2.yml        # TransNetV2 ONNX export (parity + SHA pinned)
+│   ├── syncnet_calibration.yml      # SyncNet lip-sync calibration
 │   └── cleanup_old_releases.yml     # Storage hygiene (5-day release purge)
 ├── core/                            # SHARED ENGINE (git submodule -> clips-core)
 │   ├── config.py                    # Shared configs, fonts, safe-zones, audio targets
@@ -144,7 +147,10 @@ PODCASTS-CLIPS-TO-SOCIAL/                 # V1 Podcast pipeline (this repo)
 ├── tests/                           # V1 + shared-engine test suite
 ├── clips/                           # Rendered V1 output
 ├── main.py                          # [V1] CLI Entrypoint (shim -> v1.main)
-├── requirements.txt                 # Dependencies
+├── requirements.txt                 # Runtime deps — install via core/tools/install_deps.sh
+├── requirements-dev.txt             # Dev/test tooling (pytest, ruff, mypy)
+├── requirements-ml.txt              # ML tool tier (model smoke / exports / calibration)
+├── requirements-ocr.txt             # Optional OCR tier override
 ├── AGENTS.md                        # Canonical architecture & operational guide
 └── README.md                        # Project documentation
 ```
@@ -167,9 +173,17 @@ PODCASTS-CLIPS-TO-SOCIAL/                 # V1 Podcast pipeline (this repo)
 | `BUFFER_CHANNEL_IDS` | **V1 Only** | Optional | Specific podcast social channels in Buffer. |
 | `GROQ_API_KEY`, `OLLAMA_API_KEY`, `OPENROUTER_API_KEY` | V1 | Optional | LLM fallback tiers. |
 | `PEXELS_API_KEY` | V1 | Optional | B-roll source (`ENABLE_BROLL`). |
-| `YOUTUBE_COOKIES` | V1 | Optional | YouTube resilience when datacenter IPs are blocked. |
+| `YOUTUBE_COOKIES` | V1 | Optional | YouTube resilience when datacenter IPs are blocked (gated by the `USE_YOUTUBE_COOKIES` variable). |
+| `COBALT_API_URL` | V1 | Optional | Tier-2 download engine; `COBALT_INSTANCES` overrides with a comma-separated list. |
+| `RAPIDAPI_KEY` | V1 | Optional | Tier-3 1080p download fallback (rotatable, comma-separated keys). |
+| `CHOCODATA_API_KEY` | V1 | Optional | Tier-3 transcript fallback. |
+| `YTDLP_PROXY` | V1 | Optional | Proxy for yt-dlp downloads (also honors `HTTP_PROXY` / `PROXY_URL`). |
+| `SLACK_WEBHOOK_URL` | V1 | Optional | Block-Kit run reports and error alerts (`v1/slack_notifier.py`). |
+| `CHANNEL_WATERMARK` | V1 | Optional | Default burn-in watermark handle when `--watermark` is omitted. |
 
-`GITHUB_TOKEN` is provided automatically by Actions.
+`GITHUB_TOKEN` is provided automatically by Actions. Optional repository **variables**
+(`ENABLE_BROLL`, `OLLAMA_MODEL`, `USE_YOUTUBE_COOKIES`, `ENABLE_WARP`, `APIFY_*_ACTOR_ID`,
+`UNIVERSAL_EDITOR_*`) tune optional features and all carry workflow defaults.
 
 > **V2 secrets** — `STREAMER_BUFFER_ACCESS_TOKEN`, `STREAMER_BUFFER_CHANNEL_IDS`,
 > `STREAMER_WATERMARK`, `FIRECRAWL_API_KEY` — belong to the
@@ -198,7 +212,7 @@ Moved out of this repository. Clone and run it from there:
 ```bash
 git clone https://github.com/JackPro2121/streamer-clips-to-social.git
 cd streamer-clips-to-social
-pip install -r requirements.txt
+bash core/tools/install_deps.sh           # same deterministic installer (vendored copy)
 
 python main_streamer.py                                  # auto-discover a fresh stream
 python main_streamer.py --streamer kai_cenat --num-clips 3

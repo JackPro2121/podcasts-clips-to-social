@@ -32,12 +32,12 @@ git push private main
 
 ### Production Cleanliness Invariant (`JackPro2121`)
 - **NEVER** commit hardcoded API keys, tokens, cookies, or secrets to the repository.
-- The following credentials belong **EXCLUSIVELY** in GitHub Secrets (`Settings -> Secrets and variables -> Actions`):
+- The following credentials belong **EXCLUSIVELY** in GitHub Secrets (`Settings -> Secrets and variables -> Actions`) — the full V1 reference table lives in `AGENTS.md`:
   - `GEMINI_API_KEY`
   - `BUFFER_ACCESS_TOKEN` / `BUFFER_CHANNEL_IDS` (V1 Podcast only)
   - `STREAMER_BUFFER_ACCESS_TOKEN` / `STREAMER_BUFFER_CHANNEL_IDS` (V2 Streamer only)
   - `APIFY_API_TOKEN`
-  - `FIRECRAWL_API_KEY`
+  - `FIRECRAWL_API_KEY` (V2 Streamer only)
   - `GITHUB_TOKEN`
 - Local testing credentials must reside in `.env`, which is strictly ignored by `.gitignore`.
 
